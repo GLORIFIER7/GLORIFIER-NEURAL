@@ -41,13 +41,13 @@ Do not expose the service publicly without TLS, infrastructure-level request rat
 
 ## Database foundation
 
-A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied** and the API does not write to it yet. Review `db/README.md` for staging, backup, access-control, and data-handling requirements. Supabase and Neon connections remain unconfigured and unverified.
+A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Neon remains unconfigured and unverified.
 
 ## Explicit limitations
 
 - No OpenAI, Gemini, NVIDIA, OpenRouter, or other provider adapter is wired in; requests do not perform model inference.
 - No Supabase or Neon connection, migration, dual-write, or reconciliation is implemented.
-- No persistent audit database or customer billing is implemented.
+- Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.
 - No autonomous financial actions, wallet signing, minting, or irreversible production changes are enabled.
 - CI runs lint, tests, and a local Docker build; it does not deploy or publish an image.
 
