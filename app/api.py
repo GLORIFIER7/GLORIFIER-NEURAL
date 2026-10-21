@@ -15,11 +15,26 @@ app = FastAPI(
     description="Governed, provider-neutral AI orchestration API.",
 )
 orchestrator = Orchestrator()
+MAX_REQUEST_BODY_BYTES = 65_536
 
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
-    response = await call_next(request)
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError:
+            declared_length = 0
+        if declared_length > MAX_REQUEST_BODY_BYTES:
+            response = JSONResponse(
+                status_code=413,
+                content={"detail": "Request body exceeds the 65536-byte limit"},
+            )
+        else:
+            response = await call_next(request)
+    else:
+        response = await call_next(request)
     response.headers["X-Request-ID"] = str(uuid.uuid4())
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
