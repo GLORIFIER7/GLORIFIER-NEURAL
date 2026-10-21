@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Any
+import uuid
 
 ASGIMessage = dict[str, Any]
 ASGIReceive = Callable[[], Awaitable[ASGIMessage]]
@@ -62,6 +63,10 @@ class RequestBodyLimitMiddleware:
                         (b"content-type", b"application/json"),
                         (b"content-length", str(len(body)).encode("ascii")),
                         (b"cache-control", b"no-store"),
+                        (b"x-request-id", str(uuid.uuid4()).encode("ascii")),
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"x-frame-options", b"DENY"),
+                        (b"referrer-policy", b"no-referrer"),
                     ],
                 }
             )
