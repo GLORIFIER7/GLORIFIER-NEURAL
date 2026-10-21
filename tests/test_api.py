@@ -190,3 +190,56 @@ def test_negative_content_length_is_rejected():
     response = client.get("/health", headers={"Content-Length": "-1"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid Content-Length header"
+
+
+def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypatch):
+    from app.audit import AuditEvent
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    events = []
+
+    class FakeSink:
+        def write(self, event: AuditEvent):
+            events.append(event)
+
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: FakeSink())
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "private task text", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert len(events) == 2
+    assert events[0].event_type == "task_received"
+    assert events[1].event_type == "inference_failed"
+    assert events[0].request_id == response.headers["x-request-id"]
+    assert events[1].request_id == response.headers["x-request-id"]
+    assert all(not hasattr(event, "task") for event in events)
+    assert all("private task text" not in repr(event) for event in events)
+
+
+def test_audit_write_failure_prevents_task_execution(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    called = {"run": False}
+
+    class BrokenSink:
+        def write(self, event):
+            raise RuntimeError("private credentials must not leak")
+
+    def forbidden_run(task_request):
+        called["run"] = True
+        raise AssertionError("task execution must not start if initial audit write fails")
+
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: BrokenSink())
+    monkeypatch.setattr("app.api.orchestrator.run", forbidden_run)
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "test", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Audit persistence unavailable; task not executed"
+    assert "private credentials" not in response.text
+    assert called["run"] is False
