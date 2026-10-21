@@ -51,8 +51,7 @@ def test_nim_is_configured_only_after_explicit_opt_in_and_key(monkeypatch):
     monkeypatch.setenv("GLORIFIER_PROVIDER", NvidiaNimAdapter.name)
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-only-key")
     orchestrator = build_orchestrator_from_environment()
-    result = orchestrator.run(TaskRequest(task="hello", require_approval=False))
-    # Do not make a live network request in unit tests. A configured provider is
-    # only exercised in the dedicated mocked adapter tests.
-    assert result.status == "DEGRADED"
-    assert result.evidence == ["provider:nvidia_nim:error", "execution:failed"]
+    # Verify runtime wiring without invoking the provider or making a network call.
+    assert orchestrator._allow_inference is True
+    assert orchestrator._provider_name == "nvidia_nim"
+    assert orchestrator._providers.get("nvidia_nim") is not None
