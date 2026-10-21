@@ -37,7 +37,7 @@ Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
 
-Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app does not currently implement distributed rate limiting.
+Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP and bearer token per minute, returning HTTP 429 with `Retry-After`. Forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
 
 ## Database foundation
 
