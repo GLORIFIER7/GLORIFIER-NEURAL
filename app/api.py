@@ -80,13 +80,13 @@ def health() -> HealthResponse:
 def readiness() -> JSONResponse:
     """Report dependency readiness without claiming untested integrations are healthy."""
     database_status = "NOT VERIFIED"
-    probe = NeonConnectivityProbe.from_environment()
-    if probe is not None:
-        try:
+    try:
+        probe = NeonConnectivityProbe.from_environment()
+        if probe is not None:
             probe.check()
             database_status = "VERIFIED"
-        except Exception:  # noqa: BLE001 - readiness must not leak connection details
-            database_status = "DEGRADED"
+    except Exception:  # noqa: BLE001 - readiness must not leak connection details
+        database_status = "DEGRADED"
 
     # Provider readiness remains unverified until a controlled provider check is implemented.
     return JSONResponse(
