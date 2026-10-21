@@ -24,3 +24,5 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest
+      - name: Build container image (no publish)
+        run: docker build --tag glorifier-neural:ci .
