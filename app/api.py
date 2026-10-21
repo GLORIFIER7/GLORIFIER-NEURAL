@@ -1,7 +1,8 @@
 import os
 import secrets
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import Response
 
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
@@ -13,6 +14,16 @@ app = FastAPI(
     description="Governed, provider-neutral AI orchestration API.",
 )
 orchestrator = Orchestrator()
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
