@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+
 @dataclass(frozen=True)
 class InferenceResult:
     provider: str
     text: str
     request_id: str | None = None
     evidence: list[str] = field(default_factory=list)
+
 
 class ProviderAdapter(ABC):
     name: str
