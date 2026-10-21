@@ -106,3 +106,23 @@ def test_response_has_unique_correlation_id():
     assert str(uuid.UUID(first_id)) == first_id
     assert str(uuid.UUID(second_id)) == second_id
     assert first_id != second_id
+
+
+def test_sensitive_action_is_denied_at_api_boundary(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "transfer funds", "action_class": "financial", "require_approval": False},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "DEGRADED"
+    assert body["evidence"] == ["policy:deny"]
+    assert "blocked by default" in body["message"]
+
+
+def test_task_endpoint_rejects_missing_authorization(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    response = client.post("/v1/tasks", json={"task": "test"})
+    assert response.status_code == 401
