@@ -1,5 +1,5 @@
 -- GLORIFIER Neural audit foundation (PostgreSQL / Supabase compatible).
--- This migration creates storage only; the application does not write to it yet.
+-- The API has an opt-in writer, but this migration has not been applied or live-tested.
 -- Apply only after reviewing the target database and taking a backup.
 
 begin;
