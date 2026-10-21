@@ -9,6 +9,7 @@ from app.audit import AuditEvent, SupabaseRestAuditSink
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
 from app.request_limits import RequestBodyLimitMiddleware
+from app.rate_limit import FixedWindowRateLimiter
 from app.schemas import HealthResponse, TaskRequest, TaskResponse
 
 app = FastAPI(
@@ -18,6 +19,7 @@ app = FastAPI(
 )
 orchestrator = Orchestrator()
 MAX_REQUEST_BODY_BYTES = 65_536
+TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
@@ -103,6 +105,16 @@ def run_task(
         )
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Use the direct peer address; never trust spoofable forwarded headers here.
+    client_host = request.client.host if request.client else "unknown"
+    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host, api_token)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Task rate limit exceeded; retry after the current minute window",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     try:
         audit_sink = SupabaseRestAuditSink.from_environment()
