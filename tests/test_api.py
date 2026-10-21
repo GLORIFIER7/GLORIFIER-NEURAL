@@ -126,3 +126,23 @@ def test_task_endpoint_rejects_missing_authorization(monkeypatch):
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
     response = client.post("/v1/tasks", json={"task": "test"})
     assert response.status_code == 401
+
+
+def test_task_endpoint_rejects_unknown_fields(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "test", "unexpected_admin_override": True},
+    )
+    assert response.status_code == 422
+
+
+def test_task_endpoint_rejects_blank_task(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "   "},
+    )
+    assert response.status_code == 422
