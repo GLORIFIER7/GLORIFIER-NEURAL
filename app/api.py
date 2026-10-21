@@ -5,6 +5,7 @@ import uuid
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.audit import AuditEvent, SupabaseRestAuditSink
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
 from app.request_limits import RequestBodyLimitMiddleware
@@ -22,6 +23,8 @@ app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_B
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
@@ -46,7 +49,7 @@ async def add_security_headers(request: Request, call_next) -> Response:
                 response = await call_next(request)
     else:
         response = await call_next(request)
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    response.headers["X-Request-ID"] = request_id
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -88,7 +91,8 @@ def readiness() -> JSONResponse:
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
 def run_task(
-    request: TaskRequest,
+    task_request: TaskRequest,
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
     api_token = os.getenv("GLORIFIER_API_TOKEN")
@@ -99,4 +103,54 @@ def run_task(
         )
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return orchestrator.run(request)
+
+    try:
+        audit_sink = SupabaseRestAuditSink.from_environment()
+    except ValueError:
+        # Never include environment values or credential details in client-facing errors.
+        raise HTTPException(status_code=503, detail="Configured audit persistence is unavailable") from None
+
+    request_id = request.state.request_id
+    if audit_sink is not None:
+        try:
+            # Pre-execution audit write: if it fails, do not start task processing.
+            audit_sink.write(
+                AuditEvent(
+                    request_id=request_id,
+                    event_type="task_received",
+                    status="NOT VERIFIED",
+                    action_class=task_request.action_class,
+                    evidence=("execution:not-started",),
+                )
+            )
+        except (RuntimeError, ValueError):
+            raise HTTPException(status_code=503, detail="Audit persistence unavailable; task not executed") from None
+
+    result = orchestrator.run(task_request)
+
+    if audit_sink is not None:
+        if "policy:deny" in result.evidence:
+            event_type = "policy_denied"
+        elif "policy:approval-required" in result.evidence:
+            event_type = "approval_required"
+        elif "execution:inference" in result.evidence:
+            event_type = "inference_completed"
+        else:
+            event_type = "inference_failed"
+        try:
+            audit_sink.write(
+                AuditEvent(
+                    request_id=request_id,
+                    event_type=event_type,
+                    status=result.status,
+                    action_class=task_request.action_class,
+                    provider=result.provider,
+                    evidence=tuple(result.evidence[:20]),
+                )
+            )
+        except (RuntimeError, ValueError):
+            raise HTTPException(
+                status_code=503,
+                detail="Audit persistence failed after task processing; inspect audit status",
+            ) from None
+    return result
