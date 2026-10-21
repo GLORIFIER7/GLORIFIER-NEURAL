@@ -243,3 +243,31 @@ def test_audit_write_failure_prevents_task_execution(monkeypatch):
     assert response.json()["detail"] == "Audit persistence unavailable; task not executed"
     assert "private credentials" not in response.text
     assert called["run"] is False
+
+
+
+def test_task_endpoint_rate_limits_authenticated_requests(monkeypatch):
+    from app.api import TASK_RATE_LIMITER
+    from app.rate_limit import FixedWindowRateLimiter
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
+    headers = {"Authorization": "Bearer test-secret"}
+    first = client.post("/v1/tasks", headers=headers, json={"task": "first"})
+    second = client.post("/v1/tasks", headers=headers, json={"task": "second"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert int(second.headers["retry-after"]) >= 1
+
+
+def test_task_rate_limit_does_not_apply_before_authentication(monkeypatch):
+    from app.rate_limit import FixedWindowRateLimiter
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
+    first = client.post("/v1/tasks", headers={"Authorization": "Bearer wrong"}, json={"task": "first"})
+    second = client.post("/v1/tasks", headers={"Authorization": "Bearer wrong"}, json={"task": "second"})
+
+    assert first.status_code == 401
+    assert second.status_code == 401
