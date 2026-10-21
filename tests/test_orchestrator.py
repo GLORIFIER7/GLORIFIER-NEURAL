@@ -190,3 +190,82 @@ def test_provider_output_over_limit_is_rejected():
     assert response.status == "DEGRADED"
     assert response.result is None
     assert response.evidence == ["provider:fake:invalid-result", "execution:rejected"]
+
+
+def test_nvidia_nim_adapter_requires_explicit_credentials(monkeypatch):
+    from app.providers import NvidiaNimAdapter
+
+    monkeypatch.delenv("NVIDIA_NIM_API_KEY", raising=False)
+    adapter = NvidiaNimAdapter()
+    assert adapter.is_configured() is False
+
+
+def test_nvidia_nim_adapter_parses_openai_compatible_response(monkeypatch):
+    import json
+    from app.providers import NvidiaNimAdapter
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return json.dumps({
+                "choices": [{"message": {"content": "A safe test response"}}]
+            }).encode()
+
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(request.data.decode())
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers.urllib.request.urlopen", fake_urlopen)
+    adapter = NvidiaNimAdapter(api_key="test-key", model="meta/test-model")
+    result = adapter.infer("hello", timeout_seconds=5)
+
+    assert result.provider == "nvidia_nim"
+    assert result.text == "A safe test response"
+    assert captured["url"] == NvidiaNimAdapter.endpoint
+    assert captured["authorization"] == "Bearer test-key"
+    assert captured["timeout"] == 5
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["model"] == "meta/test-model"
+
+
+def test_nvidia_nim_adapter_sanitizes_http_errors(monkeypatch):
+    import urllib.error
+    from app.providers import NvidiaNimAdapter
+
+    def fail_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 401, "unauthorized", {}, None
+        )
+
+    monkeypatch.setattr("app.providers.urllib.request.urlopen", fail_urlopen)
+    adapter = NvidiaNimAdapter(api_key="secret-key")
+
+    try:
+        adapter.infer("hello")
+        assert False, "expected sanitized provider error"
+    except RuntimeError as exc:
+        assert str(exc) == "NVIDIA NIM request failed with HTTP 401"
+        assert "secret-key" not in str(exc)
+
+
+def test_nvidia_nim_adapter_rejects_oversized_prompt():
+    from app.providers import NvidiaNimAdapter
+
+    adapter = NvidiaNimAdapter(api_key="test-key")
+    try:
+        adapter.infer("x" * (adapter.max_prompt_chars + 1))
+        assert False, "expected prompt size rejection"
+    except ValueError as exc:
+        assert "exceeds" in str(exc)
