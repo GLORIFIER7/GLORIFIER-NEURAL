@@ -15,6 +15,14 @@ def test_health_does_not_overclaim_dependencies():
     assert body["checks"]["database"] == "NOT VERIFIED"
 
 
+def test_security_headers_are_present():
+    response = client.get("/health")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_task_endpoint_disabled_without_token(monkeypatch):
     monkeypatch.delenv("GLORIFIER_API_TOKEN", raising=False)
     monkeypatch.setenv("GLORIFIER_REQUIRE_API_TOKEN", "false")
