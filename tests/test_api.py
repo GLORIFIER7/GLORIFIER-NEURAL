@@ -270,3 +270,32 @@ def test_task_rate_limit_does_not_apply_before_authentication(monkeypatch):
 
     assert first.status_code == 401
     assert second.status_code == 401
+
+
+def test_final_audit_write_failure_returns_503_without_leaking_details(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    writes = {"count": 0}
+
+    class FinalWriteFails:
+        def write(self, event):
+            writes["count"] += 1
+            if writes["count"] == 2:
+                raise RuntimeError("secret-key-and-private-payload")
+
+    monkeypatch.setattr(
+        "app.api.SupabaseRestAuditSink.from_environment",
+        lambda: FinalWriteFails(),
+    )
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "safe test task", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Audit persistence failed after task processing; inspect audit status"
+    )
+    assert "secret-key-and-private-payload" not in response.text
+    assert writes["count"] == 2
+
