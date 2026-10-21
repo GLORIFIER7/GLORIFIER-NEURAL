@@ -17,15 +17,15 @@ orchestrator = Orchestrator()
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
 def health() -> HealthResponse:
-    # Process health is not evidence of provider or database connectivity.
+    # Report known implementation gaps honestly; process health is not dependency health.
     pytorch_installed = pytorch_status()["installed"]
     return HealthResponse(
         status="PARTIALLY VERIFIED",
         service="glorifier-neural",
         checks={
             "process": "VERIFIED",
-            "providers": "NOT OBSERVABLE",
-            "database": "NOT OBSERVABLE",
+            "providers": "NOT VERIFIED",
+            "database": "NOT VERIFIED",
             "pytorch": "VERIFIED" if pytorch_installed else "NOT VERIFIED",
         },
     )
@@ -37,11 +37,11 @@ def run_task(
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
     api_token = os.getenv("GLORIFIER_API_TOKEN")
-    if api_token and not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
     if not api_token:
         raise HTTPException(
             status_code=503,
             detail="API token is not configured; execution endpoint is disabled",
         )
+    if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
     return orchestrator.run(request)
