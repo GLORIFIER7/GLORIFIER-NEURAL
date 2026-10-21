@@ -68,3 +68,27 @@ def test_action_class_input_is_bounded(monkeypatch):
         json={"task": "test", "action_class": "x" * 65},
     )
     assert response.status_code == 422
+
+def test_task_input_bounds_are_enforced(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    headers = {"Authorization": "Bearer test-secret"}
+
+    empty_task = client.post(
+        "/v1/tasks",
+        headers=headers,
+        json={"task": ""},
+    )
+    oversized_task = client.post(
+        "/v1/tasks",
+        headers=headers,
+        json={"task": "x" * 20_001},
+    )
+    oversized_purpose = client.post(
+        "/v1/tasks",
+        headers=headers,
+        json={"task": "test", "purpose": "x" * 101},
+    )
+
+    assert empty_task.status_code == 422
+    assert oversized_task.status_code == 422
+    assert oversized_purpose.status_code == 422
