@@ -16,6 +16,7 @@ AuditEventType = Literal[
     "inference_started",
     "inference_completed",
     "inference_failed",
+    "task_not_executed",
 ]
 AuditStatus = Literal[
     "FULLY VERIFIED",
