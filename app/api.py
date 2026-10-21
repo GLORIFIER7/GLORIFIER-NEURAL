@@ -3,7 +3,7 @@ import secrets
 import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
@@ -40,6 +40,22 @@ def health() -> HealthResponse:
             "providers": "NOT VERIFIED",
             "database": "NOT VERIFIED",
             "pytorch": "VERIFIED" if pytorch_installed else "NOT VERIFIED",
+        },
+    )
+
+
+@app.get("/ready", tags=["operations"])
+def readiness() -> JSONResponse:
+    """Report deployment readiness separately from process liveness."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "NOT READY",
+            "checks": {
+                "providers": "NOT VERIFIED",
+                "database": "NOT VERIFIED",
+            },
+            "message": "Required provider and database integrations are not configured.",
         },
     )
 
