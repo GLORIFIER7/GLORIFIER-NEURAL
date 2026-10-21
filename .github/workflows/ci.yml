@@ -33,7 +33,7 @@ jobs:
       - run: pytest
       - name: Audit Python dependencies
         run: |
-          python -m pip install pip-audit
+          python -m pip install --upgrade "setuptools>=83.0.0" pip-audit
           pip-audit
       - name: Build container image (no publish)
         run: docker build --tag glorifier-neural:ci .
