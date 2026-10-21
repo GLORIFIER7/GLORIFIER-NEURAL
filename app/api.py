@@ -12,7 +12,6 @@ app = FastAPI(
     description="Governed, provider-neutral AI orchestration API.",
 )
 orchestrator = Orchestrator()
-API_TOKEN = os.getenv("GLORIFIER_API_TOKEN")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
@@ -36,9 +35,10 @@ def run_task(
     request: TaskRequest,
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
-    if API_TOKEN and authorization != f"Bearer {API_TOKEN}":
+    api_token = os.getenv("GLORIFIER_API_TOKEN")
+    if api_token and authorization != f"Bearer {api_token}":
         raise HTTPException(status_code=401, detail="Unauthorized")
-    if not API_TOKEN and os.getenv("GLORIFIER_REQUIRE_API_TOKEN", "true").lower() == "true":
+    if not api_token and os.getenv("GLORIFIER_REQUIRE_API_TOKEN", "true").lower() == "true":
         raise HTTPException(
             status_code=503,
             detail="API token is not configured; execution endpoint is disabled",
