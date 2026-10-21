@@ -123,3 +123,70 @@ def test_blocked_action_prevents_provider_call():
     assert response.status == "DEGRADED"
     assert response.evidence == ["policy:deny"]
     assert provider.calls == 0
+
+
+def test_unexpected_provider_exception_is_sanitized():
+    registry = ProviderRegistry()
+    provider = FakeProvider()
+    provider.infer = lambda prompt, *, timeout_seconds=30.0: (_ for _ in ()).throw(
+        KeyError("secret prompt and credentials")
+    )
+    registry.register(provider)
+    orchestrator = Orchestrator(registry, allow_inference=True, provider_name="fake")
+
+    response = orchestrator.run(TaskRequest(task="summarize", require_approval=False))
+
+    assert response.status == "DEGRADED"
+    assert response.evidence == ["provider:fake:error", "execution:failed"]
+    assert "secret prompt and credentials" not in response.message
+
+
+def test_provider_result_must_be_an_inference_result():
+    registry = ProviderRegistry()
+    provider = FakeProvider()
+    provider.infer = lambda prompt, *, timeout_seconds=30.0: {"text": "looks valid"}
+    registry.register(provider)
+    orchestrator = Orchestrator(registry, allow_inference=True, provider_name="fake")
+
+    response = orchestrator.run(TaskRequest(task="summarize", require_approval=False))
+
+    assert response.status == "DEGRADED"
+    assert response.evidence == ["provider:fake:invalid-result", "execution:rejected"]
+
+
+def test_provider_identity_must_match_selected_adapter():
+    registry = ProviderRegistry()
+
+    class MisidentifiedProvider(FakeProvider):
+        def infer(self, prompt: str, *, timeout_seconds: float = 30.0) -> InferenceResult:
+            self.calls += 1
+            return InferenceResult(provider="different-provider", text="untrusted attribution")
+
+    provider = MisidentifiedProvider()
+    registry.register(provider)
+    orchestrator = Orchestrator(registry, allow_inference=True, provider_name="fake")
+
+    response = orchestrator.run(TaskRequest(task="summarize", require_approval=False))
+
+    assert response.status == "DEGRADED"
+    assert response.result is None
+    assert response.evidence == ["provider:fake:invalid-result", "execution:rejected"]
+
+
+def test_provider_output_over_limit_is_rejected():
+    registry = ProviderRegistry()
+
+    class OversizedProvider(FakeProvider):
+        def infer(self, prompt: str, *, timeout_seconds: float = 30.0) -> InferenceResult:
+            self.calls += 1
+            return InferenceResult(provider=self.name, text="x" * 20_001)
+
+    provider = OversizedProvider()
+    registry.register(provider)
+    orchestrator = Orchestrator(registry, allow_inference=True, provider_name="fake")
+
+    response = orchestrator.run(TaskRequest(task="summarize", require_approval=False))
+
+    assert response.status == "DEGRADED"
+    assert response.result is None
+    assert response.evidence == ["provider:fake:invalid-result", "execution:rejected"]
