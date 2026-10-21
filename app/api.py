@@ -135,7 +135,7 @@ def run_task(
                     evidence=("execution:not-started",),
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
             # Fail closed for any persistence failure without exposing implementation details.
             raise HTTPException(status_code=503, detail="Audit persistence unavailable; task not executed") from None
 
@@ -161,7 +161,7 @@ def run_task(
                     evidence=tuple(result.evidence[:20]),
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
             # Processing may have completed; report the audit failure without leaking internals.
             raise HTTPException(
                 status_code=503,
