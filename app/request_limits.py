@@ -54,7 +54,7 @@ class RequestBodyLimitMiddleware:
             body = (
                 '{"detail":"Request body exceeds the '
                 f'{self.max_body_bytes}-byte limit"}}'
-            ).encode("utf-8")
+            ).encode()
             await send(
                 {
                     "type": "http.response.start",
