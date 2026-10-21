@@ -17,6 +17,15 @@ def test_health_does_not_overclaim_dependencies():
     assert body["checks"]["database"] == "NOT VERIFIED"
 
 
+def test_readiness_fails_closed_while_integrations_are_missing():
+    response = client.get("/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "NOT READY"
+    assert body["checks"]["providers"] == "NOT VERIFIED"
+    assert body["checks"]["database"] == "NOT VERIFIED"
+
+
 def test_security_headers_are_present():
     response = client.get("/health")
     assert response.headers["x-content-type-options"] == "nosniff"
