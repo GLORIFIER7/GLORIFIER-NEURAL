@@ -90,7 +90,7 @@ class Orchestrator:
             )
         return TaskResponse(
             status="VERIFIED",
-            provider=self._provider_name,
+            provider=provider.name,
             result=result.text,
             message="Provider returned a result; this verifies response receipt, not factual correctness.",
             evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
