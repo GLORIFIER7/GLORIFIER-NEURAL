@@ -10,6 +10,7 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 - Enforces a 64 KiB request-body limit against both the declared `Content-Length` and streamed ASGI body chunks; keep a matching limit at the reverse proxy as defense in depth.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
 - Explicit provider adapter interface; no provider is registered by default.
+- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`); it is not registered or enabled automatically.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
 - Optional PyTorch availability check.
 - Unit tests and GitHub Actions CI on Python 3.11 and 3.12.
@@ -45,7 +46,7 @@ A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_
 
 ## Explicit limitations
 
-- No OpenAI, Gemini, NVIDIA, OpenRouter, or other provider adapter is wired in; requests do not perform model inference.
+- The NVIDIA NIM adapter is implemented but is not registered by default; live inference remains NOT VERIFIED until an operator explicitly wires it into the registry and tests it with a configured key. Requests through the default API orchestrator still do not perform model inference.
 - No Supabase or Neon connection, migration, dual-write, or reconciliation is implemented.
 - Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.
 - No autonomous financial actions, wallet signing, minting, or irreversible production changes are enabled.
