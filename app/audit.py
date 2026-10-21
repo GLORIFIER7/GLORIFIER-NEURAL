@@ -119,5 +119,5 @@ class SupabaseRestAuditSink(AuditSink):
                     raise RuntimeError("Audit persistence returned an unexpected status")
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"Audit persistence failed with HTTP {exc.code}") from None
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError):
             raise RuntimeError("Audit persistence unavailable") from None
