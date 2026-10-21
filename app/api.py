@@ -6,6 +6,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.audit import AuditEvent, SupabaseRestAuditSink
+from app.database.neon import NeonConnectivityProbe
 from app.neural.torch_status import pytorch_status
 from app.runtime import build_orchestrator_from_environment
 from app.request_limits import RequestBodyLimitMiddleware
@@ -77,16 +78,29 @@ def health() -> HealthResponse:
 
 @app.get("/ready", tags=["operations"])
 def readiness() -> JSONResponse:
-    """Report deployment readiness separately from process liveness."""
+    """Report dependency readiness without claiming untested integrations are healthy."""
+    database_status = "NOT VERIFIED"
+    probe = NeonConnectivityProbe.from_environment()
+    if probe is not None:
+        try:
+            probe.check()
+            database_status = "VERIFIED"
+        except Exception:  # noqa: BLE001 - readiness must not leak connection details
+            database_status = "DEGRADED"
+
+    # Provider readiness remains unverified until a controlled provider check is implemented.
     return JSONResponse(
         status_code=503,
         content={
             "status": "NOT READY",
             "checks": {
                 "providers": "NOT VERIFIED",
-                "database": "NOT VERIFIED",
+                "database": database_status,
             },
-            "message": "Required provider and database integrations are not configured.",
+            "message": (
+                "Provider readiness is not verified; database status reflects only "
+                "an opt-in connectivity probe."
+            ),
         },
     )
 
