@@ -7,6 +7,7 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 - FastAPI liveness/status endpoint at `GET /health`.
 - Fail-closed readiness endpoint at `GET /ready` (HTTP 503 until provider and database integrations are implemented and verified).
 - Task request/response schemas with input limits, including a bounded action-class field.
+- Rejects requests declaring a body larger than 64 KiB; enforce a matching body-size limit at the reverse proxy too, because application-level `Content-Length` checks alone do not cover every streamed request.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
 - Explicit provider adapter interface; no provider is registered by default.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
