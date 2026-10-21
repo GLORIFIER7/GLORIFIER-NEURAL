@@ -23,7 +23,7 @@ class TaskRequest(BaseModel):
     task: str = Field(min_length=1, max_length=20_000)
     purpose: str = Field(default="general", min_length=1, max_length=100)
     require_approval: bool = True
-    action_class: str = "read_only"
+    action_class: str = Field(default="read_only", min_length=1, max_length=64)
 
 
 class TaskResponse(BaseModel):
