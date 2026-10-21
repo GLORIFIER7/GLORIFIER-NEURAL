@@ -39,7 +39,7 @@ def run_task(
     api_token = os.getenv("GLORIFIER_API_TOKEN")
     if api_token and not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    if not api_token and os.getenv("GLORIFIER_REQUIRE_API_TOKEN", "true").lower() == "true":
+    if not api_token:
         raise HTTPException(
             status_code=503,
             detail="API token is not configured; execution endpoint is disabled",
