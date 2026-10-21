@@ -129,3 +129,45 @@ def test_supabase_sink_rejects_oversized_evidence_before_network(monkeypatch):
     )
     with pytest.raises(ValueError, match="Invalid audit evidence"):
         sink.write(event)
+
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.supabase.co/rest/v1",
+        "https://user:password@example.supabase.co",
+        "https://example.supabase.co?redirect=unsafe",
+        "https://example.supabase.co#fragment",
+    ],
+)
+def test_supabase_sink_rejects_non_origin_urls(url):
+    with pytest.raises(ValueError, match="HTTPS origin"):
+        SupabaseRestAuditSink(url, "test-key")
+
+
+def test_supabase_http_error_does_not_expose_server_body_or_secret(monkeypatch):
+    import urllib.error
+
+    def fail_with_private_response(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            403,
+            "Forbidden",
+            {},
+            __import__("io").BytesIO(b"private database details"),
+        )
+
+    monkeypatch.setattr("app.audit.urllib.request.urlopen", fail_with_private_response)
+    sink = SupabaseRestAuditSink("https://example.supabase.co", "test-service-role-key")
+    event = AuditEvent(
+        request_id="req-123",
+        event_type="task_received",
+        status="NOT VERIFIED",
+        action_class="read_only",
+    )
+
+    with pytest.raises(RuntimeError, match="HTTP 403") as error:
+        sink.write(event)
+    assert "private database details" not in str(error.value)
+    assert "test-service-role-key" not in str(error.value)
