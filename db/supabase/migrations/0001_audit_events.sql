@@ -34,6 +34,11 @@ create index if not exists audit_events_created_at_idx
 
 alter table glorifier.audit_events enable row level security;
 
+-- The API uses the server-side service_role key; do not grant these privileges to anon/authenticated.
+-- No client-facing RLS policies are created. Keep the service_role key server-side only.
+grant usage on schema glorifier to service_role;
+grant insert on table glorifier.audit_events to service_role;
+
 comment on table glorifier.audit_events is
     'Append-oriented operational evidence. Never store prompts, secrets, credentials, or raw customer content in details.';
 
