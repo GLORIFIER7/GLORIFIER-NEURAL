@@ -135,7 +135,8 @@ def run_task(
                     evidence=("execution:not-started",),
                 )
             )
-        except (RuntimeError, ValueError):
+        except Exception:
+            # Fail closed for any persistence failure without exposing implementation details.
             raise HTTPException(status_code=503, detail="Audit persistence unavailable; task not executed") from None
 
     result = orchestrator.run(task_request)
@@ -160,7 +161,8 @@ def run_task(
                     evidence=tuple(result.evidence[:20]),
                 )
             )
-        except (RuntimeError, ValueError):
+        except Exception:
+            # Processing may have completed; report the audit failure without leaking internals.
             raise HTTPException(
                 status_code=503,
                 detail="Audit persistence failed after task processing; inspect audit status",
