@@ -59,7 +59,7 @@ class Orchestrator:
 
         try:
             result = provider.infer(request.task)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # Avoid returning exception details that may contain prompts, URLs, or secrets.
             return TaskResponse(
                 status="DEGRADED",
