@@ -17,7 +17,7 @@ def test_health_does_not_overclaim_dependencies():
 
 def test_task_endpoint_disabled_without_token(monkeypatch):
     monkeypatch.delenv("GLORIFIER_API_TOKEN", raising=False)
-    monkeypatch.setenv("GLORIFIER_REQUIRE_API_TOKEN", "true")
+    monkeypatch.setenv("GLORIFIER_REQUIRE_API_TOKEN", "false")
     response = client.post("/v1/tasks", json={"task": "test"})
     assert response.status_code == 503
 
@@ -43,3 +43,10 @@ def test_task_endpoint_never_claims_inference_without_provider(monkeypatch):
     body = response.json()
     assert body["status"] == "NOT VERIFIED"
     assert body["evidence"] == ["provider:none", "execution:none"]
+
+
+def test_missing_token_cannot_be_bypassed_by_environment_flag(monkeypatch):
+    monkeypatch.delenv("GLORIFIER_API_TOKEN", raising=False)
+    monkeypatch.setenv("GLORIFIER_REQUIRE_API_TOKEN", "false")
+    response = client.post("/v1/tasks", json={"task": "test"})
+    assert response.status_code == 503
