@@ -1,4 +1,5 @@
 from app.policy import evaluate_task
+from app.providers.base import InferenceResult
 from app.providers.registry import ProviderRegistry
 from app.schemas import TaskRequest, TaskResponse
 
@@ -58,7 +59,7 @@ class Orchestrator:
 
         try:
             result = provider.infer(request.task)
-        except (TimeoutError, ConnectionError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             # Avoid returning exception details that may contain prompts, URLs, or secrets.
             return TaskResponse(
                 status="DEGRADED",
@@ -67,16 +68,29 @@ class Orchestrator:
                 evidence=[f"provider:{self._provider_name}:error", "execution:failed"],
             )
 
-        if not isinstance(result.text, str) or not result.text.strip():
+        if not isinstance(result, InferenceResult):
             return TaskResponse(
                 status="DEGRADED",
                 provider=self._provider_name,
-                message="Provider returned an empty or invalid result.",
+                message="Provider returned an invalid result object.",
+                evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
+            )
+        if (
+            not isinstance(result.provider, str)
+            or result.provider.strip().casefold() != self._provider_name.strip().casefold()
+            or not isinstance(result.text, str)
+            or not result.text.strip()
+            or len(result.text) > 20_000
+        ):
+            return TaskResponse(
+                status="DEGRADED",
+                provider=self._provider_name,
+                message="Provider returned an empty, oversized, or mismatched result.",
                 evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
             )
         return TaskResponse(
             status="VERIFIED",
-            provider=result.provider,
+            provider=self._provider_name,
             result=result.text,
             message="Provider returned a result; this verifies response receipt, not factual correctness.",
             evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
