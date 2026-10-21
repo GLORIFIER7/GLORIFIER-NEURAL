@@ -178,3 +178,15 @@ def test_declared_oversized_request_body_is_rejected():
     assert response.json()["detail"] == "Request body exceeds the 65536-byte limit"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-request-id"]
+
+def test_malformed_content_length_is_rejected():
+    response = client.get("/health", headers={"Content-Length": "invalid"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid Content-Length header"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_negative_content_length_is_rejected():
+    response = client.get("/health", headers={"Content-Length": "-1"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid Content-Length header"
