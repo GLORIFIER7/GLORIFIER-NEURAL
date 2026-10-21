@@ -25,14 +25,23 @@ async def add_security_headers(request: Request, call_next) -> Response:
         try:
             declared_length = int(content_length)
         except ValueError:
-            declared_length = 0
-        if declared_length > MAX_REQUEST_BODY_BYTES:
             response = JSONResponse(
-                status_code=413,
-                content={"detail": "Request body exceeds the 65536-byte limit"},
+                status_code=400,
+                content={"detail": "Invalid Content-Length header"},
             )
         else:
-            response = await call_next(request)
+            if declared_length < 0:
+                response = JSONResponse(
+                    status_code=400,
+                    content={"detail": "Invalid Content-Length header"},
+                )
+            elif declared_length > MAX_REQUEST_BODY_BYTES:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body exceeds the 65536-byte limit"},
+                )
+            else:
+                response = await call_next(request)
     else:
         response = await call_next(request)
     response.headers["X-Request-ID"] = str(uuid.uuid4())
