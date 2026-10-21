@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.audit import AuditEvent, SupabaseRestAuditSink
 from app.neural.torch_status import pytorch_status
-from app.orchestrator import Orchestrator
+from app.runtime import build_orchestrator_from_environment
 from app.request_limits import RequestBodyLimitMiddleware
 from app.rate_limit import FixedWindowRateLimiter
 from app.schemas import HealthResponse, TaskRequest, TaskResponse
@@ -17,7 +17,7 @@ app = FastAPI(
     version="0.2.0",
     description="Governed, provider-neutral AI orchestration API.",
 )
-orchestrator = Orchestrator()
+orchestrator = build_orchestrator_from_environment()
 MAX_REQUEST_BODY_BYTES = 65_536
 TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
