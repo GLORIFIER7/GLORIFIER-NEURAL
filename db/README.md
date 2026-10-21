@@ -7,7 +7,7 @@ This folder contains a reviewed starting point for PostgreSQL-compatible audit s
 - Migration: schema only; **not applied** to Supabase or Neon.
 - Application integration: opt-in Supabase REST writer implemented; **live persistence NOT VERIFIED**. It remains disabled unless `GLORIFIER_AUDIT_ENABLED=true` and server-side Supabase credentials are configured.
 - Reconciliation, retention, backup/restore, and production permissions: **NOT VERIFIED**.
-- The migration enables row-level security and intentionally creates no client-facing policies. The API writer requires the `glorifier` schema exposed through Supabase's API settings and server-side service-role credentials. Confirm schema/table privileges and service-role access in staging before enabling it.
+- The migration enables row-level security and intentionally creates no client-facing policies. It grants `USAGE` on `glorifier` and `INSERT` on `glorifier.audit_events` to Supabase's `service_role` only; it does not grant these privileges to `anon` or `authenticated`. The API writer requires the `glorifier` schema exposed through Supabase's API settings and server-side service-role credentials. Confirm schema/table privileges and service-role access in staging before enabling it.
 
 ## Apply safely
 
