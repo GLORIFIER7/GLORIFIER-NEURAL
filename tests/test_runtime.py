@@ -4,7 +4,7 @@ from app.schemas import TaskRequest
 
 
 def clear_runtime_environment(monkeypatch):
-    for name in ("GLORIFIER_ENABLE_INFERENCE", "GLORIFIER_PROVIDER", "NVIDIA_NIM_API_KEY", "NVIDIA_NIM_MODEL"):
+    for name in ("GLORIFIER_ENABLE_INFERENCE", "GLORIFIER_PROVIDER", "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "NVIDIA_NIM_API_KEY", "NVIDIA_NIM_MODEL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -50,8 +50,30 @@ def test_nim_is_configured_only_after_explicit_opt_in_and_key(monkeypatch):
     monkeypatch.setenv("GLORIFIER_ENABLE_INFERENCE", "true")
     monkeypatch.setenv("GLORIFIER_PROVIDER", NvidiaNimAdapter.name)
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-only-key")
+    monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
     orchestrator = build_orchestrator_from_environment()
     # Verify runtime wiring without invoking the provider or making a network call.
     assert orchestrator._allow_inference is True
     assert orchestrator._provider_name == "nvidia_nim"
+    assert orchestrator._providers.get("nvidia_nim") is not None
+
+
+def test_nim_is_not_registered_without_external_egress_consent(monkeypatch):
+    clear_runtime_environment(monkeypatch)
+    monkeypatch.setenv("GLORIFIER_ENABLE_INFERENCE", "true")
+    monkeypatch.setenv("GLORIFIER_PROVIDER", NvidiaNimAdapter.name)
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-only-key")
+    orchestrator = build_orchestrator_from_environment()
+    result = orchestrator.run(TaskRequest(task="hello", require_approval=False))
+    assert result.status == "NOT VERIFIED"
+    assert result.evidence == ["provider:nvidia_nim:unavailable", "execution:none"]
+
+
+def test_nim_requires_explicit_external_egress_consent(monkeypatch):
+    clear_runtime_environment(monkeypatch)
+    monkeypatch.setenv("GLORIFIER_ENABLE_INFERENCE", "true")
+    monkeypatch.setenv("GLORIFIER_PROVIDER", NvidiaNimAdapter.name)
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "test-only-key")
+    monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
+    orchestrator = build_orchestrator_from_environment()
     assert orchestrator._providers.get("nvidia_nim") is not None
