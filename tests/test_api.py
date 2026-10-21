@@ -155,3 +155,19 @@ def test_task_endpoint_rejects_blank_task(monkeypatch):
         json={"task": "   "},
     )
     assert response.status_code == 422
+
+
+def test_readiness_response_has_security_headers():
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_readiness_does_not_claim_database_or_provider_health():
+    response = client.get("/ready")
+    body = response.json()
+    assert body["status"] == "NOT READY"
+    assert set(body["checks"]) == {"providers", "database"}
+    assert all(value == "NOT VERIFIED" for value in body["checks"].values())
