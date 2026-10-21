@@ -37,6 +37,10 @@ The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a 
 
 Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app does not currently implement distributed rate limiting.
 
+## Database foundation
+
+A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied** and the API does not write to it yet. Review `db/README.md` for staging, backup, access-control, and data-handling requirements. Supabase and Neon connections remain unconfigured and unverified.
+
 ## Explicit limitations
 
 - No OpenAI, Gemini, NVIDIA, OpenRouter, or other provider adapter is wired in; requests do not perform model inference.
