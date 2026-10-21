@@ -58,7 +58,7 @@ class Orchestrator:
 
         try:
             result = provider.infer(request.task)
-        except Exception as exc:
+        except (TimeoutError, ConnectionError, ValueError, RuntimeError) as exc:
             # Avoid returning exception details that may contain prompts, URLs, or secrets.
             return TaskResponse(
                 status="DEGRADED",
