@@ -47,12 +47,11 @@ class NeonConnectivityProbe:
                 self._database_url,
                 connect_timeout=self._timeout,
                 sslmode="require",
-            ) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT 1")
-                    row = cursor.fetchone()
-                    if row != (1,):
-                        raise RuntimeError("Neon connectivity probe returned an unexpected result")
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                row = cursor.fetchone()
+                if row != (1,):
+                    raise RuntimeError("Neon connectivity probe returned an unexpected result")
         except RuntimeError:
             raise
         except Exception:  # noqa: BLE001 - do not leak DSN, server errors, or query context
