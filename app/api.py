@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
 from app.schemas import HealthResponse, TaskRequest, TaskResponse
@@ -19,7 +19,7 @@ def health() -> HealthResponse:
     )
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
-def run_task(request: TaskRequest, authorization: str | None = None) -> TaskResponse:
+def run_task(request: TaskRequest, authorization: str | None = Header(default=None)) -> TaskResponse:
     if API_TOKEN and authorization != f"Bearer {API_TOKEN}":
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not API_TOKEN and os.getenv("GLORIFIER_REQUIRE_API_TOKEN", "true").lower() == "true":
