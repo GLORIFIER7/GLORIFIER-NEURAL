@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.neural.torch_status import pytorch_status
 from app.orchestrator import Orchestrator
+from app.request_limits import RequestBodyLimitMiddleware
 from app.schemas import HealthResponse, TaskRequest, TaskResponse
 
 app = FastAPI(
@@ -16,6 +17,7 @@ app = FastAPI(
 )
 orchestrator = Orchestrator()
 MAX_REQUEST_BODY_BYTES = 65_536
+app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
 @app.middleware("http")
