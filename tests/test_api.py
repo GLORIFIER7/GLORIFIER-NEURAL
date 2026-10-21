@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.testclient import TestClient
 
 from app.api import app
@@ -92,3 +94,15 @@ def test_task_input_bounds_are_enforced(monkeypatch):
     assert empty_task.status_code == 422
     assert oversized_task.status_code == 422
     assert oversized_purpose.status_code == 422
+
+
+def test_response_has_unique_correlation_id():
+    first = client.get("/health")
+    second = client.get("/health")
+
+    first_id = first.headers["x-request-id"]
+    second_id = second.headers["x-request-id"]
+
+    assert str(uuid.UUID(first_id)) == first_id
+    assert str(uuid.UUID(second_id)) == second_id
+    assert first_id != second_id
