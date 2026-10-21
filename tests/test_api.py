@@ -171,3 +171,10 @@ def test_readiness_does_not_claim_database_or_provider_health():
     assert body["status"] == "NOT READY"
     assert set(body["checks"]) == {"providers", "database"}
     assert all(value == "NOT VERIFIED" for value in body["checks"].values())
+
+def test_declared_oversized_request_body_is_rejected():
+    response = client.get("/health", headers={"Content-Length": "65537"})
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Request body exceeds the 65536-byte limit"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-request-id"]
