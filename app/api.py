@@ -1,5 +1,6 @@
 import os
 import secrets
+import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
@@ -19,6 +20,7 @@ orchestrator = Orchestrator()
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
     response = await call_next(request)
+    response.headers["X-Request-ID"] = str(uuid.uuid4())
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
