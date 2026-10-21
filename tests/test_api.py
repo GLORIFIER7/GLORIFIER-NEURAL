@@ -212,7 +212,7 @@ def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypa
     assert response.status_code == 200
     assert len(events) == 2
     assert events[0].event_type == "task_received"
-    assert events[1].event_type == "inference_failed"
+    assert events[1].event_type == "task_not_executed"
     assert events[0].request_id == response.headers["x-request-id"]
     assert events[1].request_id == response.headers["x-request-id"]
     assert all(not hasattr(event, "task") for event in events)
