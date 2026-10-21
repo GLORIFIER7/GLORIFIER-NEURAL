@@ -1,4 +1,5 @@
 import os
+import secrets
 
 from fastapi import FastAPI, Header, HTTPException
 
@@ -36,7 +37,7 @@ def run_task(
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
     api_token = os.getenv("GLORIFIER_API_TOKEN")
-    if api_token and authorization != f"Bearer {api_token}":
+    if api_token and not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not api_token and os.getenv("GLORIFIER_REQUIRE_API_TOKEN", "true").lower() == "true":
         raise HTTPException(
