@@ -10,7 +10,7 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 - Enforces a 64 KiB request-body limit against both the declared `Content-Length` and streamed ASGI body chunks; keep a matching limit at the reverse proxy as defense in depth.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
 - Explicit provider adapter interface; no provider is registered by default.
-- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`); it is not registered or enabled automatically.
+- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), wired only when both `GLORIFIER_ENABLE_INFERENCE=true` and `GLORIFIER_PROVIDER=nvidia_nim` are explicitly set.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
 - Optional PyTorch availability check.
 - Unit tests and GitHub Actions CI on Python 3.11 and 3.12.
@@ -40,13 +40,13 @@ The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a 
 
 Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP and bearer token per minute, returning HTTP 429 with `Retry-After`. Forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
 
-## Database foundation
+## Explicit inference configuration\n\nInference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. Optionally set `NVIDIA_NIM_MODEL`; the default is `meta/llama-3.1-8b-instruct`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.\n\n## Database foundation
 
 A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Neon remains unconfigured and unverified.
 
 ## Explicit limitations
 
-- The NVIDIA NIM adapter is implemented but is not registered by default; live inference remains NOT VERIFIED until an operator explicitly wires it into the registry and tests it with a configured key. Requests through the default API orchestrator still do not perform model inference.
+- NVIDIA NIM is wired through explicit runtime configuration only. Without both `GLORIFIER_ENABLE_INFERENCE=true` and `GLORIFIER_PROVIDER=nvidia_nim`, requests do not perform inference. With those flags, a server-side API key is also required; live inference remains NOT VERIFIED until a controlled staging check succeeds.
 - No Supabase or Neon connection, migration, dual-write, or reconciliation is implemented.
 - Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.
 - No autonomous financial actions, wallet signing, minting, or irreversible production changes are enabled.
