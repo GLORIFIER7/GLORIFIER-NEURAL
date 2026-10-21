@@ -61,7 +61,7 @@ def test_task_endpoint_never_claims_inference_without_provider(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "NOT VERIFIED"
-    assert body["evidence"] == ["provider:none", "execution:none"]
+    assert body["evidence"] == ["inference:disabled", "execution:none"]
 
 
 def test_missing_token_cannot_be_bypassed_by_environment_flag(monkeypatch):
