@@ -50,3 +50,13 @@ def test_missing_token_cannot_be_bypassed_by_environment_flag(monkeypatch):
     monkeypatch.setenv("GLORIFIER_REQUIRE_API_TOKEN", "false")
     response = client.post("/v1/tasks", json={"task": "test"})
     assert response.status_code == 503
+
+
+def test_action_class_input_is_bounded(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "test", "action_class": "x" * 65},
+    )
+    assert response.status_code == 422
