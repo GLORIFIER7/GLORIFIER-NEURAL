@@ -58,8 +58,16 @@ class SupabaseRestAuditSink(AuditSink):
 
     def __init__(self, url: str, service_role_key: str, *, timeout_seconds: float = 2.0):
         parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError("Supabase URL must be an HTTPS origin")
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Supabase URL must be a plain HTTPS origin without path or credentials")
         if not service_role_key.strip():
             raise ValueError("Supabase service-role key is required")
         if not 0 < timeout_seconds <= 5:
