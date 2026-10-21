@@ -299,3 +299,29 @@ def test_final_audit_write_failure_returns_503_without_leaking_details(monkeypat
     assert "secret-key-and-private-payload" not in response.text
     assert writes["count"] == 2
 
+
+
+def test_unexpected_initial_audit_failure_fails_closed_without_leaking(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    called = {"run": False}
+
+    class BrokenSink:
+        def write(self, event):
+            raise OSError("internal network path and credential details")
+
+    def forbidden_run(task_request):
+        called["run"] = True
+        raise AssertionError("task processing must not start after audit failure")
+
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: BrokenSink())
+    monkeypatch.setattr("app.api.orchestrator.run", forbidden_run)
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "test", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Audit persistence unavailable; task not executed"
+    assert "internal network path" not in response.text
+    assert called["run"] is False
