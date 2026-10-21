@@ -18,7 +18,11 @@ def build_orchestrator_from_environment() -> Orchestrator:
     provider_name = os.getenv("GLORIFIER_PROVIDER", "").strip().casefold() or None
     registry = ProviderRegistry()
 
-    if enabled and provider_name == NvidiaNimAdapter.name:
+    external_egress_allowed = (
+        os.getenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "").strip().casefold() == "true"
+    )
+
+    if enabled and external_egress_allowed and provider_name == NvidiaNimAdapter.name:
         registry.register(NvidiaNimAdapter())
 
     return Orchestrator(
