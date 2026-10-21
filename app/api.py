@@ -136,7 +136,7 @@ def run_task(
         elif "execution:inference" in result.evidence:
             event_type = "inference_completed"
         else:
-            event_type = "inference_failed"
+            event_type = "task_not_executed"
         try:
             audit_sink.write(
                 AuditEvent(
