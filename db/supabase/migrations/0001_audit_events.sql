@@ -11,7 +11,7 @@ create table if not exists glorifier.audit_events (
     request_id text not null,
     event_type text not null check (
         event_type in ('task_received', 'policy_denied', 'approval_required',
-                       'inference_started', 'inference_completed', 'inference_failed')
+                       'inference_started', 'inference_completed', 'inference_failed', 'task_not_executed')
     ),
     status text not null check (
         status in ('FULLY VERIFIED', 'VERIFIED', 'PARTIALLY VERIFIED',
