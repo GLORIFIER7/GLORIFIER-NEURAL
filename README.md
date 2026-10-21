@@ -4,7 +4,8 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 
 ## Current capabilities
 
-- FastAPI health endpoint at `GET /health`.
+- FastAPI liveness/status endpoint at `GET /health`.
+- Fail-closed readiness endpoint at `GET /ready` (HTTP 503 until provider and database integrations are implemented and verified).
 - Task request/response schemas with input limits, including a bounded action-class field.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
 - Explicit provider adapter interface; no provider is registered by default.
@@ -29,7 +30,7 @@ pytest
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports the process separately from integrations that are not implemented. Current provider and database checks are `NOT VERIFIED`, not healthy.
+Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from integrations that are not implemented. `/ready` returns HTTP 503 while required provider and database integrations remain unverified; this prevents a deployment orchestrator from mistaking a running process for a ready service. Current provider and database checks are `NOT VERIFIED`, not healthy.
 
 ## API access
 
