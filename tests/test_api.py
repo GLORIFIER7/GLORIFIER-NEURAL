@@ -247,7 +247,6 @@ def test_audit_write_failure_prevents_task_execution(monkeypatch):
 
 
 def test_task_endpoint_rate_limits_authenticated_requests(monkeypatch):
-    from app.api import TASK_RATE_LIMITER
     from app.rate_limit import FixedWindowRateLimiter
 
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
