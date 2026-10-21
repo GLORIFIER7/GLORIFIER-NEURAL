@@ -50,7 +50,10 @@ class RequestBodyLimitMiddleware:
         except _RequestBodyTooLarge:
             if response_started:
                 raise
-            body = b'{"detail":"Request body exceeds the 65536-byte limit"}'
+            body = (
+                '{"detail":"Request body exceeds the '
+                f'{self.max_body_bytes}-byte limit"}}'
+            ).encode("utf-8")
             await send(
                 {
                     "type": "http.response.start",
