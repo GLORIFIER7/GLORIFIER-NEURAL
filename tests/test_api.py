@@ -11,8 +11,8 @@ def test_health_does_not_overclaim_dependencies():
     assert response.status_code == 200
     body = response.json()
     assert body["checks"]["process"] == "VERIFIED"
-    assert body["checks"]["providers"] == "NOT OBSERVABLE"
-    assert body["checks"]["database"] == "NOT OBSERVABLE"
+    assert body["checks"]["providers"] == "NOT VERIFIED"
+    assert body["checks"]["database"] == "NOT VERIFIED"
 
 
 def test_task_endpoint_disabled_without_token(monkeypatch):
