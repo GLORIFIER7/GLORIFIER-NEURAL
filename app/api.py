@@ -13,6 +13,8 @@ from app.request_limits import RequestBodyLimitMiddleware
 from app.rate_limit import FixedWindowRateLimiter
 from app.schemas import HealthResponse, TaskRequest, TaskResponse
 
+NOT_VERIFIED = "NOT VERIFIED"
+
 app = FastAPI(
     title="GLORIFIER Neural Orchestration",
     version="0.2.0",
@@ -26,6 +28,7 @@ app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_B
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
+    """Attach request correlation and baseline security headers to every response."""
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     content_length = request.headers.get("content-length")
@@ -62,24 +65,28 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
 def health() -> HealthResponse:
-    # Report known implementation gaps honestly; process health is not dependency health.
+    """Report process health separately from unverified provider and database health."""
     pytorch_installed = pytorch_status()["installed"]
     return HealthResponse(
         status="PARTIALLY VERIFIED",
         service="glorifier-neural",
         checks={
             "process": "VERIFIED",
-            "providers": "NOT VERIFIED",
-            "database": "NOT VERIFIED",
-            "pytorch": "VERIFIED" if pytorch_installed else "NOT VERIFIED",
+            "providers": NOT_VERIFIED,
+            "database": NOT_VERIFIED,
+            "pytorch": "VERIFIED" if pytorch_installed else NOT_VERIFIED,
         },
     )
 
 
 @app.get("/ready", tags=["operations"])
 def readiness() -> JSONResponse:
-    """Report dependency readiness without claiming untested integrations are healthy."""
-    database_status = "NOT VERIFIED"
+    """Return 503 until provider readiness is verified.
+
+    A configured Neon probe is read-only and opt-in. A successful database probe
+    alone does not make the service ready while provider readiness is unverified.
+    """
+    database_status = NOT_VERIFIED
     try:
         probe = NeonConnectivityProbe.from_environment()
         if probe is not None:
@@ -88,13 +95,12 @@ def readiness() -> JSONResponse:
     except Exception:  # noqa: BLE001 - readiness must not leak connection details
         database_status = "DEGRADED"
 
-    # Provider readiness remains unverified until a controlled provider check is implemented.
     return JSONResponse(
         status_code=503,
         content={
             "status": "NOT READY",
             "checks": {
-                "providers": "NOT VERIFIED",
+                "providers": NOT_VERIFIED,
                 "database": database_status,
             },
             "message": (
@@ -111,6 +117,15 @@ def run_task(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
+    """Process a governed task request.
+
+    Raises:
+        HTTPException: 503 when the API token is missing or configured audit
+            persistence is unavailable; 401 when the bearer token is invalid;
+            429 when the authenticated caller exceeds the task rate limit.
+        HTTPException: 503 when required audit persistence fails before or after
+            orchestration. Pre-execution audit failures prevent task processing.
+    """
     api_token = os.getenv("GLORIFIER_API_TOKEN")
     if not api_token:
         raise HTTPException(
@@ -144,7 +159,7 @@ def run_task(
                 AuditEvent(
                     request_id=request_id,
                     event_type="task_received",
-                    status="NOT VERIFIED",
+                    status=NOT_VERIFIED,
                     action_class=task_request.action_class,
                     evidence=("execution:not-started",),
                 )
@@ -156,16 +171,7 @@ def run_task(
     result = orchestrator.run(task_request)
 
     if audit_sink is not None:
-        if "policy:deny" in result.evidence:
-            event_type = "policy_denied"
-        elif "policy:approval-required" in result.evidence:
-            event_type = "approval_required"
-        elif "execution:failed" in result.evidence:
-            event_type = "inference_failed"
-        elif "execution:inference" in result.evidence:
-            event_type = "inference_completed"
-        else:
-            event_type = "task_not_executed"
+        event_type = _audit_event_type(result)
         try:
             audit_sink.write(
                 AuditEvent(
@@ -184,3 +190,16 @@ def run_task(
                 detail="Audit persistence failed after task processing; inspect audit status",
             ) from None
     return result
+
+
+def _audit_event_type(result: TaskResponse) -> str:
+    """Map bounded orchestration evidence to a sanitized audit event category."""
+    if "policy:deny" in result.evidence:
+        return "policy_denied"
+    if "policy:approval-required" in result.evidence:
+        return "approval_required"
+    if "execution:failed" in result.evidence:
+        return "inference_failed"
+    if "execution:inference" in result.evidence:
+        return "inference_completed"
+    return "task_not_executed"
