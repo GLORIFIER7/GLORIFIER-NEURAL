@@ -6,6 +6,7 @@ prompts, outputs, request bodies, credentials, or arbitrary evidence payloads.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import UTC, datetime, timedelta
@@ -113,8 +114,52 @@ class TaskRunRepository:
                        VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
                     (
                         values[0], values[1], values[2], values[3],
-                        __import__("json").dumps(values[4]), values[5], values[6],
+                        json.dumps(values[4]), values[5], values[6],
                     ),
                 )
         except Exception:  # noqa: BLE001 - never leak DSN or database details
             raise RuntimeError("Neon task-run persistence failed") from None
+
+
+    def delete_expired(self, *, batch_size: int = 500, now: datetime | None = None) -> int:
+        """Delete only expired task-run metadata in a bounded, explicit cleanup batch.
+
+        This method is never scheduled or invoked automatically. Operators must call
+        it deliberately after approving retention and verifying the target database.
+        """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or not 1 <= batch_size <= 1000:
+            raise ValueError("batch_size must be an integer between 1 and 1000")
+        cutoff = now or datetime.now(UTC)
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        cutoff = cutoff.astimezone(UTC)
+
+        try:
+            import psycopg
+        except ImportError:
+            raise RuntimeError("Neon task-run driver is not installed") from None
+
+        try:
+            with psycopg.connect(
+                self._database_url,
+                connect_timeout=self._connect_timeout,
+                sslmode="require",
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    """WITH expired AS (
+                           SELECT id
+                           FROM glorifier.task_runs
+                           WHERE expires_at <= %s
+                           ORDER BY expires_at ASC
+                           LIMIT %s
+                           FOR UPDATE SKIP LOCKED
+                       )
+                       DELETE FROM glorifier.task_runs AS task_run
+                       USING expired
+                       WHERE task_run.id = expired.id
+                       RETURNING task_run.id""",
+                    (cutoff, batch_size),
+                )
+                return len(cursor.fetchall())
+        except Exception:  # noqa: BLE001 - never leak DSN or database details
+            raise RuntimeError("Neon task-run cleanup failed") from None
