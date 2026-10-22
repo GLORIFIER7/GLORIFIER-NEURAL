@@ -67,3 +67,68 @@ def test_rejects_naive_timestamp():
             request_id=str(uuid4()), action_class="summarize", status="VERIFIED",
             now=datetime(2026, 1, 1),
         )
+
+
+
+def test_delete_expired_uses_bounded_expiry_only_batch(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    class Cursor:
+        def __init__(self):
+            self.query = ""
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchall(self):
+            return [(uuid4(),), (uuid4(),)]
+
+    class Connection:
+        def __init__(self):
+            self.cursor_instance = Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+    connection = Connection()
+    monkeypatch.setitem(
+        sys.modules,
+        "psycopg",
+        SimpleNamespace(connect=lambda *_args, **_kwargs: connection),
+    )
+    now = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    repository = TaskRunRepository("postgresql://test.invalid/db")
+
+    assert repository.delete_expired(batch_size=50, now=now) == 2
+    assert connection.cursor_instance.params == (now, 50)
+    assert "expires_at <= %s" in connection.cursor_instance.query
+    assert "LIMIT %s" in connection.cursor_instance.query
+    assert "FOR UPDATE SKIP LOCKED" in connection.cursor_instance.query
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, 1001, True, 1.5])
+def test_delete_expired_rejects_unsafe_batch_size(batch_size):
+    repository = TaskRunRepository("postgresql://test.invalid/db")
+    with pytest.raises(ValueError, match="batch_size"):
+        repository.delete_expired(batch_size=batch_size)
+
+
+def test_delete_expired_rejects_naive_timestamp():
+    repository = TaskRunRepository("postgresql://test.invalid/db")
+    with pytest.raises(ValueError, match="timezone-aware"):
+        repository.delete_expired(now=datetime(2026, 1, 1))
