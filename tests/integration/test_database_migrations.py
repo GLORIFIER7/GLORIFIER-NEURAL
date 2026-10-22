@@ -1,6 +1,7 @@
 """Runtime integration checks for migrations applied to a disposable PostgreSQL database."""
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -45,7 +46,7 @@ def main() -> None:
         rejected(conn, insert_task, (base[0], base[1], "success", base[3], base[4], base[5]))
         rejected(
             conn, insert_task,
-            (base[0], base[1], base[2], '["x"]' * 21, base[4], base[5]),
+            (base[0], base[1], base[2], json.dumps(["x"] * 21), base[4], base[5]),
         )
         rejected(
             conn, insert_task,
