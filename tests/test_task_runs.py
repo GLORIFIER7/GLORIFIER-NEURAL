@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -20,7 +20,7 @@ def test_task_run_repository_requires_url_when_explicitly_enabled(monkeypatch):
 
 
 def test_valid_metadata_is_bounded_and_retained_for_30_days():
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     values = TaskRunRepository.validate_record(
         request_id=str(uuid4()), action_class="summarize", status="NOT VERIFIED",
         provider="nvidia_nim", evidence=["inference:disabled", "execution:none"], now=now,
