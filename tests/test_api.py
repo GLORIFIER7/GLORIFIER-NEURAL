@@ -325,3 +325,38 @@ def test_unexpected_initial_audit_failure_fails_closed_without_leaking(monkeypat
     assert response.json()["detail"] == "Audit persistence unavailable; task not executed"
     assert "internal network path" not in response.text
     assert called["run"] is False
+
+
+def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
+    from app.audit import AuditEvent
+    from app.schemas import TaskResponse
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    events = []
+
+    class FakeSink:
+        def write(self, event: AuditEvent):
+            events.append(event)
+
+    def failed_run(task_request):
+        return TaskResponse(
+            status="DEGRADED",
+            provider="nvidia_nim",
+            message="Provider inference failed (RuntimeError); no result was accepted.",
+            evidence=["provider:nvidia_nim:error", "execution:failed"],
+        )
+
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: FakeSink())
+    monkeypatch.setattr("app.api.orchestrator.run", failed_run)
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer test-secret"},
+        json={"task": "safe test", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert len(events) == 2
+    assert events[0].event_type == "task_received"
+    assert events[1].event_type == "inference_failed"
+    assert events[1].status == "DEGRADED"
+    assert events[1].evidence == ("provider:nvidia_nim:error", "execution:failed")
