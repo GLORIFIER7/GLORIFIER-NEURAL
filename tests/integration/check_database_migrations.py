@@ -10,16 +10,16 @@ import psycopg
 from psycopg import Error
 
 
-DATABASE_URL = os.environ["GLORIFIER_TEST_DATABASE_URL"]
+DATABASE_URL = os.environ.get("GLORIFIER_TEST_DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("Required environment variable GLORIFIER_TEST_DATABASE_URL is not set")
 
 
 def rejected(connection, statement: str, params: tuple) -> None:
     try:
         connection.execute(statement, params)
     except Error:
-        connection.rollback()
         return
-    connection.rollback()
     raise AssertionError("Expected database constraint to reject invalid data")
 
 
@@ -42,15 +42,15 @@ def main() -> None:
         insert_task = """INSERT INTO glorifier.task_runs
             (request_id, action_class, status, evidence, created_at, expires_at)
             VALUES (%s, %s, %s, %s::jsonb, %s, %s)"""
-        rejected(conn, insert_task, (base[0], "Bad Action", base[2], base[3], base[4], base[5]))
-        rejected(conn, insert_task, (base[0], base[1], "success", base[3], base[4], base[5]))
+        rejected(conn, insert_task, (str(uuid4()), "Bad Action", base[2], base[3], base[4], base[5]))
+        rejected(conn, insert_task, (str(uuid4()), base[1], "success", base[3], base[4], base[5]))
         rejected(
             conn, insert_task,
-            (base[0], base[1], base[2], json.dumps(["x"] * 21), base[4], base[5]),
+            (str(uuid4()), base[1], base[2], json.dumps(["x"] * 21), base[4], base[5]),
         )
         rejected(
             conn, insert_task,
-            (base[0], base[1], base[2], "[]", base[4], base[4] + timedelta(days=31)),
+            (str(uuid4()), base[1], base[2], "[]", base[4], base[4] + timedelta(days=31)),
         )
 
         conn.execute(
