@@ -60,4 +60,4 @@ jobs:
       - name: Apply proposed Supabase-compatible migration to disposable database
         run: psql "$GLORIFIER_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/supabase/migrations/0001_audit_events.sql
       - name: Verify constraints, RLS, and least-privilege grants
-        run: python tests/integration/test_database_migrations.py
+        run: python tests/integration/check_database_migrations.py
