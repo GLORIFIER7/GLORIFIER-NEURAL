@@ -111,7 +111,7 @@ def test_delete_expired_uses_bounded_expiry_only_batch(monkeypatch):
         "psycopg",
         SimpleNamespace(connect=lambda *_args, **_kwargs: connection),
     )
-    now = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 1, tzinfo=UTC)
     repository = TaskRunRepository("postgresql://test.invalid/db")
 
     assert repository.delete_expired(batch_size=50, now=now) == 2
