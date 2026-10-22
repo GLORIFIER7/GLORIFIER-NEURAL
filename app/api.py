@@ -160,6 +160,8 @@ def run_task(
             event_type = "policy_denied"
         elif "policy:approval-required" in result.evidence:
             event_type = "approval_required"
+        elif "execution:failed" in result.evidence:
+            event_type = "inference_failed"
         elif "execution:inference" in result.evidence:
             event_type = "inference_completed"
         else:
