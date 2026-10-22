@@ -85,9 +85,13 @@ def main() -> None:
             """SELECT
                  has_schema_privilege('service_role', 'glorifier', 'USAGE'),
                  has_table_privilege('service_role', 'glorifier.audit_events', 'INSERT'),
-                 has_table_privilege('service_role', 'glorifier.audit_events', 'SELECT')"""
+                 undefined
         ).fetchone()
-        assert grants == (True, True, False), f"Unexpected service_role grants: {grants}"
+        has_table_privilege('service_role', 'glorifier.audit_events', 'UPDATE'),
+                 has_table_privilege('service_role', 'glorifier.audit_events', 'DELETE'),
+                 has_table_privilege('service_role', 'glorifier.audit_events', 'TRUNCATE')"""
+        ).fetchone()
+        assert grants == (True, True, False, False, False, False), f"Unexpected service_role grants: {grants}"
 
     print("Disposable PostgreSQL migration integration checks passed.")
 
