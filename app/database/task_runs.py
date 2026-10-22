@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 
@@ -74,10 +74,10 @@ class TaskRunRepository:
         if any(not isinstance(item, str) or not _SAFE_CODE.fullmatch(item) for item in evidence):
             raise ValueError("evidence may contain only bounded lowercase evidence codes")
 
-        created_at = now or datetime.now(timezone.utc)
+        created_at = now or datetime.now(UTC)
         if created_at.tzinfo is None or created_at.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
-        created_at = created_at.astimezone(timezone.utc)
+        created_at = created_at.astimezone(UTC)
         expires_at = created_at + timedelta(days=RETENTION_DAYS)
         return (
             normalized_request_id, action_class, status, provider,
