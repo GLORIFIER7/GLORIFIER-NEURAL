@@ -85,9 +85,8 @@ def main() -> None:
             """SELECT
                  has_schema_privilege('service_role', 'glorifier', 'USAGE'),
                  has_table_privilege('service_role', 'glorifier.audit_events', 'INSERT'),
-                 undefined
-        ).fetchone()
-        has_table_privilege('service_role', 'glorifier.audit_events', 'UPDATE'),
+                 has_table_privilege('service_role', 'glorifier.audit_events', 'SELECT'),
+                 has_table_privilege('service_role', 'glorifier.audit_events', 'UPDATE'),
                  has_table_privilege('service_role', 'glorifier.audit_events', 'DELETE'),
                  has_table_privilege('service_role', 'glorifier.audit_events', 'TRUNCATE')"""
         ).fetchone()
