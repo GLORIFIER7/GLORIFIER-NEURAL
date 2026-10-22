@@ -1,0 +1,120 @@
+"""Opt-in, metadata-only Neon task-run persistence.
+
+This repository is intentionally not wired into request execution. It is disabled
+unless explicitly enabled, validates every persisted field, and never accepts task
+prompts, outputs, request bodies, credentials, or arbitrary evidence payloads.
+"""
+from __future__ import annotations
+
+import os
+import re
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+
+
+RETENTION_DAYS = 30  # Proposed default; production collection still requires approval.
+_ALLOWED_STATUSES = {
+    "FULLY VERIFIED",
+    "VERIFIED",
+    "PARTIALLY VERIFIED",
+    "NOT VERIFIED",
+    "DEGRADED",
+    "NOT OBSERVABLE",
+}
+_SAFE_CODE = re.compile(r"^[a-z][a-z0-9_.:-]{0,79}$")
+
+
+class TaskRunRepository:
+    """Store bounded task lifecycle metadata using parameterized SQL only."""
+
+    def __init__(self, database_url: str, *, connect_timeout: int = 3) -> None:
+        if not 0 < connect_timeout <= 5:
+            raise ValueError("connect timeout must be between 1 and 5 seconds")
+        if not database_url or not database_url.strip():
+            raise ValueError("database URL is required")
+        self._database_url = database_url.strip()
+        self._connect_timeout = connect_timeout
+
+    @classmethod
+    def from_environment(cls) -> TaskRunRepository | None:
+        """Return a repository only after explicit opt-in and valid configuration."""
+        enabled = os.getenv("GLORIFIER_NEON_TASK_RUNS_ENABLED", "").strip().casefold() == "true"
+        if not enabled:
+            return None
+        url = os.getenv("NEON_DATABASE_URL", "").strip()
+        if not url:
+            raise ValueError("Neon task-run persistence is enabled but its URL is missing")
+        return cls(url)
+
+    @staticmethod
+    def validate_record(
+        *, request_id: str, action_class: str, status: str,
+        provider: str | None = None, evidence: list[str] | None = None,
+        now: datetime | None = None,
+    ) -> tuple[str, str, str, str | None, list[str], datetime, datetime]:
+        """Validate metadata and calculate the proposed retention deadline."""
+        try:
+            normalized_request_id = str(UUID(request_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("request_id must be a UUID") from None
+
+        if not isinstance(action_class, str) or not _SAFE_CODE.fullmatch(action_class):
+            raise ValueError("action_class must be a bounded lowercase code")
+        if status not in _ALLOWED_STATUSES:
+            raise ValueError("status is not an allowed lifecycle status")
+        if provider is not None and (
+            not isinstance(provider, str) or not _SAFE_CODE.fullmatch(provider)
+        ):
+            raise ValueError("provider must be a bounded lowercase code")
+
+        if evidence is None:
+            evidence = []
+        if not isinstance(evidence, list) or len(evidence) > 20:
+            raise ValueError("evidence must contain at most 20 evidence codes")
+        if any(not isinstance(item, str) or not _SAFE_CODE.fullmatch(item) for item in evidence):
+            raise ValueError("evidence may contain only bounded lowercase evidence codes")
+
+        created_at = now or datetime.now(timezone.utc)
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        created_at = created_at.astimezone(timezone.utc)
+        expires_at = created_at + timedelta(days=RETENTION_DAYS)
+        return (
+            normalized_request_id, action_class, status, provider,
+            list(evidence), created_at, expires_at,
+        )
+
+    def record(
+        self, *, request_id: str, action_class: str, status: str,
+        provider: str | None = None, evidence: list[str] | None = None,
+    ) -> None:
+        """Persist only validated metadata; errors never expose connection details."""
+        values = self.validate_record(
+            request_id=request_id,
+            action_class=action_class,
+            status=status,
+            provider=provider,
+            evidence=evidence,
+        )
+        try:
+            import psycopg
+        except ImportError:
+            raise RuntimeError("Neon task-run driver is not installed") from None
+
+        try:
+            with psycopg.connect(
+                self._database_url,
+                connect_timeout=self._connect_timeout,
+                sslmode="require",
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO glorifier.task_runs
+                       (request_id, action_class, status, provider, evidence, created_at, expires_at)
+                       VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
+                    (
+                        values[0], values[1], values[2], values[3],
+                        __import__("json").dumps(values[4]), values[5], values[6],
+                    ),
+                )
+        except Exception:  # noqa: BLE001 - never leak DSN or database details
+            raise RuntimeError("Neon task-run persistence failed") from None
