@@ -6,7 +6,7 @@ on:
       - security/sonar-lockfile-remediation
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: generate-uv-lock
@@ -17,26 +17,28 @@ jobs:
     if: github.repository == 'GLORIFIER7/GLORIFIER-NEURAL' && github.ref == 'refs/heads/security/sonar-lockfile-remediation'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: security/sonar-lockfile-remediation
           persist-credentials: true
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@ba3a9b49f18c8b5a06c39e2a00f191eecfb82f16 # v6
         with:
           enable-cache: false
       - name: Resolve and validate dependency lock
         run: uv lock
-      - name: Commit generated lockfile to remediation branch
+      - name: Stage and commit generated dependency lock
         run: |
           test -s uv.lock
-          if git ls-files --error-unmatch uv.lock >/dev/null 2>&1 && git diff --quiet -- uv.lock; then
+          git add -f uv.lock
+          if git diff --cached --quiet -- uv.lock; then
             echo "Tracked uv.lock is already current"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f uv.lock
           git diff --cached --check
           git commit -m "Security: add resolver-generated uv lockfile"
           git push origin HEAD:security/sonar-lockfile-remediation
