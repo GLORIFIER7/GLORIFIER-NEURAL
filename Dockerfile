@@ -4,7 +4,7 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --only-binary=:all: .
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
