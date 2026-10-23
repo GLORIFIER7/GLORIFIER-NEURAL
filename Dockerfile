@@ -4,7 +4,10 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN python -m pip install --no-cache-dir --only-binary=:all: .
+RUN python -m pip install --no-cache-dir --only-binary=:all: "setuptools>=83.0.0" wheel \
+ && python -c "import shlex, tomllib; p=tomllib.load(open('pyproject.toml','rb')); print(' '.join(shlex.quote(d) for d in p['project']['dependencies']))" > /tmp/runtime-dependencies.txt \
+ && python -m pip install --no-cache-dir --only-binary=:all: $(cat /tmp/runtime-dependencies.txt) \
+ && python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
