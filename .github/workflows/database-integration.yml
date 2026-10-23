@@ -51,8 +51,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
-          python -m pip install --upgrade pip
-          python -m pip install "psycopg[binary]>=3.2,<4.0"
+          python -m pip install --only-binary=:all: --upgrade pip
+          python -m pip install --only-binary=:all: "psycopg[binary]>=3.2,<4.0"
       - name: Create isolated migration role
         run: psql "$GLORIFIER_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE service_role NOLOGIN"
       - name: Apply proposed Neon migration to disposable database
