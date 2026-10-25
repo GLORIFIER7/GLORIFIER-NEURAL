@@ -115,6 +115,27 @@ def test_response_has_unique_correlation_id():
     assert str(uuid.UUID(first_id)) == first_id
     assert str(uuid.UUID(second_id)) == second_id
     assert first_id != second_id
+    assert first.headers["x-correlation-id"] == first_id
+    assert second.headers["x-correlation-id"] == second_id
+
+
+def test_incoming_correlation_id_is_preserved_and_echoed():
+    correlation_id = str(uuid.uuid4())
+    response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+    assert response.headers["x-request-id"] == correlation_id
+
+
+def test_invalid_correlation_id_is_replaced_with_a_uuid():
+    response = client.get("/health", headers={"X-Correlation-ID": "trace-" + ("x" * 200)})
+
+    assert response.status_code == 200
+    response_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(response_id)) == response_id
+    assert response.headers["x-correlation-id"] == response_id
+    assert response_id != "trace-" + ("x" * 200)
 
 
 def test_sensitive_action_is_denied_at_api_boundary(monkeypatch):
@@ -178,6 +199,7 @@ def test_declared_oversized_request_body_is_rejected():
     assert response.json()["detail"] == "Request body exceeds the 65536-byte limit"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-request-id"]
+    assert response.headers["x-correlation-id"] == response.headers["x-request-id"]
 
 def test_malformed_content_length_is_rejected():
     response = client.get("/health", headers={"Content-Length": "invalid"})
