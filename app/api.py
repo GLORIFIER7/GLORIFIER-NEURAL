@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import uuid
 
@@ -26,10 +27,26 @@ TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
+_CORRELATION_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89a-fA-F][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+
+
+def _request_correlation_id(request: Request) -> str:
+    """Preserve only a canonical UUID-shaped correlation value; otherwise generate one."""
+    candidate = request.headers.get("x-correlation-id", "").strip()
+    if _CORRELATION_ID_PATTERN.fullmatch(candidate):
+        try:
+            parsed = uuid.UUID(candidate)
+            if str(parsed) == candidate.lower():
+                return str(parsed)
+        except ValueError:
+            pass
+    return str(uuid.uuid4())
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
-    """Attach request correlation and baseline security headers to every response."""
-    request_id = str(uuid.uuid4())
+    """Propagate a bounded correlation ID into logs and back to the caller."""
+    request_id = _request_correlation_id(request)
     request.state.request_id = request_id
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -56,6 +73,7 @@ async def add_security_headers(request: Request, call_next) -> Response:
     else:
         response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Correlation-ID"] = request_id
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
