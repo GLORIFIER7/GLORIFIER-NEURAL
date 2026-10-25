@@ -12,6 +12,7 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 - Explicit provider adapter interface; no provider is registered by default.
 - Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), wired only when `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are explicitly set.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
+- Validated UUID-shaped `X-Correlation-ID` propagation; the API returns the same value in `X-Correlation-ID` and `X-Request-ID`, and uses it for audit-event correlation. Invalid caller-supplied values are replaced with a server-generated UUID.
 - Optional PyTorch availability check.
 - Unit tests and GitHub Actions CI on Python 3.11 and 3.12.
 - Container runs as a non-root user; CI builds the image without publishing it.
