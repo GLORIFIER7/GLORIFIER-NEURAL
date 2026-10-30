@@ -41,8 +41,10 @@ def _request_correlation_id(request: Request) -> str:
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
     """Propagate a bounded correlation ID into logs and back to the caller."""
-    request_id = _request_correlation_id(request)
+    request_id = str(uuid.uuid4())
+    correlation_id = _request_correlation_id(request)
     request.state.request_id = request_id
+    request.state.correlation_id = correlation_id
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
@@ -68,7 +70,7 @@ async def add_security_headers(request: Request, call_next) -> Response:
     else:
         response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
-    response.headers["X-Correlation-ID"] = request_id
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -165,12 +167,14 @@ def run_task(
         raise HTTPException(status_code=503, detail="Configured audit persistence is unavailable") from None
 
     request_id = request.state.request_id
+    correlation_id = request.state.correlation_id
     if audit_sink is not None:
         try:
             # Pre-execution audit write: if it fails, do not start task processing.
             audit_sink.write(
                 AuditEvent(
                     request_id=request_id,
+                    correlation_id=correlation_id,
                     event_type="task_received",
                     status=NOT_VERIFIED,
                     action_class=task_request.action_class,
@@ -189,6 +193,7 @@ def run_task(
             audit_sink.write(
                 AuditEvent(
                     request_id=request_id,
+                    correlation_id=correlation_id,
                     event_type=event_type,
                     status=result.status,
                     action_class=task_request.action_class,
