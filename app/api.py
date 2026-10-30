@@ -34,12 +34,7 @@ def _request_correlation_id(request: Request) -> str:
     """Preserve only a canonical UUID-shaped correlation value; otherwise generate one."""
     candidate = request.headers.get("x-correlation-id", "").strip()
     if _CORRELATION_ID_PATTERN.fullmatch(candidate):
-        try:
-            parsed = uuid.UUID(candidate)
-            if str(parsed) == candidate.lower():
-                return str(parsed)
-        except ValueError:
-            pass
+        return candidate
     return str(uuid.uuid4())
 
 
