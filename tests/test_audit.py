@@ -108,10 +108,27 @@ def test_supabase_sink_posts_only_sanitized_allowlisted_fields(monkeypatch):
         "action_class": "read_only",
         "provider": None,
         "evidence": ["execution:none"],
-        "details": {},
+        "details": {"correlation_id": "correlation-123"},
     }
     assert "test-service-role-key" in captured["headers"]["Authorization"]
     assert captured["headers"]["Content-profile"] == "glorifier"
+
+
+def test_supabase_sink_rejects_oversized_correlation_id_before_network(monkeypatch):
+    sink = SupabaseRestAuditSink("https://example.supabase.co", "test-key")
+    monkeypatch.setattr(
+        "app.audit.urllib.request.urlopen",
+        lambda *args, **kwargs: pytest.fail("network must not be called"),
+    )
+    event = AuditEvent(
+        request_id="req-123",
+        event_type="task_received",
+        status="NOT VERIFIED",
+        action_class="read_only",
+        correlation_id="x" * 129,
+    )
+    with pytest.raises(ValueError, match="Invalid audit correlation_id"):
+        sink.write(event)
 
 
 def test_supabase_sink_rejects_oversized_evidence_before_network(monkeypatch):
