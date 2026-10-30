@@ -128,6 +128,15 @@ def test_incoming_correlation_id_is_preserved_and_echoed():
     assert response.headers["x-request-id"] == correlation_id
 
 
+def test_uppercase_canonical_correlation_id_is_preserved_exactly():
+    correlation_id = str(uuid.uuid4()).upper()
+    response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+    assert response.headers["x-request-id"] == correlation_id
+
+
 def test_invalid_correlation_id_is_replaced_with_a_uuid():
     response = client.get("/health", headers={"X-Correlation-ID": "trace-" + ("x" * 200)})
 
