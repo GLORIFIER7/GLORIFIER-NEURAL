@@ -40,6 +40,6 @@ jobs:
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: "/language:python"
-          # This repository currently cannot accept code-scanning uploads.
-          # Keep analysis running until code scanning is enabled in repository settings.
-          upload: false
+          # GitHub supports code-scanning uploads for public repositories.
+          # Keep the analysis step usable while this repository is private.
+          upload: ${{ github.event.repository.private == false }}
