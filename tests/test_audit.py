@@ -95,6 +95,7 @@ def test_supabase_sink_posts_only_sanitized_allowlisted_fields(monkeypatch):
             status="NOT VERIFIED",
             action_class="read_only",
             provider=None,
+            correlation_id="correlation-123",
             evidence=("execution:none",),
         )
     )
