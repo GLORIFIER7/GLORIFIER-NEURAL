@@ -42,4 +42,4 @@ jobs:
           category: "/language:python"
           # Scheduled events do not provide repository.visibility; null safely fails this string comparison.
           # SARIF is uploaded only when GitHub explicitly identifies the repository as public.
-          upload: ${{ github.event.repository.visibility == 'public' }}
+          upload: ${{ github.repository_visibility == 'public' }}
