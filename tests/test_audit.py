@@ -22,6 +22,22 @@ def test_audit_event_contains_only_minimal_operational_fields():
     assert "details" not in {field.name for field in dataclasses.fields(event)}
 
 
+
+def test_audit_event_preserves_legacy_positional_evidence_argument():
+    event = AuditEvent(
+        "req-123",
+        "task_received",
+        "NOT VERIFIED",
+        "read_only",
+        "nvidia_nim",
+        ("execution:none",),
+    )
+
+    assert event.provider == "nvidia_nim"
+    assert event.evidence == ("execution:none",)
+    assert event.correlation_id is None
+
+
 def test_audit_event_is_immutable():
     event = AuditEvent(
         request_id="req-123",
