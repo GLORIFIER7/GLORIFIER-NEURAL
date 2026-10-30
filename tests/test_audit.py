@@ -131,39 +131,41 @@ def test_supabase_sink_posts_only_sanitized_allowlisted_fields(monkeypatch):
     assert captured["headers"]["Content-profile"] == "glorifier"
 
 
-def test_supabase_sink_rejects_oversized_correlation_id_before_network(monkeypatch):
+@pytest.mark.parametrize(
+    "event, error_message",
+    [
+        (
+            AuditEvent(
+                request_id="req-123",
+                event_type="task_received",
+                status="NOT VERIFIED",
+                action_class="read_only",
+                correlation_id="x" * 129,
+            ),
+            "Invalid audit correlation_id",
+        ),
+        (
+            AuditEvent(
+                request_id="req-123",
+                event_type="task_received",
+                status="NOT VERIFIED",
+                action_class="read_only",
+                evidence=("x" * 161,),
+            ),
+            "Invalid audit evidence",
+        ),
+    ],
+)
+def test_supabase_sink_rejects_oversized_values_before_network(
+    monkeypatch, event, error_message
+):
     sink = SupabaseRestAuditSink("https://example.supabase.co", "test-key")
     monkeypatch.setattr(
         "app.audit.urllib.request.urlopen",
         lambda *args, **kwargs: pytest.fail("network must not be called"),
     )
-    event = AuditEvent(
-        request_id="req-123",
-        event_type="task_received",
-        status="NOT VERIFIED",
-        action_class="read_only",
-        correlation_id="x" * 129,
-    )
-    with pytest.raises(ValueError, match="Invalid audit correlation_id"):
+    with pytest.raises(ValueError, match=error_message):
         sink.write(event)
-
-
-def test_supabase_sink_rejects_oversized_evidence_before_network(monkeypatch):
-    sink = SupabaseRestAuditSink("https://example.supabase.co", "test-key")
-    monkeypatch.setattr(
-        "app.audit.urllib.request.urlopen",
-        lambda *args, **kwargs: pytest.fail("network must not be called"),
-    )
-    event = AuditEvent(
-        request_id="req-123",
-        event_type="task_received",
-        status="NOT VERIFIED",
-        action_class="read_only",
-        evidence=("x" * 161,),
-    )
-    with pytest.raises(ValueError, match="Invalid audit evidence"):
-        sink.write(event)
-
 
 
 @pytest.mark.parametrize(
