@@ -396,6 +396,61 @@ def test_unexpected_initial_audit_failure_fails_closed_without_leaking(monkeypat
     assert called["run"] is False
 
 
+
+def test_unhandled_server_error_keeps_request_and_correlation_headers(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    correlation_id = str(uuid.uuid4())
+
+    def fail_task(task_request):
+        raise RuntimeError("private provider detail must not leak")
+
+    monkeypatch.setattr("app.api.orchestrator.run", fail_task)
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
+        "/v1/tasks",
+        headers={
+            "Authorization": "Bearer test-secret",
+            "X-Correlation-ID": correlation_id,
+        },
+        json={"task": "safe test", "require_approval": False},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal Server Error"}
+    assert response.headers["x-correlation-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
+    assert "private provider detail" not in response.text
+
+
+def test_correlation_id_trims_surrounding_whitespace():
+    correlation_id = str(uuid.uuid4())
+    response = client.get(
+        "/health",
+        headers={"X-Correlation-ID": f"  {correlation_id}  "},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+
+
+def test_noncanonical_uuid_correlation_id_is_replaced():
+    correlation_id = str(uuid.uuid4())
+    noncanonical_id = correlation_id.replace("-", "")
+    response = client.get(
+        "/health",
+        headers={"X-Correlation-ID": noncanonical_id},
+    )
+
+    assert response.status_code == 200
+    returned_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(returned_id)) == returned_id
+    assert returned_id != noncanonical_id
+
+
 def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
     from app.audit import AuditEvent
     from app.schemas import TaskResponse
