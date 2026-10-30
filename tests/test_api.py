@@ -1,5 +1,7 @@
 import uuid
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.api import app
@@ -140,19 +142,11 @@ def test_reused_correlation_id_never_reuses_server_request_id():
     assert second_request_id != correlation_id
 
 
-def test_incoming_correlation_id_is_preserved_and_echoed():
-    correlation_id = str(uuid.uuid4())
-    response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
-
-    assert response.status_code == 200
-    assert response.headers["x-correlation-id"] == correlation_id
-    request_id = response.headers["x-request-id"]
-    assert str(uuid.UUID(request_id)) == request_id
-    assert request_id != correlation_id
-
-
-def test_uppercase_canonical_correlation_id_is_preserved_exactly():
-    correlation_id = str(uuid.uuid4()).upper()
+@pytest.mark.parametrize(
+    "correlation_id",
+    [str(uuid.uuid4()), str(uuid.uuid4()).upper()],
+)
+def test_incoming_correlation_id_is_preserved_and_echoed(correlation_id):
     response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
 
     assert response.status_code == 200
