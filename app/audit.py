@@ -37,8 +37,8 @@ class AuditEvent:
     status: AuditStatus
     action_class: str
     provider: str | None = None
-    correlation_id: str | None = None
     evidence: tuple[str, ...] = ()
+    correlation_id: str | None = None
 
 
 class AuditSink:
