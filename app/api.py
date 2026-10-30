@@ -69,13 +69,40 @@ async def add_security_headers(request: Request, call_next) -> Response:
                 response = await call_next(request)
     else:
         response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Correlation-ID"] = correlation_id
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.update(_security_response_headers(request))
     return response
+
+
+def _security_response_headers(request: Request) -> dict[str, str]:
+    """Build the bounded tracing and security headers for every response path."""
+    request_id = getattr(request.state, "request_id", None)
+    if not request_id:
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if not correlation_id:
+        correlation_id = _request_correlation_id(request)
+        request.state.correlation_id = correlation_id
+
+    return {
+        "X-Request-ID": request_id,
+        "X-Correlation-ID": correlation_id,
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "no-store",
+    }
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_response(request: Request, _exc: Exception) -> JSONResponse:
+    """Keep unhandled 500 responses generic while retaining request tracing headers."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+        headers=_security_response_headers(request),
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
