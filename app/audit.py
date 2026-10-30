@@ -37,6 +37,7 @@ class AuditEvent:
     status: AuditStatus
     action_class: str
     provider: str | None = None
+    correlation_id: str | None = None
     evidence: tuple[str, ...] = ()
 
 
@@ -95,6 +96,10 @@ class SupabaseRestAuditSink(AuditSink):
             raise ValueError("Invalid audit action_class")
         if event.provider is not None and len(event.provider) > 64:
             raise ValueError("Invalid audit provider")
+        if event.correlation_id is not None and (
+            not event.correlation_id or len(event.correlation_id) > 128
+        ):
+            raise ValueError("Invalid audit correlation_id")
         if len(event.evidence) > 20 or any(not item or len(item) > 160 for item in event.evidence):
             raise ValueError("Invalid audit evidence")
         return {
@@ -104,7 +109,11 @@ class SupabaseRestAuditSink(AuditSink):
             "action_class": event.action_class,
             "provider": event.provider,
             "evidence": list(event.evidence),
-            "details": {},
+            "details": (
+                {"correlation_id": event.correlation_id}
+                if event.correlation_id is not None
+                else {}
+            ),
         }
 
     def write(self, event: AuditEvent) -> None:
