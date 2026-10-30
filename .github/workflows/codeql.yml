@@ -40,6 +40,6 @@ jobs:
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: "/language:python"
-          # GitHub supports code-scanning uploads for public repositories.
-          # Keep the analysis step usable while this repository is private.
-          upload: ${{ github.event.repository.private == false }}
+          # Scheduled events do not provide repository.visibility; null safely fails this string comparison.
+          # SARIF is uploaded only when GitHub explicitly identifies the repository as public.
+          upload: ${{ github.event.repository.visibility == 'public' }}
