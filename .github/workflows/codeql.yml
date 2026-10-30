@@ -36,10 +36,16 @@ jobs:
           languages: python
           queries: security-extended
           build-mode: none
+      - name: Detect repository visibility
+        id: repository-visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          visibility="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .visibility)"
+          printf 'visibility=%s\\n' "$visibility" >> "$GITHUB_OUTPUT"
       - name: Analyze
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: "/language:python"
-          # Scheduled events do not provide repository.visibility; null safely fails this string comparison.
-          # SARIF is uploaded only when GitHub explicitly identifies the repository as public.
-          upload: ${{ github.repository_visibility == 'public' }}
+          # Upload SARIF only when the authenticated repository API reports it as public.
+          upload: ${{ steps.repository-visibility.outputs.visibility == 'public' }}
