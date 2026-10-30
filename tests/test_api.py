@@ -218,8 +218,11 @@ def test_declared_oversized_request_body_is_rejected():
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body exceeds the 65536-byte limit"
     assert response.headers["x-content-type-options"] == "nosniff"
-    assert response.headers["x-request-id"]
-    assert response.headers["x-correlation-id"] == response.headers["x-request-id"]
+    request_id = response.headers["x-request-id"]
+    correlation_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert str(uuid.UUID(correlation_id)) == correlation_id
+    assert request_id != correlation_id
 
 def test_malformed_content_length_is_rejected():
     response = client.get("/health", headers={"Content-Length": "invalid"})
