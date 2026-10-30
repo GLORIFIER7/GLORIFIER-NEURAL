@@ -105,18 +105,23 @@ def test_task_input_bounds_are_enforced(monkeypatch):
     assert oversized_purpose.status_code == 422
 
 
-def test_response_has_unique_correlation_id():
+def test_response_has_separate_unique_request_and_correlation_ids():
     first = client.get("/health")
     second = client.get("/health")
 
-    first_id = first.headers["x-request-id"]
-    second_id = second.headers["x-request-id"]
+    first_request_id = first.headers["x-request-id"]
+    second_request_id = second.headers["x-request-id"]
+    first_correlation_id = first.headers["x-correlation-id"]
+    second_correlation_id = second.headers["x-correlation-id"]
 
-    assert str(uuid.UUID(first_id)) == first_id
-    assert str(uuid.UUID(second_id)) == second_id
-    assert first_id != second_id
-    assert first.headers["x-correlation-id"] == first_id
-    assert second.headers["x-correlation-id"] == second_id
+    assert str(uuid.UUID(first_request_id)) == first_request_id
+    assert str(uuid.UUID(second_request_id)) == second_request_id
+    assert str(uuid.UUID(first_correlation_id)) == first_correlation_id
+    assert str(uuid.UUID(second_correlation_id)) == second_correlation_id
+    assert first_request_id != second_request_id
+    assert first_correlation_id != second_correlation_id
+    assert first_request_id != first_correlation_id
+    assert second_request_id != second_correlation_id
 
 
 def test_incoming_correlation_id_is_preserved_and_echoed():
@@ -125,7 +130,9 @@ def test_incoming_correlation_id_is_preserved_and_echoed():
 
     assert response.status_code == 200
     assert response.headers["x-correlation-id"] == correlation_id
-    assert response.headers["x-request-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
 
 
 def test_uppercase_canonical_correlation_id_is_preserved_exactly():
@@ -134,17 +141,21 @@ def test_uppercase_canonical_correlation_id_is_preserved_exactly():
 
     assert response.status_code == 200
     assert response.headers["x-correlation-id"] == correlation_id
-    assert response.headers["x-request-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
 
 
 def test_invalid_correlation_id_is_replaced_with_a_uuid():
     response = client.get("/health", headers={"X-Correlation-ID": "trace-" + ("x" * 200)})
 
     assert response.status_code == 200
-    response_id = response.headers["x-request-id"]
-    assert str(uuid.UUID(response_id)) == response_id
-    assert response.headers["x-correlation-id"] == response_id
-    assert response_id != "trace-" + ("x" * 200)
+    request_id = response.headers["x-request-id"]
+    correlation_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert str(uuid.UUID(correlation_id)) == correlation_id
+    assert request_id != correlation_id
+    assert correlation_id != "trace-" + ("x" * 200)
 
 
 def test_sensitive_action_is_denied_at_api_boundary(monkeypatch):
@@ -223,10 +234,11 @@ def test_negative_content_length_is_rejected():
     assert response.json()["detail"] == "Invalid Content-Length header"
 
 
-def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypatch):
+def test_opt_in_audit_records_request_and_correlation_ids_separately(monkeypatch):
     from app.audit import AuditEvent
 
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    correlation_id = str(uuid.uuid4()).upper()
     events = []
 
     class FakeSink:
@@ -236,7 +248,10 @@ def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypa
     monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: FakeSink())
     response = client.post(
         "/v1/tasks",
-        headers={"Authorization": "Bearer test-secret"},
+        headers={
+            "Authorization": "Bearer test-secret",
+            "X-Correlation-ID": correlation_id,
+        },
         json={"task": "private task text", "require_approval": False},
     )
 
@@ -244,8 +259,12 @@ def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypa
     assert len(events) == 2
     assert events[0].event_type == "task_received"
     assert events[1].event_type == "task_not_executed"
-    assert events[0].request_id == response.headers["x-request-id"]
-    assert events[1].request_id == response.headers["x-request-id"]
+    request_id = response.headers["x-request-id"]
+    assert request_id != response.headers["x-correlation-id"]
+    assert events[0].request_id == request_id
+    assert events[1].request_id == request_id
+    assert events[0].correlation_id == correlation_id
+    assert events[1].correlation_id == correlation_id
     assert all(not hasattr(event, "task") for event in events)
     assert all("private task text" not in repr(event) for event in events)
 
