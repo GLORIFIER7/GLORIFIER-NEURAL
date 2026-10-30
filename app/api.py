@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import uuid
 
@@ -26,11 +27,24 @@ TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
+_CORRELATION_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+
+
+def _request_correlation_id(request: Request) -> str:
+    """Preserve only a canonical UUID-shaped correlation value; otherwise generate one."""
+    candidate = request.headers.get("x-correlation-id", "").strip()
+    if _CORRELATION_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return str(uuid.uuid4())
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
-    """Attach request correlation and baseline security headers to every response."""
+    """Propagate a bounded correlation ID into logs and back to the caller."""
     request_id = str(uuid.uuid4())
+    correlation_id = _request_correlation_id(request)
     request.state.request_id = request_id
+    request.state.correlation_id = correlation_id
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
@@ -55,12 +69,40 @@ async def add_security_headers(request: Request, call_next) -> Response:
                 response = await call_next(request)
     else:
         response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.update(_security_response_headers(request))
     return response
+
+
+def _security_response_headers(request: Request) -> dict[str, str]:
+    """Build the bounded tracing and security headers for every response path."""
+    request_id = getattr(request.state, "request_id", None)
+    if not request_id:
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if not correlation_id:
+        correlation_id = _request_correlation_id(request)
+        request.state.correlation_id = correlation_id
+
+    return {
+        "X-Request-ID": request_id,
+        "X-Correlation-ID": correlation_id,
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "no-store",
+    }
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_response(request: Request, _exc: Exception) -> JSONResponse:
+    """Keep unhandled 500 responses generic while retaining request tracing headers."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+        headers=_security_response_headers(request),
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
@@ -152,12 +194,14 @@ def run_task(
         raise HTTPException(status_code=503, detail="Configured audit persistence is unavailable") from None
 
     request_id = request.state.request_id
+    correlation_id = request.state.correlation_id
     if audit_sink is not None:
         try:
             # Pre-execution audit write: if it fails, do not start task processing.
             audit_sink.write(
                 AuditEvent(
                     request_id=request_id,
+                    correlation_id=correlation_id,
                     event_type="task_received",
                     status=NOT_VERIFIED,
                     action_class=task_request.action_class,
@@ -176,6 +220,7 @@ def run_task(
             audit_sink.write(
                 AuditEvent(
                     request_id=request_id,
+                    correlation_id=correlation_id,
                     event_type=event_type,
                     status=result.status,
                     action_class=task_request.action_class,

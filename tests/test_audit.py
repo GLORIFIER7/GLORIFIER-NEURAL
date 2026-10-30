@@ -22,6 +22,22 @@ def test_audit_event_contains_only_minimal_operational_fields():
     assert "details" not in {field.name for field in dataclasses.fields(event)}
 
 
+
+def test_audit_event_preserves_legacy_positional_evidence_argument():
+    event = AuditEvent(
+        "req-123",
+        "task_received",
+        "NOT VERIFIED",
+        "read_only",
+        "nvidia_nim",
+        ("execution:none",),
+    )
+
+    assert event.provider == "nvidia_nim"
+    assert event.evidence == ("execution:none",)
+    assert event.correlation_id is None
+
+
 def test_audit_event_is_immutable():
     event = AuditEvent(
         request_id="req-123",
@@ -95,6 +111,7 @@ def test_supabase_sink_posts_only_sanitized_allowlisted_fields(monkeypatch):
             status="NOT VERIFIED",
             action_class="read_only",
             provider=None,
+            correlation_id="correlation-123",
             evidence=("execution:none",),
         )
     )
@@ -108,28 +125,47 @@ def test_supabase_sink_posts_only_sanitized_allowlisted_fields(monkeypatch):
         "action_class": "read_only",
         "provider": None,
         "evidence": ["execution:none"],
-        "details": {},
+        "details": {"correlation_id": "correlation-123"},
     }
     assert "test-service-role-key" in captured["headers"]["Authorization"]
     assert captured["headers"]["Content-profile"] == "glorifier"
 
 
-def test_supabase_sink_rejects_oversized_evidence_before_network(monkeypatch):
+@pytest.mark.parametrize(
+    "event, error_message",
+    [
+        (
+            AuditEvent(
+                request_id="req-123",
+                event_type="task_received",
+                status="NOT VERIFIED",
+                action_class="read_only",
+                correlation_id="x" * 129,
+            ),
+            "Invalid audit correlation_id",
+        ),
+        (
+            AuditEvent(
+                request_id="req-123",
+                event_type="task_received",
+                status="NOT VERIFIED",
+                action_class="read_only",
+                evidence=("x" * 161,),
+            ),
+            "Invalid audit evidence",
+        ),
+    ],
+)
+def test_supabase_sink_rejects_oversized_values_before_network(
+    monkeypatch, event, error_message
+):
     sink = SupabaseRestAuditSink("https://example.supabase.co", "test-key")
     monkeypatch.setattr(
         "app.audit.urllib.request.urlopen",
         lambda *args, **kwargs: pytest.fail("network must not be called"),
     )
-    event = AuditEvent(
-        request_id="req-123",
-        event_type="task_received",
-        status="NOT VERIFIED",
-        action_class="read_only",
-        evidence=("x" * 161,),
-    )
-    with pytest.raises(ValueError, match="Invalid audit evidence"):
+    with pytest.raises(ValueError, match=error_message):
         sink.write(event)
-
 
 
 @pytest.mark.parametrize(

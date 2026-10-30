@@ -1,5 +1,7 @@
 import uuid
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.api import app
@@ -105,16 +107,65 @@ def test_task_input_bounds_are_enforced(monkeypatch):
     assert oversized_purpose.status_code == 422
 
 
-def test_response_has_unique_correlation_id():
+def test_response_has_separate_unique_request_and_correlation_ids():
     first = client.get("/health")
     second = client.get("/health")
 
-    first_id = first.headers["x-request-id"]
-    second_id = second.headers["x-request-id"]
+    first_request_id = first.headers["x-request-id"]
+    second_request_id = second.headers["x-request-id"]
+    first_correlation_id = first.headers["x-correlation-id"]
+    second_correlation_id = second.headers["x-correlation-id"]
 
-    assert str(uuid.UUID(first_id)) == first_id
-    assert str(uuid.UUID(second_id)) == second_id
-    assert first_id != second_id
+    assert str(uuid.UUID(first_request_id)) == first_request_id
+    assert str(uuid.UUID(second_request_id)) == second_request_id
+    assert str(uuid.UUID(first_correlation_id)) == first_correlation_id
+    assert str(uuid.UUID(second_correlation_id)) == second_correlation_id
+    assert first_request_id != second_request_id
+    assert first_correlation_id != second_correlation_id
+    assert first_request_id != first_correlation_id
+    assert second_request_id != second_correlation_id
+
+
+def test_reused_correlation_id_never_reuses_server_request_id():
+    correlation_id = str(uuid.uuid4())
+    first = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+    second = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert first.headers["x-correlation-id"] == correlation_id
+    assert second.headers["x-correlation-id"] == correlation_id
+    first_request_id = first.headers["x-request-id"]
+    second_request_id = second.headers["x-request-id"]
+    assert str(uuid.UUID(first_request_id)) == first_request_id
+    assert str(uuid.UUID(second_request_id)) == second_request_id
+    assert first_request_id != second_request_id
+    assert first_request_id != correlation_id
+    assert second_request_id != correlation_id
+
+
+@pytest.mark.parametrize(
+    "correlation_id",
+    [str(uuid.uuid4()), str(uuid.uuid4()).upper()],
+)
+def test_incoming_correlation_id_is_preserved_and_echoed(correlation_id):
+    response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
+
+
+def test_invalid_correlation_id_is_replaced_with_a_uuid():
+    response = client.get("/health", headers={"X-Correlation-ID": "trace-" + ("x" * 200)})
+
+    assert response.status_code == 200
+    request_id = response.headers["x-request-id"]
+    correlation_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert str(uuid.UUID(correlation_id)) == correlation_id
+    assert request_id != correlation_id
+    assert correlation_id != "trace-" + ("x" * 200)
 
 
 def test_sensitive_action_is_denied_at_api_boundary(monkeypatch):
@@ -177,7 +228,11 @@ def test_declared_oversized_request_body_is_rejected():
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body exceeds the 65536-byte limit"
     assert response.headers["x-content-type-options"] == "nosniff"
-    assert response.headers["x-request-id"]
+    request_id = response.headers["x-request-id"]
+    correlation_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert str(uuid.UUID(correlation_id)) == correlation_id
+    assert request_id != correlation_id
 
 def test_malformed_content_length_is_rejected():
     response = client.get("/health", headers={"Content-Length": "invalid"})
@@ -192,10 +247,11 @@ def test_negative_content_length_is_rejected():
     assert response.json()["detail"] == "Invalid Content-Length header"
 
 
-def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypatch):
+def test_opt_in_audit_records_request_and_correlation_ids_separately(monkeypatch):
     from app.audit import AuditEvent
 
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    correlation_id = str(uuid.uuid4()).upper()
     events = []
 
     class FakeSink:
@@ -205,7 +261,10 @@ def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypa
     monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: FakeSink())
     response = client.post(
         "/v1/tasks",
-        headers={"Authorization": "Bearer test-secret"},
+        headers={
+            "Authorization": "Bearer test-secret",
+            "X-Correlation-ID": correlation_id,
+        },
         json={"task": "private task text", "require_approval": False},
     )
 
@@ -213,8 +272,12 @@ def test_opt_in_audit_records_sanitized_events_with_response_request_id(monkeypa
     assert len(events) == 2
     assert events[0].event_type == "task_received"
     assert events[1].event_type == "task_not_executed"
-    assert events[0].request_id == response.headers["x-request-id"]
-    assert events[1].request_id == response.headers["x-request-id"]
+    request_id = response.headers["x-request-id"]
+    assert request_id != response.headers["x-correlation-id"]
+    assert events[0].request_id == request_id
+    assert events[1].request_id == request_id
+    assert events[0].correlation_id == correlation_id
+    assert events[1].correlation_id == correlation_id
     assert all(not hasattr(event, "task") for event in events)
     assert all("private task text" not in repr(event) for event in events)
 
@@ -325,6 +388,61 @@ def test_unexpected_initial_audit_failure_fails_closed_without_leaking(monkeypat
     assert response.json()["detail"] == "Audit persistence unavailable; task not executed"
     assert "internal network path" not in response.text
     assert called["run"] is False
+
+
+
+def test_unhandled_server_error_keeps_request_and_correlation_headers(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
+    correlation_id = str(uuid.uuid4())
+
+    def fail_task(task_request):
+        raise RuntimeError("private provider detail must not leak")
+
+    monkeypatch.setattr("app.api.orchestrator.run", fail_task)
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    response = safe_client.post(
+        "/v1/tasks",
+        headers={
+            "Authorization": "Bearer test-secret",
+            "X-Correlation-ID": correlation_id,
+        },
+        json={"task": "safe test", "require_approval": False},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal Server Error"}
+    assert response.headers["x-correlation-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
+    assert "private provider detail" not in response.text
+
+
+def test_correlation_id_trims_surrounding_whitespace():
+    correlation_id = str(uuid.uuid4())
+    response = client.get(
+        "/health",
+        headers={"X-Correlation-ID": f"  {correlation_id}  "},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+
+
+def test_noncanonical_uuid_correlation_id_is_replaced():
+    correlation_id = str(uuid.uuid4())
+    noncanonical_id = correlation_id.replace("-", "")
+    response = client.get(
+        "/health",
+        headers={"X-Correlation-ID": noncanonical_id},
+    )
+
+    assert response.status_code == 200
+    returned_id = response.headers["x-correlation-id"]
+    assert str(uuid.UUID(returned_id)) == returned_id
+    assert returned_id != noncanonical_id
 
 
 def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
