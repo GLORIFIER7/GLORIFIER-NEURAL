@@ -124,6 +124,22 @@ def test_response_has_separate_unique_request_and_correlation_ids():
     assert second_request_id != second_correlation_id
 
 
+def test_reused_correlation_id_never_reuses_server_request_id():
+    correlation_id = str(uuid.uuid4())
+    first = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+    second = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert first.headers["x-correlation-id"] == correlation_id
+    assert second.headers["x-correlation-id"] == correlation_id
+    first_request_id = first.headers["x-request-id"]
+    second_request_id = second.headers["x-request-id"]
+    assert str(uuid.UUID(first_request_id)) == first_request_id
+    assert str(uuid.UUID(second_request_id)) == second_request_id
+    assert first_request_id != second_request_id
+    assert first_request_id != correlation_id
+    assert second_request_id != correlation_id
+
+
 def test_incoming_correlation_id_is_preserved_and_echoed():
     correlation_id = str(uuid.uuid4())
     response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
