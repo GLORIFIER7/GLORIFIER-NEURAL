@@ -12,6 +12,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from app.database.neon import neon_connection_options
+
 
 RETENTION_DAYS = 30  # Proposed default; production collection still requires approval.
 _ALLOWED_STATUSES = {
@@ -29,8 +31,7 @@ class TaskRunRepository:
     """Store bounded task lifecycle metadata using parameterized SQL only."""
 
     def __init__(self, database_url: str, *, connect_timeout: int = 3) -> None:
-        if not 0 < connect_timeout <= 5:
-            raise ValueError("connect timeout must be between 1 and 5 seconds")
+        neon_connection_options(connect_timeout)
         if not database_url or not database_url.strip():
             raise ValueError("database URL is required")
         self._database_url = database_url.strip()
@@ -105,8 +106,7 @@ class TaskRunRepository:
         try:
             with psycopg.connect(
                 self._database_url,
-                connect_timeout=self._connect_timeout,
-                sslmode="require",
+                **neon_connection_options(self._connect_timeout),
             ) as connection, connection.cursor() as cursor:
                 cursor.execute(
                     """INSERT INTO glorifier.task_runs
@@ -142,8 +142,7 @@ class TaskRunRepository:
         try:
             with psycopg.connect(
                 self._database_url,
-                connect_timeout=self._connect_timeout,
-                sslmode="require",
+                **neon_connection_options(self._connect_timeout),
             ) as connection, connection.cursor() as cursor:
                 cursor.execute(
                     """WITH expired AS (

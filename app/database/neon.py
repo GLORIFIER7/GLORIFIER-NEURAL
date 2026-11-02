@@ -9,17 +9,33 @@ import os
 from urllib.parse import urlparse
 
 
+def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
+    """Return mandatory Neon TLS server-authentication and channel-binding options."""
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 0 < timeout_seconds <= 5
+    ):
+        raise ValueError("Neon connection timeout must be between 1 and 5 seconds")
+    return {
+        "connect_timeout": timeout_seconds,
+        "sslmode": "verify-full",
+        "sslrootcert": "system",
+        "channel_binding": "require",
+    }
+
+
 class NeonConnectivityProbe:
     """Run a bounded TLS-only SELECT 1 against an explicitly configured Neon URL."""
 
     def __init__(self, database_url: str, *, timeout_seconds: int = 3) -> None:
+        neon_connection_options(timeout_seconds)
         parsed = urlparse(database_url)
         if (
             parsed.scheme not in ("postgres", "postgresql")
             or not parsed.hostname
             or parsed.username is None
             or parsed.password is None
-            or not 0 < timeout_seconds <= 5
         ):
             raise ValueError("Neon database URL or timeout is invalid")
         self._database_url = database_url
@@ -45,8 +61,7 @@ class NeonConnectivityProbe:
         try:
             with psycopg.connect(
                 self._database_url,
-                connect_timeout=self._timeout,
-                sslmode="require",
+                **neon_connection_options(self._timeout),
             ) as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 row = cursor.fetchone()
