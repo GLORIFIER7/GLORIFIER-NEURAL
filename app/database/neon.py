@@ -37,7 +37,7 @@ class NeonConnectivityProbe:
             or parsed.username is None
             or parsed.password is None
         ):
-            raise ValueError("Neon database URL is invalid")
+            raise ValueError("Neon database URL or timeout is invalid")
         self._database_url = database_url
         self._timeout = timeout_seconds
 
