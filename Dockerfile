@@ -4,7 +4,8 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY pyproject.toml uv.lock README.md ./
 COPY app ./app
-RUN python -m pip install --no-cache-dir --only-binary=:all: "setuptools>=83.0.0" wheel  && python -m pip install --no-cache-dir --only-binary=:all: "uv>=0.9,<1.0"  && uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.txt  && python -m pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements.txt  && python -m pip install --no-cache-dir --no-build-isolation --no-deps .
+RUN python -m pip install --no-cache-dir --only-binary=:all: "setuptools>=83.0.0" wheel  && python -m pip install --no-cache-dir --only-binary=:all: "uv>=0.9,<1.0"  && uv export --locked --extra neon --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.txt  && python -m pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements.txt  && python -m pip install --no-cache-dir --no-build-isolation --no-deps . \
+  && python -c "import psycopg; assert psycopg.__version__"
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
