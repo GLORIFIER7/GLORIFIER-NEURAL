@@ -191,3 +191,11 @@ def test_task_run_repository_uses_authenticated_tls_for_writes_and_cleanup(monke
     assert "INSERT INTO glorifier.task_runs" in calls[0]["query"]
     assert "DELETE FROM glorifier.task_runs" in calls[1]["query"]
 
+@pytest.mark.parametrize("connect_timeout", [0, -1, 6, True, False, 1.5, "3", None])
+def test_task_run_repository_rejects_invalid_neon_timeouts(connect_timeout):
+    with pytest.raises(ValueError, match="Neon connection timeout"):
+        TaskRunRepository(
+            "postgresql://test.invalid/db",
+            connect_timeout=connect_timeout,
+        )
+
