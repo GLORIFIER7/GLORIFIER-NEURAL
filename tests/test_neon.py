@@ -69,7 +69,12 @@ def test_neon_probe_uses_tls_bounded_connection_and_read_only_query(monkeypatch)
     NeonConnectivityProbe("postgresql://user:pass@example.neon.tech/db").check()
 
     assert calls["query"] == "SELECT 1"
-    assert calls["kwargs"] == {"connect_timeout": 3, "sslmode": "require"}
+    assert calls["kwargs"] == {
+        "connect_timeout": 3,
+        "sslmode": "verify-full",
+        "sslrootcert": "system",
+        "channel_binding": "require",
+    }
     assert calls["dsn"] == "postgresql://user:pass@example.neon.tech/db"
 
 
