@@ -11,7 +11,11 @@ from urllib.parse import urlparse
 
 def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
     """Return mandatory Neon TLS server-authentication and channel-binding options."""
-    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 0 < timeout_seconds <= 5:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 0 < timeout_seconds <= 5
+    ):
         raise ValueError("Neon connection timeout must be between 1 and 5 seconds")
     return {
         "connect_timeout": timeout_seconds,
