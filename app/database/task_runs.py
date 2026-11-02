@@ -31,8 +31,7 @@ class TaskRunRepository:
     """Store bounded task lifecycle metadata using parameterized SQL only."""
 
     def __init__(self, database_url: str, *, connect_timeout: int = 3) -> None:
-        if not 0 < connect_timeout <= 5:
-            raise ValueError("connect timeout must be between 1 and 5 seconds")
+        neon_connection_options(connect_timeout)
         if not database_url or not database_url.strip():
             raise ValueError("database URL is required")
         self._database_url = database_url.strip()
