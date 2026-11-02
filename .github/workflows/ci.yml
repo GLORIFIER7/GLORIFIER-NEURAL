@@ -44,3 +44,5 @@ jobs:
           pip-audit
       - name: Build container image (no publish)
         run: docker build --tag glorifier-neural:ci .
+      - name: Verify runtime image includes the Neon PostgreSQL driver
+        run: docker run --rm --entrypoint python glorifier-neural:ci -c "import psycopg; assert psycopg.__version__"
