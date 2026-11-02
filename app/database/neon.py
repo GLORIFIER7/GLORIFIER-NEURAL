@@ -29,15 +29,15 @@ class NeonConnectivityProbe:
     """Run a bounded TLS-only SELECT 1 against an explicitly configured Neon URL."""
 
     def __init__(self, database_url: str, *, timeout_seconds: int = 3) -> None:
+        neon_connection_options(timeout_seconds)
         parsed = urlparse(database_url)
         if (
             parsed.scheme not in ("postgres", "postgresql")
             or not parsed.hostname
             or parsed.username is None
             or parsed.password is None
-            or not 0 < timeout_seconds <= 5
         ):
-            raise ValueError("Neon database URL or timeout is invalid")
+            raise ValueError("Neon database URL is invalid")
         self._database_url = database_url
         self._timeout = timeout_seconds
 
