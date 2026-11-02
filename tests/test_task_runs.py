@@ -132,3 +132,62 @@ def test_delete_expired_rejects_naive_timestamp():
     repository = TaskRunRepository("postgresql://test.invalid/db")
     with pytest.raises(ValueError, match="timezone-aware"):
         repository.delete_expired(now=datetime(2026, 1, 1))
+
+def test_task_run_repository_uses_authenticated_tls_for_writes_and_cleanup(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params):
+            calls[-1]["query"] = query
+            calls[-1]["params"] = params
+
+        def fetchall(self):
+            return []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    def connect(dsn, **kwargs):
+        calls.append({"dsn": dsn, "kwargs": kwargs})
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=connect))
+    database_url = "postgresql://neural_writer:secret@example.neon.tech/glorifier"
+    repository = TaskRunRepository(database_url)
+
+    repository.record(
+        request_id=str(uuid4()),
+        action_class="read_only",
+        status="NOT VERIFIED",
+        evidence=["execution:none"],
+    )
+    repository.delete_expired(batch_size=5)
+
+    assert len(calls) == 2
+    for call in calls:
+        assert call["dsn"] == database_url
+        assert call["kwargs"] == {
+            "connect_timeout": 3,
+            "sslmode": "verify-full",
+            "sslrootcert": "system",
+            "channel_binding": "require",
+        }
+    assert "INSERT INTO glorifier.task_runs" in calls[0]["query"]
+    assert "DELETE FROM glorifier.task_runs" in calls[1]["query"]
+
