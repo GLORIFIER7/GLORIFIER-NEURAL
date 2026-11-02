@@ -143,8 +143,7 @@ class TaskRunRepository:
         try:
             with psycopg.connect(
                 self._database_url,
-                connect_timeout=self._connect_timeout,
-                sslmode="require",
+                **neon_connection_options(self._connect_timeout),
             ) as connection, connection.cursor() as cursor:
                 cursor.execute(
                     """WITH expired AS (
