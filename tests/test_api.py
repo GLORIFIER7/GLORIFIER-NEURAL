@@ -156,6 +156,20 @@ def test_incoming_correlation_id_is_preserved_and_echoed(correlation_id):
     assert request_id != correlation_id
 
 
+@pytest.mark.parametrize(
+    "correlation_id",
+    ["00000000-0000-0000-0000-000000000000"],
+)
+def test_nil_uuid_correlation_id_is_preserved_and_echoed(correlation_id):
+    response = client.get("/health", headers={"X-Correlation-ID": correlation_id})
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+    request_id = response.headers["x-request-id"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert request_id != correlation_id
+
+
 def test_invalid_correlation_id_is_replaced_with_a_uuid():
     response = client.get("/health", headers={"X-Correlation-ID": "trace-" + ("x" * 200)})
 
