@@ -58,7 +58,7 @@ A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_
 ## Explicit limitations
 
 - NVIDIA NIM is wired through explicit runtime configuration only. Unless `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are all set, requests do not perform inference. A server-side API key is also required; live inference remains NOT VERIFIED until a controlled staging check succeeds.
-- Neon has an optional, read-only connectivity probe. Install `.[neon]`, set `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true` and `NEON_DATABASE_URL` in the deployment secret manager to make `/ready` run a TLS-only, bounded `SELECT 1`. This does not create schemas or write data. The probe is disabled by default and is not proof of application-data readiness.
+- Neon has an optional, read-only connectivity probe. Install `.[neon]`, set `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true` and `NEON_DATABASE_URL` in the deployment secret manager to make `/ready` run a bounded `SELECT 1` using certificate-verified TLS (`sslmode=verify-full`, system trust roots) and required channel binding. This does not create schemas or write data. The probe is disabled by default and is not proof of application-data readiness.
 - No Supabase migration, Neon application-data schema, dual-write, or reconciliation is implemented.
 - Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.
 - No autonomous financial actions, wallet signing, minting, or irreversible production changes are enabled.
