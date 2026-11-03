@@ -497,7 +497,30 @@ def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
     assert events[1].evidence == ("provider:nvidia_nim:error", "execution:failed")
 
 
-def test_readiness_verifies_configured_nvidia_model_without_running_inference(monkeypatch):
+@pytest.mark.parametrize(
+    ("catalogue_data", "expected_status", "expected_provider_status", "expected_readiness_status"),
+    [
+        (
+            [{"id": "meta/llama-3.1-8b-instruct"}],
+            200,
+            "VERIFIED",
+            "READY",
+        ),
+        (
+            [{"id": "another/model"}],
+            503,
+            "DEGRADED",
+            "NOT READY",
+        ),
+    ],
+)
+def test_readiness_checks_configured_nvidia_model_without_inference(
+    monkeypatch,
+    catalogue_data,
+    expected_status,
+    expected_provider_status,
+    expected_readiness_status,
+):
     import json
 
     from app.runtime import build_orchestrator_from_environment
@@ -520,9 +543,7 @@ def test_readiness_verifies_configured_nvidia_model_without_running_inference(mo
             return None
 
         def read(self, _limit):
-            return json.dumps({
-                "data": [{"id": "meta/llama-3.1-8b-instruct"}],
-            }).encode()
+            return json.dumps({"data": catalogue_data}).encode()
 
     def fake_urlopen(request, *, timeout):
         assert request.full_url == "https://integrate.api.nvidia.com/v1/models"
@@ -536,47 +557,10 @@ def test_readiness_verifies_configured_nvidia_model_without_running_inference(mo
 
     response = client.get("/ready")
 
-    assert response.status_code == 200
+    assert response.status_code == expected_status
     body = response.json()
-    assert body["status"] == "READY"
-    assert body["checks"]["providers"] == "VERIFIED"
+    assert body["status"] == expected_readiness_status
+    assert body["checks"]["providers"] == expected_provider_status
     assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
-    assert body["execution"]["inference_performed"] is False
-    assert "readiness-test-secret" not in response.text
-
-
-def test_readiness_fails_when_configured_nvidia_model_is_not_listed(monkeypatch):
-    import json
-
-    from app.runtime import build_orchestrator_from_environment
-
-    monkeypatch.setenv("GLORIFIER_ENABLE_INFERENCE", "true")
-    monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
-    monkeypatch.setenv("GLORIFIER_PROVIDER", "nvidia_nim")
-    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "readiness-test-secret")
-    monkeypatch.setenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
-    monkeypatch.setattr("app.api.orchestrator", build_orchestrator_from_environment())
-    monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda: None)
-
-    class FakeResponse:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def read(self, _limit):
-            return json.dumps({"data": [{"id": "another/model"}]}).encode()
-
-    monkeypatch.setattr("app.providers._open_nvidia_request", lambda *_a, **_k: FakeResponse())
-
-    response = client.get("/ready")
-
-    assert response.status_code == 503
-    body = response.json()
-    assert body["status"] == "NOT READY"
-    assert body["checks"]["providers"] == "DEGRADED"
     assert body["execution"]["inference_performed"] is False
     assert "readiness-test-secret" not in response.text
