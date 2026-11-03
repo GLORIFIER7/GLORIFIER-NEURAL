@@ -39,6 +39,42 @@ class NvidiaNimAdapter(ProviderAdapter):
     def is_configured(self) -> bool:
         return bool(self._api_key and self._model)
 
+    def check_readiness(self) -> None:
+        """Verify the selected model is listed by NVIDIA without submitting inference."""
+        if not self.is_configured():
+            raise RuntimeError("NVIDIA NIM is not configured")
+
+        request = urllib.request.Request(
+            "https://integrate.api.nvidia.com/v1/models",
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=min(self._timeout, 5.0)) as response:
+                if response.status != 200:
+                    raise RuntimeError("NVIDIA NIM readiness endpoint returned an unexpected status")
+                raw = response.read(262_145)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"NVIDIA NIM readiness probe failed with HTTP {exc.code}") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise RuntimeError("NVIDIA NIM readiness endpoint is unavailable") from None
+
+        if len(raw) > 262_144:
+            raise RuntimeError("NVIDIA NIM model catalogue exceeded the response size limit")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("NVIDIA NIM returned an invalid model catalogue") from None
+        models = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(models, list) or not any(
+            isinstance(model, dict) and model.get("id") == self._model
+            for model in models
+        ):
+            raise RuntimeError("Configured NVIDIA NIM model is not present in the available model catalogue")
+
     def infer(self, prompt: str, *, timeout_seconds: float = 30.0) -> InferenceResult:
         if not self.is_configured():
             raise RuntimeError("NVIDIA NIM is not configured")
