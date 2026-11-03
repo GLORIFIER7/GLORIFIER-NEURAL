@@ -1,6 +1,13 @@
+from collections.abc import Callable
+import threading
+import time
+
 from app.policy import evaluate_task
 from app.providers.base import InferenceResult
 from app.providers.registry import ProviderRegistry
+
+
+_READINESS_CACHE_TTL_SECONDS = 30.0
 from app.schemas import TaskRequest, TaskResponse
 
 
@@ -17,8 +24,25 @@ class Orchestrator:
         self._providers = providers or ProviderRegistry()
         self._allow_inference = allow_inference
         self._provider_name = provider_name
+        self._readiness_lock = threading.Lock()
+        self._readiness_cache: tuple[float, tuple[str, str]] | None = None
 
     def check_readiness(self) -> tuple[str, str]:
+        """Return a short-lived cached provider check to protect the upstream credential."""
+        with self._readiness_lock:
+            now = time.monotonic()
+            if (
+                self._readiness_cache is not None
+                and now - self._readiness_cache[0] < _READINESS_CACHE_TTL_SECONDS
+            ):
+                return self._readiness_cache[1]
+
+            result = self._probe_readiness()
+            # Start the TTL after the potentially slow upstream request completes.
+            self._readiness_cache = (time.monotonic(), result)
+            return result
+
+    def _probe_readiness(self) -> tuple[str, str]:
         """Probe the selected provider without sending task content or running inference."""
         if not self._allow_inference:
             return "NOT VERIFIED", "Provider inference is disabled by configuration."
@@ -30,8 +54,9 @@ class Orchestrator:
         probe = getattr(provider, "check_readiness", None)
         if not callable(probe):
             return "NOT VERIFIED", "The selected provider has no read-only readiness probe."
+        readiness_probe: Callable[[], None] = probe
         try:
-            probe()
+            readiness_probe()
         except Exception as exc:  # noqa: BLE001 - readiness must not leak credentials or endpoints
             return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
         return "VERIFIED", "Configured provider passed its read-only model availability probe."
