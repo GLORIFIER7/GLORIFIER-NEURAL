@@ -1,0 +1,198 @@
+"""Regression coverage for fail-closed provider and database readiness."""
+
+import urllib.error
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api import app
+from app.orchestrator import Orchestrator
+from app.providers import NvidiaNimAdapter
+from app.providers.base import InferenceResult, ProviderAdapter
+from app.providers.registry import ProviderRegistry
+
+
+class ReadinessProvider(ProviderAdapter):
+    name = "fake"
+
+    def __init__(self, *, configured: bool = True, fail: bool = False) -> None:
+        self.configured = configured
+        self.fail = fail
+        self.readiness_calls = 0
+
+    def is_configured(self) -> bool:
+        return self.configured
+
+    def check_readiness(self) -> None:
+        self.readiness_calls += 1
+        if self.fail:
+            raise RuntimeError("sensitive endpoint and credential details")
+
+    def infer(self, prompt: str, *, timeout_seconds: float = 30.0) -> InferenceResult:
+        raise AssertionError("readiness must never invoke inference")
+
+
+def test_readiness_stays_unverified_when_provider_inference_is_disabled():
+    registry = ProviderRegistry()
+    provider = ReadinessProvider()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=False, provider_name="fake"
+    )
+
+    status, message = orchestrator.check_readiness()
+
+    assert status == "NOT VERIFIED"
+    assert "disabled" in message
+    assert provider.readiness_calls == 0
+
+
+def test_readiness_stays_unverified_without_an_explicit_provider_selection():
+    orchestrator = Orchestrator(
+        ProviderRegistry(), allow_inference=True, provider_name=None
+    )
+
+    status, message = orchestrator.check_readiness()
+
+    assert status == "NOT VERIFIED"
+    assert "selected" in message
+
+
+def test_readiness_stays_unverified_for_an_unconfigured_provider():
+    registry = ProviderRegistry()
+    provider = ReadinessProvider(configured=False)
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    status, message = orchestrator.check_readiness()
+
+    assert status == "NOT VERIFIED"
+    assert "not configured" in message
+    assert provider.readiness_calls == 0
+
+
+def test_provider_readiness_failure_is_sanitized():
+    registry = ProviderRegistry()
+    provider = ReadinessProvider(fail=True)
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    status, message = orchestrator.check_readiness()
+
+    assert status == "DEGRADED"
+    assert "RuntimeError" in message
+    assert "sensitive endpoint" not in message
+    assert "credential" not in message
+    assert provider.readiness_calls == 1
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        urllib.error.URLError("sensitive upstream detail"),
+        TimeoutError("sensitive timeout detail"),
+        OSError("sensitive socket detail"),
+    ],
+)
+def test_nvidia_readiness_sanitizes_network_and_timeout_failures(monkeypatch, failure):
+    def fail_request(_request, *, timeout):
+        assert timeout <= 5
+        raise failure
+
+    monkeypatch.setattr("app.providers._open_nvidia_request", fail_request)
+    adapter = NvidiaNimAdapter(api_key="readiness-secret")
+
+    with pytest.raises(RuntimeError, match="unavailable") as exc_info:
+        adapter.check_readiness()
+
+    assert "readiness-secret" not in str(exc_info.value)
+    assert "sensitive" not in str(exc_info.value)
+
+
+def test_nvidia_readiness_sanitizes_http_failures(monkeypatch):
+    def fail_request(request, *, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 503, "sensitive upstream detail", {}, None
+        )
+
+    monkeypatch.setattr("app.providers._open_nvidia_request", fail_request)
+    adapter = NvidiaNimAdapter(api_key="readiness-secret")
+
+    with pytest.raises(RuntimeError, match="HTTP 503") as exc_info:
+        adapter.check_readiness()
+
+    assert "readiness-secret" not in str(exc_info.value)
+    assert "sensitive upstream detail" not in str(exc_info.value)
+
+
+class _FakeCatalogueResponse:
+    status = 200
+
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+        self.requested_limit = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self, limit: int) -> bytes:
+        self.requested_limit = limit
+        return self.body
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_message"),
+    [
+        (b"{not-json", "invalid model catalogue"),
+        (b"x" * 262_145, "exceeded the response size limit"),
+        (b'{"data": "not-a-list"}', "not present in the available model catalogue"),
+    ],
+)
+def test_nvidia_readiness_rejects_malformed_or_oversized_catalogues(
+    monkeypatch, body, expected_message
+):
+    response = _FakeCatalogueResponse(body)
+    monkeypatch.setattr(
+        "app.providers._open_nvidia_request",
+        lambda _request, *, timeout: response,
+    )
+    adapter = NvidiaNimAdapter(api_key="readiness-secret")
+
+    with pytest.raises(RuntimeError, match=expected_message):
+        adapter.check_readiness()
+
+    assert response.requested_limit == 262_145
+
+
+def test_failed_explicit_neon_probe_blocks_provider_readiness(monkeypatch):
+    class ReadyOrchestrator:
+        def check_readiness(self):
+            return "VERIFIED", "provider probe passed"
+
+    class FailingNeonProbe:
+        def check(self):
+            raise RuntimeError("sensitive Neon hostname and password")
+
+    monkeypatch.setattr("app.api.orchestrator", ReadyOrchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        lambda: FailingNeonProbe(),
+    )
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "NOT READY"
+    assert body["checks"]["providers"] == "VERIFIED"
+    assert body["checks"]["database"] == "DEGRADED"
+    assert body["execution"]["inference_performed"] is False
+    assert "sensitive Neon hostname" not in response.text
+    assert "password" not in response.text
