@@ -125,12 +125,15 @@ def health() -> HealthResponse:
 
 @app.get("/ready", tags=["operations"])
 def readiness() -> JSONResponse:
-    """Return 503 until provider readiness is verified.
+    """Probe provider availability without running inference.
 
-    A configured Neon probe is read-only and opt-in. A successful database probe
-    alone does not make the service ready while provider readiness is unverified.
+    A configured Neon probe is read-only and opt-in. Database connectivity is
+    optional for this starter API; when explicitly enabled, a failed probe
+    blocks readiness. Provider readiness uses the adapter's documented
+    read-only availability check and never transmits task content.
     """
-    database_status = NOT_VERIFIED
+    provider_status, provider_message = orchestrator.check_readiness()
+    database_status = "NOT CONFIGURED (OPTIONAL)"
     try:
         probe = NeonConnectivityProbe.from_environment()
         if probe is not None:
@@ -139,21 +142,29 @@ def readiness() -> JSONResponse:
     except Exception:  # noqa: BLE001 - readiness must not leak connection details
         database_status = "DEGRADED"
 
+    ready = provider_status == "VERIFIED" and database_status != "DEGRADED"
     return JSONResponse(
-        status_code=503,
+        status_code=200 if ready else 503,
         content={
-            "status": "NOT READY",
+            "status": "READY" if ready else "NOT READY",
             "checks": {
-                "providers": NOT_VERIFIED,
+                "providers": provider_status,
                 "database": database_status,
             },
+            "requirements": {
+                "database": "optional",
+            },
+            "execution": {
+                "inference_performed": False,
+            },
             "message": (
-                "Provider readiness is not verified; database status reflects only "
-                "an opt-in connectivity probe."
+                "The configured provider passed a read-only availability probe; "
+                "no inference was performed."
+                if ready
+                else provider_message
             ),
         },
     )
-
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
 def run_task(
