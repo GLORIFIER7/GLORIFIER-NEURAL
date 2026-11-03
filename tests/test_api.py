@@ -532,7 +532,7 @@ def test_readiness_verifies_configured_nvidia_model_without_running_inference(mo
         assert timeout <= 5
         return FakeResponse()
 
-    monkeypatch.setattr("app.providers.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.providers._open_nvidia_request", fake_urlopen)
 
     response = client.get("/ready")
 
@@ -570,7 +570,7 @@ def test_readiness_fails_when_configured_nvidia_model_is_not_listed(monkeypatch)
         def read(self, _limit):
             return json.dumps({"data": [{"id": "another/model"}]}).encode()
 
-    monkeypatch.setattr("app.providers.urllib.request.urlopen", lambda *_a, **_k: FakeResponse())
+    monkeypatch.setattr("app.providers._open_nvidia_request", lambda *_a, **_k: FakeResponse())
 
     response = client.get("/ready")
 
