@@ -13,6 +13,18 @@ import urllib.request
 from app.providers.base import InferenceResult, ProviderAdapter
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so bearer credentials cannot be forwarded to another host."""
+
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def _open_nvidia_request(request: urllib.request.Request, *, timeout: float):
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    return opener.open(request, timeout=timeout)
+
+
 class NvidiaNimAdapter(ProviderAdapter):
     """Minimal OpenAI-compatible NVIDIA NIM chat-completions adapter."""
 
@@ -53,7 +65,7 @@ class NvidiaNimAdapter(ProviderAdapter):
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=min(self._timeout, 5.0)) as response:
+            with _open_nvidia_request(request, timeout=min(self._timeout, 5.0)) as response:
                 if response.status != 200:
                     raise RuntimeError("NVIDIA NIM readiness endpoint returned an unexpected status")
                 raw = response.read(262_145)
@@ -100,7 +112,7 @@ class NvidiaNimAdapter(ProviderAdapter):
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=min(timeout_seconds, self._timeout)) as response:
+            with _open_nvidia_request(request, timeout=min(timeout_seconds, self._timeout)) as response:
                 if response.status != 200:
                     raise RuntimeError("NVIDIA NIM returned an unexpected status")
                 raw = response.read(1_000_001)
