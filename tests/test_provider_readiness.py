@@ -194,5 +194,33 @@ def test_failed_explicit_neon_probe_blocks_provider_readiness(monkeypatch):
     assert body["checks"]["providers"] == "VERIFIED"
     assert body["checks"]["database"] == "DEGRADED"
     assert body["execution"]["inference_performed"] is False
+    assert "database connectivity probe failed" in body["message"]
     assert "sensitive Neon hostname" not in response.text
     assert "password" not in response.text
+
+
+def test_provider_readiness_is_cached_for_thirty_seconds(monkeypatch):
+    import time
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    registry = ProviderRegistry()
+    provider = ReadinessProvider()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    first = orchestrator.check_readiness()
+    clock[0] += 10.0
+    second = orchestrator.check_readiness()
+
+    assert first == second
+    assert provider.readiness_calls == 1
+
+    clock[0] += 21.0
+    third = orchestrator.check_readiness()
+
+    assert third == first
+    assert provider.readiness_calls == 2
