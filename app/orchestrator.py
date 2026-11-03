@@ -18,6 +18,24 @@ class Orchestrator:
         self._allow_inference = allow_inference
         self._provider_name = provider_name
 
+    def check_readiness(self) -> tuple[str, str]:
+        """Probe the selected provider without sending task content or running inference."""
+        if not self._allow_inference:
+            return "NOT VERIFIED", "Provider inference is disabled by configuration."
+        if not self._provider_name:
+            return "NOT VERIFIED", "No provider was explicitly selected."
+        provider = self._providers.get(self._provider_name)
+        if provider is None:
+            return "NOT VERIFIED", "The selected provider is not configured."
+        probe = getattr(provider, "check_readiness", None)
+        if not callable(probe):
+            return "NOT VERIFIED", "The selected provider has no read-only readiness probe."
+        try:
+            probe()
+        except Exception as exc:  # noqa: BLE001 - readiness must not leak credentials or endpoints
+            return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
+        return "VERIFIED", "Configured provider passed its read-only model availability probe."
+
     def run(self, request: TaskRequest) -> TaskResponse:
         decision = evaluate_task(
             require_approval=request.require_approval,
