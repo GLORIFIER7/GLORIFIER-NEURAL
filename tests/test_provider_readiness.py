@@ -282,6 +282,31 @@ def test_failed_explicit_neon_probe_blocks_provider_readiness(monkeypatch):
     assert "password" not in response.text
 
 
+def test_successful_explicit_neon_probe_allows_provider_readiness(monkeypatch):
+    class ReadyOrchestrator:
+        def check_readiness(self):
+            return "VERIFIED", "provider probe passed"
+
+    class SuccessfulNeonProbe:
+        def check(self):
+            return None
+
+    monkeypatch.setattr("app.api.orchestrator", ReadyOrchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        lambda: SuccessfulNeonProbe(),
+    )
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "READY"
+    assert body["checks"]["providers"] == "VERIFIED"
+    assert body["checks"]["database"] == "VERIFIED"
+    assert body["execution"]["inference_performed"] is False
+
+
 def test_provider_readiness_is_cached_for_thirty_seconds(monkeypatch):
     import time
 

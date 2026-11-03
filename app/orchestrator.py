@@ -5,10 +5,10 @@ import time
 from app.policy import evaluate_task
 from app.providers.base import InferenceResult
 from app.providers.registry import ProviderRegistry
+from app.schemas import TaskRequest, TaskResponse
 
 
 _READINESS_CACHE_TTL_SECONDS = 30.0
-from app.schemas import TaskRequest, TaskResponse
 
 
 class Orchestrator:

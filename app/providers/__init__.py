@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -23,6 +24,36 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 def _open_nvidia_request(request: urllib.request.Request, *, timeout: float):
     opener = urllib.request.build_opener(_NoRedirectHandler())
     return opener.open(request, timeout=timeout)
+
+
+def _read_response_before_deadline(
+    response,
+    *,
+    deadline: float,
+    max_bytes: int,
+) -> bytes:
+    """Read a bounded HTTP body while applying the remaining absolute deadline."""
+    response_file = getattr(response, "fp", None)
+    raw_stream = getattr(response_file, "raw", None)
+    response_socket = getattr(raw_stream, "_sock", None)
+    read_once = getattr(response, "read1", None)
+    if response_socket is None or not callable(read_once):
+        raise OSError("NVIDIA NIM response does not expose a deadline-capable stream")
+
+    body = bytearray()
+    while len(body) < max_bytes + 1:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("NVIDIA NIM readiness probe exceeded its deadline")
+        response_socket.settimeout(remaining)
+        chunk = read_once(min(8_192, max_bytes + 1 - len(body)))
+        if not chunk:
+            break
+        body.extend(chunk)
+
+    if time.monotonic() > deadline:
+        raise TimeoutError("NVIDIA NIM readiness probe exceeded its deadline")
+    return bytes(body)
 
 
 class NvidiaNimAdapter(ProviderAdapter):
@@ -64,11 +95,20 @@ class NvidiaNimAdapter(ProviderAdapter):
                 "Accept": "application/json",
             },
         )
+        timeout = min(self._timeout, 5.0)
+        deadline = time.monotonic() + timeout
         try:
-            with _open_nvidia_request(request, timeout=min(self._timeout, 5.0)) as response:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NVIDIA NIM readiness probe exceeded its deadline")
+            with _open_nvidia_request(request, timeout=remaining) as response:
                 if response.status != 200:
                     raise RuntimeError("NVIDIA NIM readiness endpoint returned an unexpected status")
-                raw = response.read(262_145)
+                raw = _read_response_before_deadline(
+                    response,
+                    deadline=deadline,
+                    max_bytes=262_144,
+                )
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"NVIDIA NIM readiness probe failed with HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError):
