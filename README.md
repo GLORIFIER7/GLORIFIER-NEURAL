@@ -5,7 +5,7 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI.
 ## Current capabilities
 
 - FastAPI liveness/status endpoint at `GET /health`.
-- Fail-closed readiness endpoint at `GET /ready` (HTTP 503 until provider and database integrations are implemented and verified).
+- Evidence-based readiness endpoint at `GET /ready`: it returns HTTP 200 only after the explicitly enabled provider passes its read-only model-availability probe; missing or failed providers return HTTP 503. Neon connectivity is an optional, separately reported read-only check.
 - Task request/response schemas with input limits, including a bounded action-class field.
 - Enforces a 64 KiB request-body limit against both the declared `Content-Length` and streamed ASGI body chunks; keep a matching limit at the reverse proxy as defense in depth.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
@@ -39,7 +39,7 @@ pytest
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from integrations that are not implemented. `/ready` returns HTTP 503 while required provider and database integrations remain unverified; this prevents a deployment orchestrator from mistaking a running process for a ready service. Current provider and database checks are `NOT VERIFIED`, not healthy.
+Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only check against the explicitly configured provider; for NVIDIA NIM it queries `GET https://integrate.api.nvidia.com/v1/models` and requires the selected model ID to be present. This does not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. With no provider configured, `/ready` remains HTTP 503.
 
 ## API access
 
@@ -58,7 +58,8 @@ A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_
 ## Explicit limitations
 
 - NVIDIA NIM is wired through explicit runtime configuration only. Unless `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are all set, requests do not perform inference. A server-side API key is also required; live inference remains NOT VERIFIED until a controlled staging check succeeds.
-- Neon has an optional, read-only connectivity probe. Install `.[neon]` for local execution (the Docker image includes this extra), set `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true` and `NEON_DATABASE_URL` in the deployment secret manager to make `/ready` run a bounded `SELECT 1` using certificate-verified TLS (`sslmode=verify-full`, system trust roots) and required channel binding. This does not create schemas or write data. The probe is disabled by default and is not proof of application-data readiness.
+- NVIDIA NIM readiness uses a bounded, authenticated `GET /v1/models` request and verifies the configured model ID is available. This proves model-catalog reachability only, not inference quality, latency, capacity, SLA, or factual correctness. Actual inference remains a separate controlled staging check. The NVIDIA key is used only server-side and readiness never sends task content.
+- Neon has an optional, read-only connectivity probe. Install `.[neon]` for local execution (the Docker image includes this extra), set `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true` and `NEON_DATABASE_URL` in the deployment secret manager to make `/ready` run a bounded `SELECT 1` using certificate-verified TLS (`sslmode=verify-full`, system trust roots) and required channel binding. This does not create schemas or write data. The probe is disabled by default and is not proof of application-data readiness. The audit database integration remains optional and must be separately verified before it is treated as operational.
 - No Supabase migration, Neon application-data schema, dual-write, or reconciliation is implemented.
 - Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.
 - No autonomous financial actions, wallet signing, minting, or irreversible production changes are enabled.
