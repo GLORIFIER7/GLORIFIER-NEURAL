@@ -1,6 +1,7 @@
 """Regression coverage for fail-closed provider and database readiness."""
 
 import urllib.error
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -129,12 +130,23 @@ def test_nvidia_readiness_sanitizes_http_failures(monkeypatch):
     assert "sensitive upstream detail" not in str(exc_info.value)
 
 
+class _FakeSocket:
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+
 class _FakeCatalogueResponse:
     status = 200
 
     def __init__(self, body: bytes) -> None:
         self.body = body
-        self.requested_limit = None
+        self.requested_limits: list[int] = []
+        self.bytes_read = 0
+        self.socket = _FakeSocket()
+        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
 
     def __enter__(self):
         return self
@@ -142,9 +154,15 @@ class _FakeCatalogueResponse:
     def __exit__(self, *_args):
         return None
 
+    def read1(self, limit: int) -> bytes:
+        self.requested_limits.append(limit)
+        chunk = self.body[:limit]
+        self.body = self.body[len(chunk):]
+        self.bytes_read += len(chunk)
+        return chunk
+
     def read(self, limit: int) -> bytes:
-        self.requested_limit = limit
-        return self.body
+        return self.read1(limit)
 
 
 @pytest.mark.parametrize(
@@ -168,7 +186,72 @@ def test_nvidia_readiness_rejects_malformed_or_oversized_catalogues(
     with pytest.raises(RuntimeError, match=expected_message):
         adapter.check_readiness()
 
-    assert response.requested_limit == 262_145
+    assert response.bytes_read == min(len(body), 262_145)
+    assert all(0 < limit <= 8_192 for limit in response.requested_limits)
+
+
+def test_nvidia_readiness_enforces_one_absolute_deadline(monkeypatch):
+    import time
+
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    class SlowSocket:
+        def __init__(self):
+            self.timeouts = []
+            self.current_timeout = None
+
+        def settimeout(self, timeout):
+            self.current_timeout = timeout
+            self.timeouts.append(timeout)
+
+    class SlowResponse:
+        status = 200
+
+        def __init__(self):
+            self.socket = SlowSocket()
+            self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _limit):
+            # The old one-shot read allowed the five-second budget to be exceeded.
+            clock[0] += 6.0
+            return b'{"data":[{"id":"meta/llama-3.1-8b-instruct"}]}'
+
+        def read1(self, _limit):
+            # The upstream trickles data every two seconds. The second read must
+            # time out because only one second remains in the absolute budget.
+            timeout = self.socket.current_timeout
+            delay = 2.0
+            if delay > timeout:
+                clock[0] += timeout
+                raise TimeoutError("simulated slow upstream")
+            clock[0] += delay
+            return b"{"
+
+    response = SlowResponse()
+
+    def open_after_connection_delay(_request, *, timeout):
+        assert timeout <= 5.0
+        clock[0] += 2.0  # connection and response headers consume the same deadline
+        return response
+
+    monkeypatch.setattr(
+        "app.providers._open_nvidia_request",
+        open_after_connection_delay,
+    )
+    adapter = NvidiaNimAdapter(api_key="readiness-secret")
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        adapter.check_readiness()
+
+    assert response.socket.timeouts == pytest.approx([3.0, 1.0])
+    assert clock[0] == pytest.approx(105.0)
 
 
 def test_failed_explicit_neon_probe_blocks_provider_readiness(monkeypatch):

@@ -5,9 +5,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.orchestrator import Orchestrator
 
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def isolated_readiness(monkeypatch):
+    """Keep basic readiness API tests independent of deployment environment secrets."""
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        classmethod(lambda _cls: None),
+    )
 
 
 def test_health_does_not_overclaim_dependencies():
@@ -19,7 +30,7 @@ def test_health_does_not_overclaim_dependencies():
     assert body["checks"]["database"] == "NOT VERIFIED"
 
 
-def test_readiness_fails_closed_while_integrations_are_missing():
+def test_readiness_fails_closed_while_integrations_are_missing(isolated_readiness):
     response = client.get("/ready")
     assert response.status_code == 503
     body = response.json()
@@ -222,7 +233,7 @@ def test_task_endpoint_rejects_blank_task(monkeypatch):
     assert response.status_code == 422
 
 
-def test_readiness_response_has_security_headers():
+def test_readiness_response_has_security_headers(isolated_readiness):
     response = client.get("/ready")
     assert response.status_code == 503
     assert response.headers["x-content-type-options"] == "nosniff"
@@ -230,7 +241,7 @@ def test_readiness_response_has_security_headers():
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_readiness_does_not_claim_database_or_provider_health():
+def test_readiness_does_not_claim_database_or_provider_health(isolated_readiness):
     response = client.get("/ready")
     body = response.json()
     assert body["status"] == "NOT READY"
