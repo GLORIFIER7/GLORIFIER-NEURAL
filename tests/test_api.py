@@ -544,8 +544,22 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
     monkeypatch.setattr("app.api.orchestrator", build_orchestrator_from_environment())
     monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda: None)
 
+    from types import SimpleNamespace
+
+    class FakeSocket:
+        def __init__(self):
+            self.timeouts = []
+
+        def settimeout(self, timeout):
+            self.timeouts.append(timeout)
+
     class FakeResponse:
         status = 200
+
+        def __init__(self):
+            self.body = json.dumps({"data": catalogue_data}).encode()
+            self.socket = FakeSocket()
+            self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
 
         def __enter__(self):
             return self
@@ -553,8 +567,10 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
         def __exit__(self, *_args):
             return None
 
-        def read(self, _limit):
-            return json.dumps({"data": catalogue_data}).encode()
+        def read1(self, limit):
+            chunk = self.body[:limit]
+            self.body = self.body[len(chunk):]
+            return chunk
 
     def fake_urlopen(request, *, timeout):
         assert request.full_url == "https://integrate.api.nvidia.com/v1/models"
