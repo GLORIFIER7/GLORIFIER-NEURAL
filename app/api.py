@@ -161,7 +161,12 @@ def readiness() -> JSONResponse:
                 "The configured provider passed a read-only availability probe; "
                 "no inference was performed."
                 if ready
-                else provider_message
+                else (
+                    "The explicitly enabled database connectivity probe failed; "
+                    "provider availability is verified."
+                    if provider_status == "VERIFIED" and database_status == "DEGRADED"
+                    else provider_message
+                )
             ),
         },
     )
