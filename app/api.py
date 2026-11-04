@@ -307,6 +307,7 @@ async def readiness(request: Request) -> JSONResponse:
     auth_status = "NOT REQUIRED (LOCAL)"
     task_rate_limit_status = "NOT REQUIRED (LOCAL)"
     readiness_rate_limit_status = "NOT REQUIRED (LOCAL)"
+    rate_limit_status = "NOT REQUIRED (LOCAL)"
     if worker_request:
         auth_status = "VERIFIED" if _request_environment_value(request, "GLORIFIER_API_TOKEN") else "DEGRADED"
         task_rate_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
