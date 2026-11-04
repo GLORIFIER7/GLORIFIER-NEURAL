@@ -130,6 +130,9 @@ def test_worker_neon_probe_uses_pg8000_with_verified_tls(monkeypatch):
         def fetchone(self):
             return (1,)
 
+        def close(self):
+            calls["cursor_closed"] = True
+
     class Connection:
         def cursor(self):
             return Cursor()
@@ -185,3 +188,51 @@ def test_worker_neon_configuration_uses_task_run_opt_in_and_request_bindings():
 
     assert probe is not None
     assert probe._database_url == env["NEON_DATABASE_URL"]
+
+
+def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
+    calls = {}
+
+    class Cursor:
+        def execute(self, query):
+            calls["query"] = query
+
+        def fetchone(self):
+            return (1,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            calls["closed"] = True
+
+    def connect(**kwargs):
+        calls["kwargs"] = kwargs
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
+    hyperdrive = types.SimpleNamespace(
+        user="neon_readonly",
+        password="bound-secret",
+        host="hyperdrive.internal",
+        port="5432",
+        database="glorifier",
+    )
+    probe = NeonConnectivityProbe.from_environment(
+        {
+            "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
+            "NEON_READONLY": hyperdrive,
+        }
+    )
+
+    probe.check_worker()
+
+    assert calls["kwargs"]["host"] == "hyperdrive.internal"
+    assert calls["kwargs"]["database"] == "glorifier"
+    assert calls["kwargs"]["ssl_context"] is False
+    assert calls["query"] == "SELECT 1"
+    assert calls["closed"] is True
