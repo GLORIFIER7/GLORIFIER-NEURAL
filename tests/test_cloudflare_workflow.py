@@ -77,7 +77,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
     # Dependabot may update the immutable action commit; pinning is the invariant.
     for artifact_action in ("upload-artifact", "download-artifact"):
         action_pin = re.search(
-            rf"(?m)^\\s+uses:\\s+actions/{re.escape(artifact_action)}@[0-9a-f]{{40}}(?:\\s+#.*)?$",
+            rf"(?m)^\s+uses:\s+actions/{re.escape(artifact_action)}@[0-9a-f]{{40}}(?:\s+#.*)?$",
             workflow,
         )
         assert action_pin is not None, (
