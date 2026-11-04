@@ -33,11 +33,18 @@ _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_.:-]{0,79}$")
 class TaskRunRepository:
     """Store bounded task lifecycle metadata using parameterized SQL only."""
 
-    def __init__(self, database_url: str, *, connect_timeout: int = 3) -> None:
+    def __init__(
+        self,
+        database_url: str | None,
+        *,
+        hyperdrive=None,
+        connect_timeout: int = 3,
+    ) -> None:
         neon_connection_options(connect_timeout)
-        if not database_url or not database_url.strip():
-            raise ValueError("database URL is required")
-        self._database_url = database_url.strip()
+        if (not database_url or not database_url.strip()) and hyperdrive is None:
+            raise ValueError("database URL or Hyperdrive binding is required")
+        self._database_url = database_url.strip() if database_url else None
+        self._hyperdrive = hyperdrive
         self._connect_timeout = connect_timeout
 
     @classmethod
@@ -56,9 +63,13 @@ class TaskRunRepository:
         if not enabled:
             return None
         url = value("NEON_DATABASE_URL").strip()
-        if not url:
-            raise ValueError("Neon task-run persistence is enabled but its URL is missing")
-        return cls(url)
+        if isinstance(environment, Mapping):
+            hyperdrive = environment.get("NEON_WRITE")
+        else:
+            hyperdrive = getattr(environment, "NEON_WRITE", None) if environment is not None else None
+        if not url and hyperdrive is None:
+            raise ValueError("Neon task-run persistence is enabled but its URL or write Hyperdrive binding is missing")
+        return cls(url or None, hyperdrive=hyperdrive)
 
     @staticmethod
     def validate_record(
@@ -136,6 +147,7 @@ class TaskRunRepository:
     def record_worker(
         self, *, request_id: str, action_class: str, status: str,
         provider: str | None = None, evidence: list[str] | None = None,
+        hyperdrive=None,
     ) -> None:
         """Write and read back metadata through pg8000 on Cloudflare Python Workers."""
         values = self.validate_record(
@@ -151,16 +163,28 @@ class TaskRunRepository:
             raise RuntimeError("Neon task-run driver is not installed") from None
 
         try:
-            parsed = urlparse(self._database_url)
-            connection = pg8000.connect(
-                user=parsed.username,
-                password=parsed.password,
-                host=parsed.hostname,
-                port=parsed.port or 5432,
-                database=parsed.path.lstrip("/"),
-                ssl_context=ssl.create_default_context(),
-                timeout=self._connect_timeout,
-            )
+            selected_hyperdrive = hyperdrive or self._hyperdrive
+            if selected_hyperdrive is not None:
+                connection = pg8000.connect(
+                    user=str(selected_hyperdrive.user),
+                    password=str(selected_hyperdrive.password),
+                    host=str(selected_hyperdrive.host),
+                    port=int(selected_hyperdrive.port),
+                    database=str(selected_hyperdrive.database),
+                    ssl_context=False,
+                    timeout=self._connect_timeout,
+                )
+            else:
+                parsed = urlparse(self._database_url)
+                connection = pg8000.connect(
+                    user=parsed.username,
+                    password=parsed.password,
+                    host=parsed.hostname,
+                    port=parsed.port or 5432,
+                    database=parsed.path.lstrip("/"),
+                    ssl_context=ssl.create_default_context(),
+                    timeout=self._connect_timeout,
+                )
             try:
                 cursor = connection.cursor()
                 try:
