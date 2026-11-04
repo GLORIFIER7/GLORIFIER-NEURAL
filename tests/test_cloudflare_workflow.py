@@ -48,6 +48,10 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
     assert 'WORKER_APP = WORKER_ROOT / "neural_app" / "app"' in preparation_script
 
     required_runtime_checks = (
+        "uv lock --check",
+        "Commit initial dependency lock to this repository's PR branch",
+        'git push origin "HEAD:refs/heads/${BRANCH}"',
+        "contents: write",
         "uv sync --locked --group dev --no-install-project",
         "Prepare Neural application source as local Worker dependency",
         "python prepare_worker.py",
@@ -61,3 +65,6 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
+
+    assert "Upload the generated Cloudflare lockfile for review" not in workflow
+    assert "Download the exact dependency lock validated by the build job" not in workflow
