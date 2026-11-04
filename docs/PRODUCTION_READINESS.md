@@ -30,7 +30,7 @@ The account-wide `All Workers` Access application remains enabled and still prot
 
 These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Public `GET /ready` is protected by a separate Cloudflare-native per-client rate limiter and a 30-second cache for provider/database probes. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
 
-Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. The latest live `GET /ready` probe returned HTTP 503, but the current fetch did not expose its response body, so the reason cannot be asserted from that probe. The latest structured failing smoke result (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546)) reported `providers: NOT VERIFIED`, `database: DEGRADED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. Do not describe this as verified provider-disabled safe mode until a fresh structured response proves all safe-mode conditions.
+Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. The latest rerun of the production smoke job (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) returned HTTP 503 from `/ready` with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. The smoke job passed the strict provider-disabled safe-mode branch. This is deployed safe mode, not provider readiness.
 
 ## Cloudflare variables and secrets
 
@@ -57,7 +57,7 @@ The readiness probe performs a read-only `GET /v1/models` request. It does not s
 
 ### Neon task-run writes (optional)
 
-The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The latest detailed smoke response reported `database: DEGRADED`, and a later live `/ready` probe returned HTTP 503 without an inspectable body. Database readiness must therefore remain unverified until a fresh structured probe succeeds. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
+The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The latest structured production smoke rerun reported `database: VERIFIED`; the HTTP 503 readiness status was due to `providers: NOT VERIFIED` while inference was disabled. The probe remains read-only and does not verify application-data reads/writes. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
 
 To enable task-run persistence:
 
@@ -89,7 +89,7 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest detailed production observation did not meet the safe-mode branch because the database check was degraded. Re-run the smoke check and retain the 503 failure until a structured response verifies database, authentication, rate-limit, and inference-disabled conditions.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest production smoke rerun met the strict provider-disabled safe-mode branch: database, authentication, and rate-limit checks were VERIFIED, with `inference_performed=false`. Retain HTTP 503 as the correct non-provider-ready status until provider readiness is configured and verified.
 
 ## Rate limiting
 
@@ -99,8 +99,8 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 - Latest Cloudflare deployment record observed at `2026-11-04T13:24:33Z`; source was the dashboard and 100% of production traffic was assigned to version `3481f2ac-2207-4b30-9858-32ad4bff8f0a`.
 - `/health`: HTTP 200; process liveness verified only.
-- `/ready`: latest live probe returned HTTP 503; the current fetch did not expose its structured JSON body.
-- The latest structured failing smoke result (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546)) reported providers `NOT VERIFIED`, database `DEGRADED`, authentication `VERIFIED`, rate limit `VERIFIED`, and `inference_performed=false`.
+- `/ready`: HTTP 503 because provider readiness is `NOT VERIFIED`.
+- The successful smoke rerun (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) reported database `VERIFIED`, authentication `VERIFIED`, rate limit `VERIFIED`, providers `NOT VERIFIED`, and `inference_performed=false`; the strict provider-disabled safe-mode branch passed.
 - Cloudflare settings expose a `GLORIFIER_API_TOKEN` secret binding and a secret binding named `NVIDIA_NIM_API_KEY`. Secret values and credential validity are not observable from the binding inventory.
 - Provider inference remains unverified; optional audit and task-run persistence are not configured.
 
