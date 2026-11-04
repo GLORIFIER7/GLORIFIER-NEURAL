@@ -339,14 +339,14 @@ async def readiness(request: Request) -> JSONResponse:
                 "no inference was performed and optional persistence writes were not tested."
                 if ready
                 else (
-                    "One or more required provider, database, authentication, or rate-limit checks failed."
-                    if (
-                        provider_status != "VERIFIED"
-                        or database_status == "DEGRADED"
-                        or auth_status == "DEGRADED"
-                        or rate_limit_status == "DEGRADED"
+                    "The explicitly enabled database connectivity probe failed; "
+                    "provider availability is verified."
+                    if provider_status == "VERIFIED" and database_status == "DEGRADED"
+                    else (
+                        "Worker authentication or rate limiting is not configured."
+                        if auth_status == "DEGRADED" or rate_limit_status == "DEGRADED"
+                        else provider_message
                     )
-                    else provider_message
                 )
             ),
         },
