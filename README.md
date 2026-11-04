@@ -1,6 +1,6 @@
 # GLORIFIER Neural Orchestration
 
-A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest live `/health` check confirms process liveness; `/ready` currently returns HTTP 503, so production dependency readiness is not fully verified. The latest structured failing smoke observation reported Neon as degraded. NVIDIA inference and optional audit/task-run persistence remain unverified or disabled.
+A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest live `/health` check confirms process liveness. The latest structured production smoke rerun passed the strict provider-disabled safe-mode branch: database, authentication, and rate limits are VERIFIED, while provider readiness is NOT VERIFIED and `/ready` returns HTTP 503. Neural is deployed and security/database controls are verified, but it is not ready for provider-backed task execution. Optional audit/task-run persistence remains unconfigured.
 
 ## Current capabilities
 
@@ -111,20 +111,18 @@ secret values, so credential validity is not verified.
 Observed live checks:
 
 - `GET /health`: HTTP 200; process liveness is verified only.
-- `GET /ready`: HTTP 503 in the latest live probe. The current fetch returned the
-  status code but not the structured response body, so the underlying readiness
-  reason is not independently confirmed by that probe.
-- The latest structured failing GitHub smoke observation (run
-  [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546))
-  reported `providers: NOT VERIFIED`, `database: DEGRADED`,
-  `authentication: VERIFIED`, `rate_limit: VERIFIED`, and
-  `inference_performed: false`.
+- `GET /ready`: HTTP 503, `NOT READY`, because provider readiness is
+  `NOT VERIFIED`. The latest structured rerun of GitHub smoke run
+  [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546)
+  confirmed `database: VERIFIED`, `authentication: VERIFIED`,
+  `rate_limit: VERIFIED`, and `inference_performed: false`. The smoke job
+  completed successfully using the strict provider-disabled safe-mode branch.
 - Optional audit and task-run persistence remain unconfigured. No live inference
   request or model-quality verification has been performed.
 
-Do not classify the current deployment as fully ready or as a verified safe-mode
-release until a fresh structured readiness response confirms the database,
-authentication, and rate-limit checks.
+This is **deployed and verified provider-disabled safe mode**, not full AI/provider
+readiness. Do not report the service as ready for provider-backed task execution
+until provider readiness and a separately controlled inference check succeed.
 
 ## Database foundation
 
