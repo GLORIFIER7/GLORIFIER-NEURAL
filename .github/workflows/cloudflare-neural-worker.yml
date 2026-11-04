@@ -98,9 +98,11 @@ jobs:
           cat /tmp/glorifier-neural-worker.log
           echo "Cloudflare Python Worker did not become healthy within 120 seconds"
           exit 1
-      - name: Build Cloudflare Python Worker bundle without deployment
+      - name: Prepare isolated Worker bundle and validate without deployment
         working-directory: cloudflare
-        run: uv run --locked pywrangler deploy --dry-run
+        run: |
+          bash ./worker-build.sh --prepare-only
+          npx wrangler deploy --dry-run
       - name: Upload validated Cloudflare dependency lock
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -135,9 +137,11 @@ jobs:
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Build final Cloudflare Worker bundle without publishing
+      - name: Prepare isolated Worker bundle and validate without deployment
         working-directory: cloudflare
-        run: uv run --locked pywrangler deploy --dry-run
+        run: |
+          bash ./worker-build.sh --prepare-only
+          npx wrangler deploy --dry-run
       - name: Verify Neural application package was vendored by Pywrangler
         working-directory: cloudflare
         run: |
@@ -200,7 +204,7 @@ jobs:
           PY
       - name: Deploy Neural Worker to Cloudflare
         working-directory: cloudflare
-        run: uv run --locked pywrangler deploy
+        run: bash ./worker-build.sh deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
