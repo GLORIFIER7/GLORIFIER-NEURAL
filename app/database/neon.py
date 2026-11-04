@@ -89,7 +89,7 @@ class NeonConnectivityProbe:
         else:
             hyperdrive = None
         if not database_url and hyperdrive is None:
-            raise ValueError("Neon connectivity is enabled but its URL or Hyperdrive binding is missing")
+            raise ValueError("Neon connectivity is enabled but its URL is missing and no Hyperdrive binding is configured")
         return cls(database_url or None, hyperdrive=hyperdrive)
 
     def check(self) -> None:
