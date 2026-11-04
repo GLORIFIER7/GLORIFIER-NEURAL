@@ -104,3 +104,16 @@ def test_cloudflare_worker_uses_native_rate_limit_binding():
     assert '"period": 60' in config
     assert "GLORIFIER_RATE_LIMITER" in api_source
     assert "await rate_limit_binding.limit" in api_source
+
+
+def test_cloudflare_worker_binds_existing_readonly_neon_hyperdrive():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+
+    assert '"binding": "NEON_READONLY"' in config
+    assert '"id": "eff847b6c3c64488a989f1fa67d966a0"' in config
+    assert '"GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"' in config
