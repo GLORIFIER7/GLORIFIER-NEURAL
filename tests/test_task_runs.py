@@ -307,7 +307,7 @@ def test_worker_task_run_write_fails_closed_on_missing_readback(monkeypatch):
         "postgresql://neon_user:neon_pass@example.neon.tech/neural"
     )
 
-    with pytest.raises(RuntimeError, match="Neon task-run persistence failed"):
+    with pytest.raises(RuntimeError, match="readback did not match"):
         repository.record_worker(
             request_id=str(uuid4()),
             action_class="read_only",
