@@ -13,6 +13,17 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 
 The Cloudflare deployment is managed by `.github/workflows/cloudflare-neural-worker.yml`. Production deployment remains a manual `workflow_dispatch` with `deploy=true` on `main`. Pull requests never deploy production.
 
+## Cloudflare Access
+
+The account-wide `All Workers` Access application remains enabled and still protects Neural task execution. A separate application named `GLORIFIER Neural Public Readiness Probes` has been created with narrowly scoped public destinations for only:
+
+- `GET /health`
+- `GET /ready`
+
+These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
+
+Live check after this Access change: `GET /health` returns HTTP 200 JSON. `GET /ready` currently returns HTTP 503 JSON because provider inference is not enabled/configured on the deployed `main` version.
+
 ## Cloudflare variables and secrets
 
 Configure the following in Workers & Pages → `glorifier-neural` → Settings → Variables and Secrets. Do not put secret values in Git, this document, issue comments, or chat.
@@ -38,7 +49,7 @@ The readiness probe performs a read-only `GET /v1/models` request. It does not s
 
 ### Neon task-run writes (optional)
 
-The Wrangler configuration binds the existing `glorifier-neon-readonly` Hyperdrive resource as `NEON_READONLY`. It is used only for a read-only `SELECT 1` readiness probe and must not be used for writes.
+The PR branch Wrangler configuration binds the existing `glorifier-neon-readonly` Hyperdrive resource as `NEON_READONLY`. It is intended only for a read-only `SELECT 1` readiness probe and must not be used for writes. This binding is not active on the deployed `main` Worker until PR #31 and PR #32 are merged and the gated deployment is run.
 
 To enable task-run persistence:
 
