@@ -6,6 +6,7 @@ enabled, and all failures are sanitized before they can reach an API response.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from urllib.parse import urlparse
 
 
@@ -42,11 +43,20 @@ class NeonConnectivityProbe:
         self._timeout = timeout_seconds
 
     @classmethod
-    def from_environment(cls) -> NeonConnectivityProbe | None:
+    def from_environment(cls, environment=None) -> NeonConnectivityProbe | None:
         """Return a probe only when explicitly enabled and configured."""
-        if os.getenv("GLORIFIER_NEON_CONNECTIVITY_ENABLED", "").strip().casefold() != "true":
+        def value(name: str) -> str:
+            if environment is None:
+                return os.getenv(name, "")
+            if isinstance(environment, Mapping):
+                raw = environment.get(name, "")
+            else:
+                raw = getattr(environment, name, "")
+            return str(raw) if raw is not None else ""
+
+        if value("GLORIFIER_NEON_CONNECTIVITY_ENABLED").strip().casefold() != "true":
             return None
-        database_url = os.getenv("NEON_DATABASE_URL", "").strip()
+        database_url = value("NEON_DATABASE_URL").strip()
         if not database_url:
             raise ValueError("Neon connectivity is enabled but its URL is missing")
         return cls(database_url)
