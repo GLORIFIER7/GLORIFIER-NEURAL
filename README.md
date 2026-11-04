@@ -45,7 +45,9 @@ Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status
 
 Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway service.
 The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
-`worker.py` and the `python_workers` compatibility flag in `wrangler.jsonc`.
+`cloudflare/worker.py` and the `python_workers` compatibility flag in
+`cloudflare/wrangler.jsonc`. Its dedicated `cloudflare/pyproject.toml` keeps the
+Worker bundle independent of the conventional Uvicorn server extras used by Docker.
 
 The account's current Workers subdomain is `glorifier`; after an operator-triggered
 deployment, the expected Worker address is
@@ -64,8 +66,9 @@ Cloudflare's fetch and binding APIs. Consequently, `/ready` is expected to remai
 HTTP 503 while no supported provider is configured. `/health` reports process
 liveness only.
 
-Pull requests build the Worker bundle in dry-run mode. Production deployment is
-manual through the **Cloudflare Neural Worker** workflow, requires the
+Pull requests build the Worker bundle in dry-run mode using only the supported
+Cloudflare runtime dependencies. Production deployment is manual through the
+**Cloudflare Neural Worker** workflow, requires the
 `CLOUDFLARE_API_TOKEN` repository secret, and requires setting its `deploy`
 input to `true`. The workflow uses a dedicated
 `glorifier-neural-cloudflare-production` GitHub environment.

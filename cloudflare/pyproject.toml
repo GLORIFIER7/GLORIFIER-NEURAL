@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=83.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glorifier-neural-cloudflare"
+version = "0.2.0"
+description = "Cloudflare Python Worker package for GLORIFIER Neural"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "pydantic>=2.8,<3.0",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py==1.17.8",
+    "workers-runtime-sdk",
+]
+
+[tool.setuptools]
+package-dir = {"" = "../"}
+packages = ["app", "app.database", "app.neural", "app.providers"]
