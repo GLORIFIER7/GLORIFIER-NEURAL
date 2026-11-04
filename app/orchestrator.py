@@ -4,7 +4,7 @@ import threading
 import time
 
 from app.policy import evaluate_task
-from app.providers.base import InferenceResult
+from app.providers.base import InferenceResult, ProviderAdapter
 from app.providers.registry import ProviderRegistry
 from app.schemas import TaskRequest, TaskResponse
 
@@ -84,43 +84,86 @@ class Orchestrator:
 
         return await asyncio.to_thread(self.check_readiness)
 
-    async def arun(self, request: TaskRequest) -> TaskResponse:
-        """Execute a governed task using an async provider transport."""
+    def _async_preflight(
+        self, request: TaskRequest
+    ) -> tuple[ProviderAdapter | None, TaskResponse | None]:
+        """Apply policy and explicit provider configuration before async inference."""
         decision = evaluate_task(
             require_approval=request.require_approval,
             action_class=request.action_class,
         )
         if not decision.allowed:
-            return TaskResponse(
-                status="DEGRADED",
-                message=decision.reason,
-                evidence=["policy:deny"],
-            )
+            return None, TaskResponse(status="DEGRADED", message=decision.reason, evidence=["policy:deny"])
         if decision.requires_human_approval:
-            return TaskResponse(
+            return None, TaskResponse(
                 status="NOT VERIFIED",
                 message=decision.reason,
                 evidence=["policy:approval-required"],
             )
         if not self._allow_inference:
-            return TaskResponse(
+            return None, TaskResponse(
                 status="NOT VERIFIED",
                 message="Provider inference is disabled by configuration; no inference was performed.",
                 evidence=["inference:disabled", "execution:none"],
             )
         if not self._provider_name:
-            return TaskResponse(
+            return None, TaskResponse(
                 status="NOT VERIFIED",
                 message="No provider was explicitly selected; no inference was performed.",
                 evidence=["provider:none", "execution:none"],
             )
-
         provider = self._providers.get(self._provider_name)
         if provider is None:
-            return TaskResponse(
+            return None, TaskResponse(
                 status="NOT VERIFIED",
                 message="The explicitly selected provider is unavailable or unconfigured.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
+            )
+        return provider, None
+
+    def _async_result_response(
+        self, provider: ProviderAdapter, result: InferenceResult
+    ) -> TaskResponse:
+        """Accept only a bounded result from the selected provider."""
+        provider_name = self._provider_name or provider.name
+        if not isinstance(result, InferenceResult):
+            return TaskResponse(
+                status="DEGRADED",
+                provider=provider_name,
+                message="Provider returned an invalid result object.",
+                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
+            )
+        if (
+            not isinstance(result.provider, str)
+            or result.provider.strip().casefold() != provider_name.strip().casefold()
+            or not isinstance(result.text, str)
+            or not result.text.strip()
+            or len(result.text) > 20_000
+        ):
+            return TaskResponse(
+                status="DEGRADED",
+                provider=provider_name,
+                message="Provider returned an empty, oversized, or mismatched result.",
+                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
+            )
+        return TaskResponse(
+            status="VERIFIED",
+            provider=provider.name,
+            result=result.text,
+            message="Provider returned a result; this verifies response receipt, not factual correctness.",
+            evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
+        )
+
+    async def arun(self, request: TaskRequest) -> TaskResponse:
+        """Execute a governed task using an explicitly configured async provider."""
+        provider, preflight_response = self._async_preflight(request)
+        if preflight_response is not None:
+            return preflight_response
+        if provider is None:
+            return TaskResponse(
+                status="DEGRADED",
+                message="Provider configuration is unavailable.",
+                evidence=["provider:unavailable", "execution:none"],
             )
 
         infer = getattr(provider, "ainfer", None)
@@ -141,34 +184,7 @@ class Orchestrator:
                 message=f"Provider inference failed ({type(exc).__name__}); no result was accepted.",
                 evidence=[f"provider:{self._provider_name}:error", "execution:failed"],
             )
-
-        if not isinstance(result, InferenceResult):
-            return TaskResponse(
-                status="DEGRADED",
-                provider=self._provider_name,
-                message="Provider returned an invalid result object.",
-                evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
-            )
-        if (
-            not isinstance(result.provider, str)
-            or result.provider.strip().casefold() != self._provider_name.strip().casefold()
-            or not isinstance(result.text, str)
-            or not result.text.strip()
-            or len(result.text) > 20_000
-        ):
-            return TaskResponse(
-                status="DEGRADED",
-                provider=self._provider_name,
-                message="Provider returned an empty, oversized, or mismatched result.",
-                evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
-            )
-        return TaskResponse(
-            status="VERIFIED",
-            provider=provider.name,
-            result=result.text,
-            message="Provider returned a result; this verifies response receipt, not factual correctness.",
-            evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
-        )
+        return self._async_result_response(provider, result)
 
     def run(self, request: TaskRequest) -> TaskResponse:
         decision = evaluate_task(
