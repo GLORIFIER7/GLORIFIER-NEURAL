@@ -37,15 +37,22 @@ jobs:
         with:
           enable-cache: false
           version: "0.13.6"
+      - name: Prepare Neural application source as local Worker dependency
+        working-directory: cloudflare
+        run: python prepare_worker.py
       - name: Resolve Cloudflare-only dependency lock
         working-directory: cloudflare
         run: uv lock
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Prepare Neural application source beside the Worker entrypoint
+      - name: Verify Neural application package was vendored by Pywrangler
         working-directory: cloudflare
-        run: python prepare_worker.py
+        run: |
+          set -euo pipefail
+          test -f python_modules/app/api.py
+          test -f python_modules/app/database/neon.py
+          test -f python_modules/app/neural/torch_status.py
       - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
         run: |
@@ -112,12 +119,19 @@ jobs:
           name: cloudflare-neural-uv-lock
           path: cloudflare
 
+      - name: Prepare Neural application source as local Worker dependency
+        working-directory: cloudflare
+        run: python prepare_worker.py
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Prepare Neural application source beside the Worker entrypoint
+      - name: Verify Neural application package was vendored by Pywrangler
         working-directory: cloudflare
-        run: python prepare_worker.py
+        run: |
+          set -euo pipefail
+          test -f python_modules/app/api.py
+          test -f python_modules/app/database/neon.py
+          test -f python_modules/app/neural/torch_status.py
       - name: Verify Cloudflare deployment credential exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
