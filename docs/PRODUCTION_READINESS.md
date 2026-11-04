@@ -110,7 +110,7 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 ## Current production observation — 2026-11-04
 
 - Latest Cloudflare deployment record observed at `2026-11-04T13:24:33Z`; source was the dashboard and 100% of production traffic was assigned to version `3481f2ac-2207-4b30-9858-32ad4bff8f0a`.
-- `/health`: HTTP 200; process liveness verified only.
+- `/health`: HTTP 200 with overall status `PARTIALLY VERIFIED`; process check `VERIFIED`. The endpoint does not perform dependency-readiness checks, so provider/database/PyTorch remain `NOT VERIFIED` in that response.
 - `/ready`: HTTP 503 because provider readiness is `NOT VERIFIED`.
 - The successful smoke rerun (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) reported database `VERIFIED`, authentication `VERIFIED`, rate limit `VERIFIED`, providers `NOT VERIFIED`, and `inference_performed=false`; the strict provider-disabled safe-mode branch passed.
 - Cloudflare settings expose a `GLORIFIER_API_TOKEN` secret binding and a secret binding named `NVIDIA_NIM_API_KEY`. Secret values and credential validity are not observable from the binding inventory.
