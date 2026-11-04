@@ -135,11 +135,16 @@ class NeonConnectivityProbe:
         row = None
         query_completed = operation_failed = cleanup_failed = False
         try:
+            timeout = (
+                WORKER_CONNECT_TIMEOUT_SECONDS
+                if self._hyperdrive is not None
+                else self._timeout
+            )
             connection = connect_worker_database(
                 pg8000,
                 self._database_url,
                 self._hyperdrive,
-                WORKER_CONNECT_TIMEOUT_SECONDS,
+                timeout,
             )
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
