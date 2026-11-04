@@ -158,7 +158,7 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
     except ValueError:
         raise HTTPException(status_code=503, detail="Readiness client identity is unavailable") from None
     try:
-        result = await limiter({"key": f"ready:{client_ip}"})
+        result = await binding.limit({"key": f"ready:{client_ip}"})
     except Exception:  # noqa: BLE001 - fail closed without exposing binding details
         raise HTTPException(
             status_code=503,
@@ -382,7 +382,7 @@ async def readiness(request: Request) -> JSONResponse:
             )
     elif degraded_checks:
         message = (
-            "Readiness is blocked because these checks are degraded: "
+            f"{message} Readiness is blocked because these checks are degraded: "
             f"{', '.join(degraded_checks)}."
         )
     elif providers == "VERIFIED":
