@@ -78,6 +78,22 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
     assert "Verify committed Cloudflare dependency lock" not in workflow
 
 
+def test_cloudflare_build_script_removes_host_venvs_before_wrangler_upload():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "worker-build.sh"
+    )
+    script = script_path.read_text(encoding="utf-8")
+
+    assert "uv run --locked pywrangler sync" in script
+    assert "python_modules/asyncpg/__init__.py" in script
+    assert "rm -rf -- .venv .venv-workers" in script
+    assert 'exec npx wrangler "$mode"' in script
+    assert "preview|deploy|--prepare-only" in script
+    assert "--prepare-only" in script
+
+
 def test_cloudflare_worker_preview_urls_are_explicitly_disabled():
     config_path = (
         Path(__file__).resolve().parents[1]
