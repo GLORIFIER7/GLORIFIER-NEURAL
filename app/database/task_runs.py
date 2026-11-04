@@ -68,7 +68,7 @@ class TaskRunRepository:
         else:
             hyperdrive = getattr(environment, "NEON_WRITE", None) if environment is not None else None
         if not url and hyperdrive is None:
-            raise ValueError("Neon task-run persistence is enabled but its URL or write Hyperdrive binding is missing")
+            raise ValueError("Neon task-run persistence is enabled but its URL is missing and no writable Hyperdrive binding is configured")
         return cls(url or None, hyperdrive=hyperdrive)
 
     @staticmethod
