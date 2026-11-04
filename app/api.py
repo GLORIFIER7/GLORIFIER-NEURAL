@@ -248,10 +248,12 @@ async def readiness(request: Request) -> JSONResponse:
     else:
         provider_status, provider_message = orchestrator.check_readiness()
 
+    worker_env = request.scope.get("env") if worker_request else None
+
     database_status = "NOT CONFIGURED (OPTIONAL)"
     try:
         probe = (
-            NeonConnectivityProbe.from_environment(request.scope.get("env"))
+            NeonConnectivityProbe.from_environment(worker_env)
             if worker_request
             else NeonConnectivityProbe.from_environment()
         )
@@ -264,7 +266,54 @@ async def readiness(request: Request) -> JSONResponse:
     except Exception:  # noqa: BLE001 - readiness must not leak connection details
         database_status = "DEGRADED"
 
-    ready = provider_status == "VERIFIED" and database_status != "DEGRADED"
+    auth_status = "NOT REQUIRED (LOCAL)"
+    rate_limit_status = "NOT REQUIRED (LOCAL)"
+    if worker_request:
+        auth_status = (
+            "VERIFIED"
+            if _request_environment_value(request, "GLORIFIER_API_TOKEN")
+            else "DEGRADED"
+        )
+        rate_limit_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
+        rate_limit_status = (
+            "VERIFIED"
+            if rate_limit_binding is not None
+            and callable(getattr(rate_limit_binding, "limit", None))
+            else "DEGRADED"
+        )
+
+    audit_status = "NOT CONFIGURED (OPTIONAL)"
+    try:
+        audit_sink = (
+            SupabaseRestAuditSink.from_environment(worker_env)
+            if worker_request
+            else SupabaseRestAuditSink.from_environment()
+        )
+        if audit_sink is not None:
+            audit_status = "CONFIGURED (WRITE NOT VERIFIED)"
+    except Exception:  # noqa: BLE001 - never expose persistence configuration
+        audit_status = "DEGRADED"
+
+    task_runs_status = "NOT CONFIGURED (OPTIONAL)"
+    try:
+        task_runs = (
+            TaskRunRepository.from_environment(worker_env)
+            if worker_request
+            else TaskRunRepository.from_environment()
+        )
+        if task_runs is not None:
+            task_runs_status = "CONFIGURED (WRITE NOT VERIFIED)"
+    except Exception:  # noqa: BLE001 - never expose persistence configuration
+        task_runs_status = "DEGRADED"
+
+    ready = (
+        provider_status == "VERIFIED"
+        and database_status != "DEGRADED"
+        and auth_status != "DEGRADED"
+        and rate_limit_status != "DEGRADED"
+        and audit_status != "DEGRADED"
+        and task_runs_status != "DEGRADED"
+    )
     return JSONResponse(
         status_code=200 if ready else 503,
         content={
@@ -272,17 +321,31 @@ async def readiness(request: Request) -> JSONResponse:
             "checks": {
                 "providers": provider_status,
                 "database": database_status,
+                "authentication": auth_status,
+                "rate_limit": rate_limit_status,
+                "audit": audit_status,
+                "task_runs": task_runs_status,
             },
-            "requirements": {"database": "optional"},
+            "requirements": {
+                "authentication": "required for Worker task execution",
+                "rate_limit": "required for Worker task execution",
+                "database": "optional unless connectivity or task-run persistence is enabled",
+                "audit": "optional unless explicitly enabled",
+                "task_runs": "optional unless explicitly enabled",
+            },
             "execution": {"inference_performed": False},
             "message": (
-                "The configured provider passed a read-only availability probe; "
-                "no inference was performed."
+                "Provider and required Worker controls passed read-only/configuration checks; "
+                "no inference was performed and optional persistence writes were not tested."
                 if ready
                 else (
-                    "The explicitly enabled database connectivity probe failed; "
-                    "provider availability is verified."
-                    if provider_status == "VERIFIED" and database_status == "DEGRADED"
+                    "One or more required provider, database, authentication, or rate-limit checks failed."
+                    if (
+                        provider_status != "VERIFIED"
+                        or database_status == "DEGRADED"
+                        or auth_status == "DEGRADED"
+                        or rate_limit_status == "DEGRADED"
+                    )
                     else provider_message
                 )
             ),
