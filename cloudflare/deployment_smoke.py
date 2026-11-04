@@ -43,7 +43,7 @@ def classify_readiness(status_code: int, readiness: dict[str, Any]) -> str:
     status = readiness.get("status")
     message = readiness.get("message")
     if not isinstance(checks, dict) or not isinstance(execution, dict):
-        raise ValueError("Neural readiness response is missing required structured checks.")
+        raise TypeError("Neural readiness response is missing required structured checks.")
     if execution.get("inference_performed") is not False:
         raise ValueError("Readiness smoke check must not perform inference.")
     if any(checks.get(name) == "DEGRADED" for name in ("database", "authentication", "rate_limit", "audit", "task_runs")):
