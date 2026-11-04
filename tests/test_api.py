@@ -629,7 +629,7 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
     monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
     monkeypatch.setattr("app.api.orchestrator", Orchestrator())
     monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=10))
-    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
 
     accepted = TestClient(CloudflareEnvironment(app, worker_token)).post(
         "/v1/tasks",
