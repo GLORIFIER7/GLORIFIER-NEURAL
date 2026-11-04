@@ -18,12 +18,14 @@ and `bash ./worker-build.sh deploy`. The repository's
 `workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
 push runs in GitHub Actions validate or dry-run only; they do not deploy production.
 
-The feature-branch Workers Builds configuration for this PR is separately scoped
-to its branch, runs from `/cloudflare`, prepares the package with
-`bash ./worker-build.sh --prepare-only`, and runs
-`npx wrangler deploy --dry-run`. Its `previews_enabled` flag is false, so it
-does not publish a Preview or production version. The main-branch production build
-configuration remains unchanged.
+The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
+#40 are separately scoped to their respective branches. They now run from
+`/cloudflare`, prepare the Worker package with
+`bash ./worker-build.sh --prepare-only`, and run
+`npx wrangler deploy --dry-run`. All three corrected builds completed successfully
+and stopped at `--dry-run`; they published neither a Preview nor a production
+version. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`. The
+main-branch production build configuration remains unchanged.
 
 ## GitHub deployment environment
 
@@ -107,12 +109,12 @@ The post-deploy smoke job requires HTTP 200 from `/health` and accepts either pr
 
 The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a configured limit of 60 requests per 60-second window, keyed by an HMAC-SHA-256 digest of the bearer token. Cloudflare's native Workers rate-limit counters are approximate and per-location, not a strict global quota. Do not represent this as globally exact enforcement.
 
-## Current production observation — 2026-11-04
+## Current production observation — 2026-11-05 (UTC+07:00)
 
-- Latest Cloudflare deployment record observed at `2026-11-04T13:24:33Z`; source was the dashboard and 100% of production traffic was assigned to version `3481f2ac-2207-4b30-9858-32ad4bff8f0a`.
-- `/health`: HTTP 200 with overall status `PARTIALLY VERIFIED`; process check `VERIFIED`. The endpoint does not perform dependency-readiness checks, so provider/database/PyTorch remain `NOT VERIFIED` in that response.
-- `/ready`: HTTP 503 because provider readiness is `NOT VERIFIED`.
-- The successful smoke rerun (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) reported database `VERIFIED`, authentication `VERIFIED`, rate limit `VERIFIED`, providers `NOT VERIFIED`, and `inference_performed=false`; the strict provider-disabled safe-mode branch passed.
+- Latest Cloudflare deployment record observed at `2026-11-04T13:59:29.216254Z`; 100% of production traffic is assigned to Worker version `08d46536-0ef2-46f9-8eb0-61891bd3c387`.
+- Live check at `2026-11-04T23:41Z`: `/health` returned HTTP 200 with overall status `PARTIALLY VERIFIED`; only process liveness is checked, so its provider/database/PyTorch fields remain `NOT VERIFIED`.
+- The same live check returned HTTP 503 from `/ready`: providers `NOT VERIFIED`, database `VERIFIED`, authentication `VERIFIED`, rate limit `VERIFIED`, audit/task-run persistence `NOT CONFIGURED (OPTIONAL)`, and `inference_performed=false`.
+- This is the intended provider-disabled safe mode, not a database failure. The database result verifies only a bounded, read-only Hyperdrive `SELECT 1`; it does not verify application-data reads/writes or optional persistence.
 - Cloudflare settings expose a `GLORIFIER_API_TOKEN` secret binding and a secret binding named `NVIDIA_NIM_API_KEY`. Secret values and credential validity are not observable from the binding inventory.
 - Provider inference remains unverified; optional audit and task-run persistence are not configured.
 
