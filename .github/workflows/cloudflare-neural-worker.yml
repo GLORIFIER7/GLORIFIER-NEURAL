@@ -55,12 +55,19 @@ jobs:
           fi
       - name: Commit initial dependency lock to this repository's PR branch
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        working-directory: cloudflare
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          git add uv.lock
+          cp cloudflare/uv.lock "$RUNNER_TEMP/neural-uv.lock"
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          python cloudflare/prepare_worker.py
+          cp "$RUNNER_TEMP/neural-uv.lock" cloudflare/uv.lock
+          if ! (cd cloudflare && uv lock --check); then
+            (cd cloudflare && uv lock)
+          fi
+          git add cloudflare/uv.lock
           if git diff --cached --quiet; then
             echo "Committed Cloudflare lockfile is already current"
             exit 0
