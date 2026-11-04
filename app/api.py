@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -117,7 +118,9 @@ def _request_orchestrator(request: Request):
 
 async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
     """Apply Cloudflare's native credential-keyed limit in Workers; fail closed on errors."""
-    credential_key = hashlib.sha256(api_token.encode("utf-8")).hexdigest()
+    credential_key = hmac.new(
+        api_token.encode("utf-8"), b"glorifier-rate-limit-v1", hashlib.sha256
+    ).hexdigest()
     worker_env = request.scope.get("env")
     if worker_env is None:
         allowed, retry_after = TASK_RATE_LIMITER.allow(credential_key)
