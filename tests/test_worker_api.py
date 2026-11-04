@@ -1,10 +1,7 @@
 """Cloudflare Worker request-scoped API tests."""
-import hashlib
-import hmac
 import secrets
 import uuid
 from types import SimpleNamespace
-import uuid
 
 from fastapi.testclient import TestClient
 
