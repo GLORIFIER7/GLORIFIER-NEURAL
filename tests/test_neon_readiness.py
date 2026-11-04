@@ -38,7 +38,7 @@ def test_worker_readiness_probe_does_not_block_task_run_database_lock(monkeypatc
         def from_environment(cls, _environment):
             return cls()
 
-        def check_worker(self):
+        async def check_worker(self):
             return None
 
     environment = {
