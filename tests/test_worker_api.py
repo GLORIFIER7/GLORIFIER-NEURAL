@@ -190,7 +190,7 @@ def test_worker_readiness_uses_cached_read_only_probes(monkeypatch):
             return "VERIFIED", "provider read-only probe passed"
 
     class CountingNeonProbe:
-        async def check_worker(self):
+        def check_worker(self):
             calls["database"] += 1
 
     monkeypatch.setattr("app.api.WORKER_READINESS_CACHE", {})
