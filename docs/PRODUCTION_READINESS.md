@@ -28,7 +28,7 @@ The account-wide `All Workers` Access application remains enabled and still prot
 - `GET /health`
 - `GET /ready`
 
-These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
+These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Public `GET /ready` is protected by a separate Cloudflare-native per-client rate limiter and a 30-second cache for provider/database probes. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
 
 Live check after this Access change: `GET /health` returns HTTP 200 JSON. `GET /ready` currently returns HTTP 503 JSON because provider inference is not enabled/configured on the deployed `main` version.
 
@@ -85,9 +85,9 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 - Provider readiness verified against the selected NVIDIA model catalogue.
 - Neon connectivity verified through `NEON_READONLY`.
 - `GLORIFIER_API_TOKEN` configured.
-- The `GLORIFIER_RATE_LIMITER` binding present.
+- The `GLORIFIER_RATE_LIMITER` and `GLORIFIER_READINESS_LIMITER` bindings present.
 
-Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness.
+Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
 The post-deploy smoke job requires HTTP 200 from `/health` and `/ready`, and verifies the provider, database, authentication, and rate-limit checks. It performs no inference and therefore does not incur a model completion request.
 
