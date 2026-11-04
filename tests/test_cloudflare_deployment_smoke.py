@@ -1,12 +1,20 @@
 """Tests for fail-closed Cloudflare deployment preflight and smoke checks."""
 
+import importlib.util
+from pathlib import Path
+
 import pytest
 
-from cloudflare.deployment_smoke import (
-    classify_readiness,
-    require_worker_api_token_secret,
-    validate_health,
-)
+_smoke_path = Path(__file__).resolve().parents[1] / "cloudflare" / "deployment_smoke.py"
+_smoke_spec = importlib.util.spec_from_file_location("deployment_smoke", _smoke_path)
+if _smoke_spec is None or _smoke_spec.loader is None:
+    raise ImportError("Unable to load Cloudflare deployment smoke helper.")
+_smoke_module = importlib.util.module_from_spec(_smoke_spec)
+_smoke_spec.loader.exec_module(_smoke_module)
+
+classify_readiness = _smoke_module.classify_readiness
+require_worker_api_token_secret = _smoke_module.require_worker_api_token_secret
+validate_health = _smoke_module.validate_health
 
 
 def test_deployment_smoke_accepts_fully_ready_worker():
