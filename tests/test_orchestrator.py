@@ -1,3 +1,5 @@
+import asyncio
+
 from app.orchestrator import Orchestrator
 from app.providers.base import InferenceResult, ProviderAdapter
 from app.providers.registry import ProviderRegistry
@@ -322,3 +324,53 @@ def test_nvidia_provider_readiness_rejects_redirects(monkeypatch):
     assert captured["url"] == "https://integrate.api.nvidia.com/v1/models"
     assert captured["authorization"] == "Bearer redirect-test-secret"
     assert captured["timeout"] <= 5
+
+def test_sync_readiness_rejects_a_non_callable_provider_probe():
+    provider = FakeProvider()
+    provider.check_readiness = "not-callable"
+    registry = ProviderRegistry()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    status, message = orchestrator.check_readiness()
+
+    assert status == "NOT VERIFIED"
+    assert "no read-only readiness probe" in message
+
+
+def test_async_readiness_falls_back_when_optional_probe_is_not_callable():
+    provider = FakeProvider()
+    provider.check_readiness = lambda: None
+    provider.acheck_readiness = "not-callable"
+    registry = ProviderRegistry()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    status, message = asyncio.run(orchestrator.acheck_readiness())
+
+    assert status == "VERIFIED"
+    assert "read-only model availability probe" in message
+
+
+def test_async_inference_rejects_a_non_callable_provider_method():
+    provider = FakeProvider()
+    provider.ainfer = "not-callable"
+    registry = ProviderRegistry()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry, allow_inference=True, provider_name="fake"
+    )
+
+    response = asyncio.run(
+        orchestrator.arun(
+            TaskRequest(task="summarize", require_approval=False)
+        )
+    )
+
+    assert response.status == "DEGRADED"
+    assert response.evidence == ["provider:fake:unavailable", "execution:none"]
+    assert provider.calls == 0

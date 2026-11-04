@@ -14,6 +14,7 @@ def test_cloudflare_environment_reads_attribute_style_bindings():
 
     from app.api import _request_environment_value
 
+    token = secrets.token_urlsafe(32)
     request = Request(
         {
             "type": "http",
@@ -21,11 +22,11 @@ def test_cloudflare_environment_reads_attribute_style_bindings():
             "path": "/",
             "headers": [],
             "query_string": b"",
-            "env": SimpleNamespace(GLORIFIER_API_TOKEN="attribute-worker-token"),
+            "env": SimpleNamespace(GLORIFIER_API_TOKEN=token),
         }
     )
 
-    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "attribute-worker-token"
+    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == token
 
 
 

@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from typing import cast
 import asyncio
 import threading
 import time
@@ -11,6 +12,30 @@ from app.schemas import TaskRequest, TaskResponse
 
 _READINESS_CACHE_TTL_SECONDS = 30.0
 
+
+def _sync_readiness_probe(provider: ProviderAdapter) -> Callable[[], None] | None:
+    candidate = getattr(provider, "check_readiness", None)
+    if not callable(candidate):
+        return None
+    return cast(Callable[[], None], candidate)
+
+
+def _async_readiness_probe(
+    provider: ProviderAdapter,
+) -> Callable[[], Awaitable[None]] | None:
+    candidate = getattr(provider, "acheck_readiness", None)
+    if not callable(candidate):
+        return None
+    return cast(Callable[[], Awaitable[None]], candidate)
+
+
+def _async_inference(
+    provider: ProviderAdapter,
+) -> Callable[[str], Awaitable[InferenceResult]] | None:
+    candidate = getattr(provider, "ainfer", None)
+    if not callable(candidate):
+        return None
+    return cast(Callable[[str], Awaitable[InferenceResult]], candidate)
 
 class Orchestrator:
     """Safe orchestration shell; provider inference is disabled unless explicitly opted in."""
@@ -52,10 +77,9 @@ class Orchestrator:
         provider = self._providers.get(self._provider_name)
         if provider is None:
             return "NOT VERIFIED", "The selected provider is not configured."
-        probe = getattr(provider, "check_readiness", None)
-        if not callable(probe):
+        readiness_probe = _sync_readiness_probe(provider)
+        if readiness_probe is None:
             return "NOT VERIFIED", "The selected provider has no read-only readiness probe."
-        readiness_probe: Callable[[], None] = probe
         try:
             readiness_probe()
         except Exception as exc:  # noqa: BLE001 - readiness must not leak credentials or endpoints
@@ -73,9 +97,8 @@ class Orchestrator:
         if provider is None:
             return "NOT VERIFIED", "The selected provider is not configured."
 
-        probe = getattr(provider, "acheck_readiness", None)
-        if callable(probe):
-            readiness_probe: Callable[[], Awaitable[None]] = probe
+        readiness_probe = _async_readiness_probe(provider)
+        if readiness_probe is not None:
             try:
                 await readiness_probe()
             except Exception as exc:  # noqa: BLE001 - never leak upstream details
@@ -166,15 +189,14 @@ class Orchestrator:
                 evidence=["provider:unavailable", "execution:none"],
             )
 
-        infer = getattr(provider, "ainfer", None)
-        if not callable(infer):
+        async_infer = _async_inference(provider)
+        if async_infer is None:
             return TaskResponse(
                 status="DEGRADED",
                 provider=self._provider_name,
                 message="The selected provider has no async transport supported by this runtime.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
             )
-        async_infer: Callable[[str], Awaitable[InferenceResult]] = infer
         try:
             result = await async_infer(request.task)
         except Exception as exc:  # noqa: BLE001 - sanitize any provider failure

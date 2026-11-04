@@ -18,6 +18,29 @@ from app.database.worker_connection import close_worker_database, connect_worker
 
 
 RETENTION_DAYS = 30  # Proposed default; production collection still requires approval.
+
+
+def _insert_worker_task_run(cursor, values) -> None:
+    cursor.execute(
+        """INSERT INTO glorifier.task_runs
+           (request_id, action_class, status, provider, evidence, created_at, expires_at)
+           VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
+        (
+            values[0], values[1], values[2], values[3],
+            json.dumps(values[4]), values[5], values[6],
+        ),
+    )
+
+
+def _worker_task_run_matches(cursor, request_id: str) -> bool:
+    cursor.execute(
+        "SELECT request_id FROM glorifier.task_runs WHERE request_id = %s",
+        (request_id,),
+    )
+    row = cursor.fetchone()
+    return row is not None and str(row[0]) == request_id
+
+
 _ALLOWED_STATUSES = {
     "FULLY VERIFIED",
     "VERIFIED",
@@ -176,22 +199,9 @@ class TaskRunRepository:
                 self._connect_timeout,
             )
             cursor = connection.cursor()
-            cursor.execute(
-                """INSERT INTO glorifier.task_runs
-                   (request_id, action_class, status, provider, evidence, created_at, expires_at)
-                   VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
-                (
-                    values[0], values[1], values[2], values[3],
-                    json.dumps(values[4]), values[5], values[6],
-                ),
-            )
+            _insert_worker_task_run(cursor, values)
             connection.commit()
-            cursor.execute(
-                "SELECT request_id FROM glorifier.task_runs WHERE request_id = %s",
-                (values[0],),
-            )
-            row = cursor.fetchone()
-            readback_mismatch = row is None or str(row[0]) != values[0]
+            readback_mismatch = not _worker_task_run_matches(cursor, values[0])
         except Exception:  # noqa: BLE001 - never leak DSN or database details
             operation_failed = True
         finally:
