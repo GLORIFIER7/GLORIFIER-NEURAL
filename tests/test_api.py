@@ -5,9 +5,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.orchestrator import Orchestrator
 
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def isolated_readiness(monkeypatch):
+    """Keep basic readiness API tests independent of deployment environment secrets."""
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        classmethod(lambda _cls: None),
+    )
 
 
 def test_health_does_not_overclaim_dependencies():
@@ -19,13 +30,13 @@ def test_health_does_not_overclaim_dependencies():
     assert body["checks"]["database"] == "NOT VERIFIED"
 
 
-def test_readiness_fails_closed_while_integrations_are_missing():
+def test_readiness_fails_closed_while_integrations_are_missing(isolated_readiness):
     response = client.get("/ready")
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "NOT READY"
     assert body["checks"]["providers"] == "NOT VERIFIED"
-    assert body["checks"]["database"] == "NOT VERIFIED"
+    assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
 
 
 def test_security_headers_are_present():
@@ -222,7 +233,7 @@ def test_task_endpoint_rejects_blank_task(monkeypatch):
     assert response.status_code == 422
 
 
-def test_readiness_response_has_security_headers():
+def test_readiness_response_has_security_headers(isolated_readiness):
     response = client.get("/ready")
     assert response.status_code == 503
     assert response.headers["x-content-type-options"] == "nosniff"
@@ -230,12 +241,15 @@ def test_readiness_response_has_security_headers():
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_readiness_does_not_claim_database_or_provider_health():
+def test_readiness_does_not_claim_database_or_provider_health(isolated_readiness):
     response = client.get("/ready")
     body = response.json()
     assert body["status"] == "NOT READY"
     assert set(body["checks"]) == {"providers", "database"}
-    assert all(value == "NOT VERIFIED" for value in body["checks"].values())
+    assert body["checks"]["providers"] == "NOT VERIFIED"
+    assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
+    assert body["requirements"]["database"] == "optional"
+    assert body["execution"]["inference_performed"] is False
 
 def test_declared_oversized_request_body_is_rejected():
     response = client.get("/health", headers={"Content-Length": "65537"})
@@ -492,3 +506,88 @@ def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
     assert events[1].event_type == "inference_failed"
     assert events[1].status == "DEGRADED"
     assert events[1].evidence == ("provider:nvidia_nim:error", "execution:failed")
+
+
+@pytest.mark.parametrize(
+    ("catalogue_data", "expected_status", "expected_provider_status", "expected_readiness_status"),
+    [
+        (
+            [{"id": "meta/llama-3.1-8b-instruct"}],
+            200,
+            "VERIFIED",
+            "READY",
+        ),
+        (
+            [{"id": "another/model"}],
+            503,
+            "DEGRADED",
+            "NOT READY",
+        ),
+    ],
+)
+def test_readiness_checks_configured_nvidia_model_without_inference(
+    monkeypatch,
+    catalogue_data,
+    expected_status,
+    expected_provider_status,
+    expected_readiness_status,
+):
+    import json
+
+    from app.runtime import build_orchestrator_from_environment
+
+    monkeypatch.setenv("GLORIFIER_ENABLE_INFERENCE", "true")
+    monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
+    monkeypatch.setenv("GLORIFIER_PROVIDER", "nvidia_nim")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "readiness-test-secret")
+    monkeypatch.setenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
+    monkeypatch.setattr("app.api.orchestrator", build_orchestrator_from_environment())
+    monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda: None)
+
+    from types import SimpleNamespace
+
+    class FakeSocket:
+        def __init__(self):
+            self.timeouts = []
+
+        def settimeout(self, timeout):
+            self.timeouts.append(timeout)
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self):
+            self.body = json.dumps({"data": catalogue_data}).encode()
+            self.socket = FakeSocket()
+            self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read1(self, limit):
+            chunk = self.body[:limit]
+            self.body = self.body[len(chunk):]
+            return chunk
+
+    def fake_urlopen(request, *, timeout):
+        assert request.full_url == "https://integrate.api.nvidia.com/v1/models"
+        assert request.get_method() == "GET"
+        assert request.data is None, "readiness must not submit a prompt or trigger inference"
+        assert request.get_header("Authorization") == "Bearer readiness-test-secret"
+        assert timeout <= 5
+        return FakeResponse()
+
+    monkeypatch.setattr("app.providers._open_nvidia_request", fake_urlopen)
+
+    response = client.get("/ready")
+
+    assert response.status_code == expected_status
+    body = response.json()
+    assert body["status"] == expected_readiness_status
+    assert body["checks"]["providers"] == expected_provider_status
+    assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
+    assert body["execution"]["inference_performed"] is False
+    assert "readiness-test-secret" not in response.text

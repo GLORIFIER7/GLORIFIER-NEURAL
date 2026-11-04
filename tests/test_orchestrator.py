@@ -227,7 +227,7 @@ def test_nvidia_nim_adapter_parses_openai_compatible_response(monkeypatch):
         captured["body"] = json.loads(request.data.decode())
         return FakeResponse()
 
-    monkeypatch.setattr("app.providers.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.providers._open_nvidia_request", fake_urlopen)
     adapter = NvidiaNimAdapter(api_key="test-key", model="meta/test-model")
     result = adapter.infer("hello", timeout_seconds=5)
 
@@ -249,7 +249,7 @@ def test_nvidia_nim_adapter_sanitizes_http_errors(monkeypatch):
             request.full_url, 401, "unauthorized", {}, None
         )
 
-    monkeypatch.setattr("app.providers.urllib.request.urlopen", fail_urlopen)
+    monkeypatch.setattr("app.providers._open_nvidia_request", fail_urlopen)
     adapter = NvidiaNimAdapter(api_key="secret-key")
 
     try:
@@ -269,3 +269,56 @@ def test_nvidia_nim_adapter_rejects_oversized_prompt():
         assert False, "expected prompt size rejection"
     except ValueError as exc:
         assert "exceeds" in str(exc)
+
+
+def test_nvidia_provider_readiness_rejects_redirects(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    from app.providers import NvidiaNimAdapter, _NoRedirectHandler
+
+    captured = {}
+
+    class FakeOpener:
+        def open(self, request, *, timeout):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.get_header("Authorization")
+            captured["timeout"] = timeout
+            return _raise_redirect(request)
+
+    def _raise_redirect(request):
+        handler = captured["handler"]
+        assert handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {"Location": "https://attacker.example/collect"},
+            "https://attacker.example/collect",
+        ) is None
+        raise urllib.error.HTTPError(
+            request.full_url,
+            302,
+            "redirect rejected",
+            {"Location": "https://attacker.example/collect"},
+            None,
+        )
+
+    def fake_build_opener(handler):
+        captured["handler"] = handler
+        return FakeOpener()
+
+    monkeypatch.setattr("app.providers.urllib.request.build_opener", fake_build_opener)
+    adapter = NvidiaNimAdapter(api_key="redirect-test-secret")
+
+    try:
+        adapter.check_readiness()
+        assert False, "readiness must reject redirected provider requests"
+    except RuntimeError as exc:
+        assert str(exc) == "NVIDIA NIM readiness probe failed with HTTP 302"
+        assert "redirect-test-secret" not in str(exc)
+
+    assert isinstance(captured["handler"], _NoRedirectHandler)
+    assert captured["url"] == "https://integrate.api.nvidia.com/v1/models"
+    assert captured["authorization"] == "Bearer redirect-test-secret"
+    assert captured["timeout"] <= 5
