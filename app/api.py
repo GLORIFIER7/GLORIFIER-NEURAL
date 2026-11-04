@@ -141,15 +141,19 @@ async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
     if worker_env is None:
         allowed, retry_after = TASK_RATE_LIMITER.allow(credential_key)
     else:
-        binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
-        limiter = getattr(binding, "limit", None) if binding is not None else None
+        rate_limit_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
+        limiter = (
+            getattr(rate_limit_binding, "limit", None)
+            if rate_limit_binding is not None
+            else None
+        )
         if not callable(limiter):
             raise HTTPException(
                 status_code=503,
                 detail="Task rate limiting is unavailable",
             )
         try:
-            result = await limiter({"key": credential_key})
+            result = await rate_limit_binding.limit({"key": credential_key})
             success = (
                 result.get("success")
                 if isinstance(result, Mapping)
