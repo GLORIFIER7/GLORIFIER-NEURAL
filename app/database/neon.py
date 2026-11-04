@@ -6,6 +6,8 @@ import ssl
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
+from app.database.worker_connection import close_worker_database, connect_worker_database
+
 
 def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
     """Return mandatory TLS server-authentication options for psycopg."""
@@ -114,6 +116,33 @@ class NeonConnectivityProbe:
             raise RuntimeError("Neon connectivity probe failed") from None
 
     def check_worker(self) -> None:
+        """Verify a read-only Neon connection using the Cloudflare Workers driver."""
+        try:
+            import pg8000
+        except ImportError:
+            raise RuntimeError("Neon connectivity driver is not installed") from None
+
+        connection = cursor = None
+        row = None
+        query_completed = operation_failed = cleanup_failed = False
+        try:
+            connection = connect_worker_database(
+                pg8000, self._database_url, self._hyperdrive, self._timeout
+            )
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
+            query_completed = True
+        except Exception:  # noqa: BLE001 - never expose DSN or database details
+            operation_failed = True
+        finally:
+            cleanup_failed = close_worker_database(cursor, connection)
+
+        if query_completed and row != (1,):
+            raise RuntimeError("Neon connectivity probe returned an unexpected result")
+        if operation_failed or cleanup_failed:
+            raise RuntimeError("Neon connectivity probe failed") from None
+
         """Verify a Neon connection on Python Workers with the supported pg8000 driver."""
         try:
             import pg8000
