@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import ipaddress
 import os
@@ -166,7 +167,7 @@ async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -
     if worker_request:
         await sink.awrite(event)
     else:
-        sink.write(event)
+        await asyncio.to_thread(sink.write, event)
 
 
 def _security_response_headers(request: Request) -> dict[str, str]:
@@ -226,7 +227,7 @@ async def readiness(request: Request) -> JSONResponse:
             request
         ).acheck_readiness()
     else:
-        provider_status, provider_message = orchestrator.check_readiness()
+        provider_status, provider_message = await asyncio.to_thread(orchestrator.check_readiness)
 
     worker_env = request.scope.get("env") if worker_request else None
 
@@ -239,9 +240,9 @@ async def readiness(request: Request) -> JSONResponse:
         )
         if probe is not None:
             if worker_request:
-                probe.check_worker()
+                await asyncio.to_thread(probe.check_worker)
             else:
-                probe.check()
+                await asyncio.to_thread(probe.check)
             database_status = "VERIFIED"
     except Exception:  # noqa: BLE001 - readiness must not leak connection details
         database_status = "DEGRADED"
@@ -399,12 +400,13 @@ async def run_task(
     result = (
         await _request_orchestrator(request).arun(task_request)
         if worker_request
-        else orchestrator.run(task_request)
+        else await asyncio.to_thread(orchestrator.run, task_request)
     )
     if task_run_repository is not None:
         try:
             if worker_request:
-                task_run_repository.record_worker(
+                await asyncio.to_thread(
+                    task_run_repository.record_worker,
                     request_id=request_id,
                     action_class=task_request.action_class,
                     status=result.status,
@@ -413,7 +415,8 @@ async def run_task(
                     hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
                 )
             else:
-                task_run_repository.record(
+                await asyncio.to_thread(
+                    task_run_repository.record,
                     request_id=request_id,
                     action_class=task_request.action_class,
                     status=result.status,
