@@ -13,6 +13,9 @@ case "$mode" in
     ;;
 esac
 
+# Stage the application package into the local Worker dependency before resolving it.
+python prepare_worker.py
+
 # Pywrangler vendors the production Pyodide packages into python_modules/.
 # Its host virtual environments are build tools, not Worker runtime modules.
 uv run --locked pywrangler sync
