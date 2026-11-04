@@ -237,3 +237,42 @@ def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
     assert calls["kwargs"]["ssl_context"] is False
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
+
+def test_worker_probe_preserves_result_mismatch_when_cleanup_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    class Cursor:
+        def execute(self, _query):
+            return None
+
+        def fetchone(self):
+            return (0,)
+
+        def close(self):
+            raise RuntimeError("cleanup failure must not hide the probe result")
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            raise RuntimeError("connection cleanup failure must not hide the probe result")
+
+    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=lambda **_kwargs: Connection()))
+    probe = NeonConnectivityProbe.from_environment(
+        {
+            "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
+            "NEON_READONLY": SimpleNamespace(
+                user="neon_readonly",
+                password=secrets.token_urlsafe(32),
+                host="hyperdrive.internal",
+                port="5432",
+                database="glorifier",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected result") as exc_info:
+        probe.check_worker()
+
+    assert "cleanup failure" not in str(exc_info.value)
