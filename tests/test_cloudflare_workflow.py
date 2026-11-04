@@ -168,3 +168,17 @@ def test_cloudflare_workflow_preflights_api_secret_and_smokes_safe_mode_truthful
     assert "--health-file /tmp/neural-health.json" in workflow
     assert "--readiness-file /tmp/neural-ready.json" in workflow
     assert "--readiness-status" in workflow
+
+
+def test_cloudflare_worker_excludes_duplicate_entry_point_metadata():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+
+    assert '"python_modules"' in config
+    assert '"**/*.dist-info/entry_points.txt"' in config, (
+        "Wrangler must not add duplicate Python entry-point metadata modules"
+    )
