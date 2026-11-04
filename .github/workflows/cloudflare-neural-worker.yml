@@ -163,8 +163,6 @@ jobs:
           import urllib.error
           import urllib.request
 
-          from cloudflare.deployment_smoke import require_worker_api_token_secret
-
           account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
           request = urllib.request.Request(
               f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/glorifier-neural/secrets",
@@ -186,11 +184,9 @@ jobs:
               for item in payload.get("result", [])
               if isinstance(item, dict) and isinstance(item.get("name"), str)
           ]
-          try:
-              require_worker_api_token_secret(names)
-          except ValueError as exc:
-              print(f"::error::{exc}")
-              raise SystemExit(1) from None
+          if "GLORIFIER_API_TOKEN" not in names:
+              print("::error::Missing Cloudflare Worker secret GLORIFIER_API_TOKEN; provision it in the Cloudflare Worker secret manager before deployment.")
+              raise SystemExit(1)
 
           print("Required Neural API token secret is present; its value was not read.")
           PY
