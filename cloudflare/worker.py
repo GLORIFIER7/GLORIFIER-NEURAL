@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.WARNING)
 import asyncpg
 
 if not callable(asyncpg.connect):
-    raise RuntimeError("Cloudflare asyncpg driver is unavailable")
+    raise TypeError("Cloudflare asyncpg driver is unavailable")
 
 from workers import asgi
 
