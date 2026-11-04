@@ -194,7 +194,7 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
     except ValueError:
         raise HTTPException(status_code=503, detail="Readiness client identity is unavailable") from None
     try:
-        result = await limiter.limit({"key": f"ready:{client_ip}"})
+        result = await limiter({"key": f"ready:{client_ip}"})
     except Exception as exc:  # noqa: BLE001 - fail closed without exposing binding details
         raise HTTPException(
             status_code=503,
