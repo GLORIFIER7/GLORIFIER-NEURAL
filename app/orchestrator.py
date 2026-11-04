@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import asyncio
 import threading
 import time
 
@@ -80,7 +81,7 @@ class Orchestrator:
                 return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
             return "VERIFIED", "Configured provider passed its read-only model availability probe."
 
-        return self.check_readiness()
+        return await asyncio.to_thread(self.check_readiness)
 
     async def arun(self, request: TaskRequest) -> TaskResponse:
         """Execute a governed task using an async provider transport."""
