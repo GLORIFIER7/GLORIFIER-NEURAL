@@ -317,6 +317,7 @@ def test_worker_readiness_hides_rate_limit_binding_error_details():
 
     assert response.status_code == 503
     assert response.json()["checks"]["rate_limit"] == "DEGRADED"
+    assert response.json()["checks"]["authentication"] == "VERIFIED"
     assert "private-binding-credential-detail" not in response.text
     assert "unavailable" in response.json()["message"].lower()
 
@@ -350,3 +351,35 @@ def test_worker_readiness_reports_degraded_optional_persistence_truthfully(monke
     assert body["checks"]["audit"] == "DEGRADED"
     assert "passed read-only/configuration checks" not in body["message"]
     assert "persistence" in body["message"].lower()
+
+
+
+def test_worker_readiness_preserves_provider_failure_diagnostic_when_other_checks_degrade(monkeypatch):
+    class FailedProvider:
+        async def acheck_readiness(self):
+            return "DEGRADED", "Provider readiness probe failed (RuntimeError)."
+
+    token = secrets.token_urlsafe(32)
+    monkeypatch.setattr("app.api.WORKER_READINESS_CACHE", {})
+    monkeypatch.setattr("app.api._request_orchestrator", lambda _request: FailedProvider())
+    monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda _env: None)
+    monkeypatch.setattr(
+        "app.api.SupabaseRestAuditSink.from_environment",
+        lambda *_args: (_ for _ in ()).throw(ValueError("invalid persistence configuration")),
+    )
+    monkeypatch.setattr("app.api.TaskRunRepository.from_environment", lambda *_args: None)
+    env = {
+        "GLORIFIER_API_TOKEN": token,
+        "GLORIFIER_RATE_LIMITER": _AllowReadinessRateLimitBinding(),
+        "GLORIFIER_READINESS_LIMITER": _AllowReadinessRateLimitBinding(),
+    }
+    response = TestClient(_WorkerEnvironmentASGI(app, env)).get(
+        "/ready", headers={"CF-Connecting-IP": "198.51.100.22"}
+    )
+
+    body = response.json()
+    assert response.status_code == 503
+    assert body["checks"]["providers"] == "DEGRADED"
+    assert body["checks"]["audit"] == "DEGRADED"
+    assert "Provider readiness probe failed (RuntimeError)." in body["message"]
+    assert "audit persistence" in body["message"].lower()
