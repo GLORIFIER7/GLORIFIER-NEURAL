@@ -207,3 +207,47 @@ def test_supabase_http_error_does_not_expose_server_body_or_secret(monkeypatch):
         sink.write(event)
     assert "private database details" not in str(error.value)
     assert "test-service-role-key" not in str(error.value)
+
+
+def test_supabase_sink_reads_worker_bindings_and_uses_fetch_for_async_audit():
+    import asyncio
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class FakeResponse:
+        status = 201
+
+    async def fake_fetch(url, **options):
+        captured["url"] = url
+        captured["options"] = options
+        return FakeResponse()
+
+    worker_env = {
+        "GLORIFIER_AUDIT_ENABLED": "true",
+        "SUPABASE_URL": "https://example.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "worker-only-service-key",
+    }
+    sink = SupabaseRestAuditSink.from_environment(
+        worker_env,
+        fetch_fn=fake_fetch,
+    )
+
+    asyncio.run(
+        sink.awrite(
+            AuditEvent(
+                request_id="req-worker",
+                event_type="task_received",
+                status="NOT VERIFIED",
+                action_class="read_only",
+            )
+        )
+    )
+
+    assert captured["url"] == "https://example.supabase.co/rest/v1/audit_events"
+    assert captured["options"]["method"] == "POST"
+    assert captured["options"]["redirect"] == "manual"
+    assert captured["options"]["headers"]["Authorization"] == "Bearer worker-only-service-key"
+    payload = json.loads(captured["options"]["body"])
+    assert payload["request_id"] == "req-worker"
+    assert "task" not in payload
