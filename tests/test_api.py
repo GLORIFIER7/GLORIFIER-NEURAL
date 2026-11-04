@@ -1,3 +1,4 @@
+import secrets
 import uuid
 
 import pytest
@@ -719,6 +720,7 @@ class _WorkerEnvironmentASGI:
 
 def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
     import hashlib
+    import hmac
 
     from fastapi.testclient import TestClient
 
@@ -730,7 +732,7 @@ def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
             self.keys.append(options["key"])
             return {"success": True}
 
-    token = "worker-scoped-api-token"
+    token = secrets.token_urlsafe(32)
     limiter = RateLimitBinding()
     worker_env = {
         "GLORIFIER_API_TOKEN": token,
@@ -745,7 +747,7 @@ def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
     )
 
     assert response.status_code == 200
-    assert limiter.keys == [hashlib.sha256(token.encode()).hexdigest()]
+    assert limiter.keys == [hmac.new(token.encode("utf-8"), b"glorifier-rate-limit-v1", hashlib.sha256).hexdigest()]
     assert token not in limiter.keys[0]
 
 
@@ -805,6 +807,7 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
     from app.orchestrator import Orchestrator
 
     captured = {}
+    worker_token = secrets.token_urlsafe(32)
 
     class AllowRateLimitBinding:
         async def limit(self, _options):
@@ -822,7 +825,7 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
             if scope["type"] == "http":
                 scope = dict(scope)
                 scope["env"] = SimpleNamespace(
-                    GLORIFIER_API_TOKEN="worker-token",
+                    GLORIFIER_API_TOKEN=worker_token,
                     GLORIFIER_RATE_LIMITER=AllowRateLimitBinding(),
                 )
             await self.inner(scope, receive, send)
@@ -839,7 +842,7 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
 
     response = TestClient(WorkerEnvironment(app)).post(
         "/v1/tasks",
-        headers={"Authorization": "Bearer worker-token"},
+        headers={"Authorization": f"Bearer {worker_token}"},
         json={"task": "safe metadata test", "require_approval": False},
     )
 
@@ -859,6 +862,8 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
     from starlette.types import ASGIApp, Receive, Scope, Send
 
     from app.api import app
+
+    ready_token = secrets.token_urlsafe(32)
 
     class ReadyOrchestrator:
         async def acheck_readiness(self):
@@ -882,7 +887,7 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
             if scope["type"] == "http":
                 env = {}
                 if self.include_auth:
-                    env["GLORIFIER_API_TOKEN"] = "ready-token"
+                    env["GLORIFIER_API_TOKEN"] = ready_token
                 if self.include_limiter:
                     env["GLORIFIER_RATE_LIMITER"] = AllowRateLimitBinding()
                 scope = dict(scope)
