@@ -64,7 +64,6 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("pg8000") is not None',
         'importlib.util.find_spec("asyncpg") is not None',
-        'importlib.util.find_spec("asyncpg") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "bash ./worker-build.sh --prepare-only",
