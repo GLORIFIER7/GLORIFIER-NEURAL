@@ -71,3 +71,16 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
     assert "contents: write" not in workflow
     assert "git push origin" not in workflow
     assert "Verify committed Cloudflare dependency lock" not in workflow
+
+
+def test_cloudflare_worker_preview_urls_are_explicitly_disabled():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+
+    assert re.search(r'"preview_urls"\s*:\s*false', config), (
+        "Production Worker preview URLs must be explicitly disabled"
+    )

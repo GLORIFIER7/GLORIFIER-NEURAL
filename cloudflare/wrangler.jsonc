@@ -6,6 +6,7 @@
   "compatibility_date": "2026-11-04",
   "compatibility_flags": ["python_workers"],
   "workers_dev": true,
+  "preview_urls": false,
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1.0,
