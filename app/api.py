@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import ipaddress
 import os
 import re
 import secrets
