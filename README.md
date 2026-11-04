@@ -73,9 +73,11 @@ readiness probe; it performs no schema migration or application-data write.
 NVIDIA inference remains disabled unless the provider, inference, and external-egress
 controls are explicitly enabled. The current Cloudflare secret inventory contains a
 binding named `NVIDIA_NIM_API_KEY`, but its value and validity are not observable from
-the binding inventory. `/ready` currently returns HTTP 503; do not treat this as
-provider-ready safe mode until the structured response confirms the expected database,
-authentication, and rate-limit states. `/health` reports process liveness only.
+the binding inventory. `/ready` currently returns HTTP 503 because provider readiness
+is `NOT VERIFIED`. The latest structured production smoke rerun confirmed database,
+authentication, and rate-limit controls as `VERIFIED` with
+`inference_performed=false`; this is verified provider-disabled safe mode, not full
+provider readiness. `/health` reports process liveness, not dependency readiness.
 
 Pull requests build and validate the Worker bundle in GitHub Actions dry-run mode.
 Cloudflare Workers Builds also has an automatic `main`-branch production deployment
