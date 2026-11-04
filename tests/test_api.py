@@ -791,3 +791,94 @@ def test_cloudflare_environment_reads_attribute_style_bindings():
     )
 
     assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "attribute-worker-token"
+
+
+
+class _WorkerEnvironmentASGI:
+    def __init__(self, app, env):
+        self.app = app
+        self.env = env
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            scope = dict(scope)
+            scope["env"] = self.env
+        await self.app(scope, receive, send)
+
+
+def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    class RateLimitBinding:
+        def __init__(self):
+            self.keys = []
+
+        async def limit(self, options):
+            self.keys.append(options["key"])
+            return {"success": True}
+
+    token = "worker-scoped-api-token"
+    limiter = RateLimitBinding()
+    worker_env = {
+        "GLORIFIER_API_TOKEN": token,
+        "GLORIFIER_RATE_LIMITER": limiter,
+    }
+    worker_client = TestClient(_WorkerEnvironmentASGI(app, worker_env))
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert limiter.keys == [hashlib.sha256(token.encode()).hexdigest()]
+    assert token not in limiter.keys[0]
+
+
+def test_worker_task_endpoint_fails_closed_when_rate_limit_binding_is_missing():
+    from fastapi.testclient import TestClient
+
+    token = "worker-scoped-api-token"
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(app, {"GLORIFIER_API_TOKEN": token})
+    )
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Task rate limiting is unavailable"
+
+
+def test_worker_task_endpoint_rejects_rate_limited_credentials():
+    from fastapi.testclient import TestClient
+
+    class DenyBinding:
+        async def limit(self, options):
+            return {"success": False}
+
+    token = "worker-scoped-api-token"
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(
+            app,
+            {
+                "GLORIFIER_API_TOKEN": token,
+                "GLORIFIER_RATE_LIMITER": DenyBinding(),
+            },
+        )
+    )
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
