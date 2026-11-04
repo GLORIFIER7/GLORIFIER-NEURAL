@@ -1,10 +1,14 @@
 """Opt-in Neon PostgreSQL connectivity checks for local and Cloudflare runtimes."""
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
+from app.database.worker_connection import close_worker_database, connect_worker_database
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
@@ -113,54 +117,36 @@ class NeonConnectivityProbe:
         except Exception:  # noqa: BLE001 - do not leak DSN, server errors, or query context
             raise RuntimeError("Neon connectivity probe failed") from None
 
-    async def check_worker(self) -> None:
-        """Verify a read-only Neon connection asynchronously through Cloudflare Hyperdrive."""
+    def check_worker(self) -> None:
+        """Verify a read-only Neon connection using the Cloudflare Workers driver."""
         try:
-            import asyncpg
+            import pg8000
         except ImportError:
             raise RuntimeError("Neon connectivity driver is not installed") from None
 
-        connection = None
+        connection = cursor = None
         row = None
         query_completed = operation_failed = cleanup_failed = False
         try:
-            if self._hyperdrive is not None:
-                connection = await asyncpg.connect(
-                    user=str(self._hyperdrive.user),
-                    password=str(self._hyperdrive.password),
-                    host=str(self._hyperdrive.host),
-                    port=int(self._hyperdrive.port),
-                    database=str(self._hyperdrive.database),
-                    ssl=False,
-                    timeout=self._timeout,
-                    command_timeout=self._timeout,
-                )
-            else:
-                parsed = urlparse(self._database_url)
-                import ssl
-
-                connection = await asyncpg.connect(
-                    user=parsed.username,
-                    password=parsed.password,
-                    host=parsed.hostname,
-                    port=parsed.port or 5432,
-                    database=parsed.path.lstrip("/"),
-                    ssl=ssl.create_default_context(),
-                    timeout=self._timeout,
-                    command_timeout=self._timeout,
-                )
-            row = await connection.fetchval("SELECT 1")
+            connection = connect_worker_database(
+                pg8000, self._database_url, self._hyperdrive, self._timeout
+            )
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
             query_completed = True
-        except Exception:  # noqa: BLE001 - never expose DSN or database details
+        except Exception as exc:  # noqa: BLE001 - never expose DSN or database details
+            _LOGGER.warning(
+                "Neon Worker connectivity probe failed (%s)",
+                type(exc).__name__,
+            )
             operation_failed = True
         finally:
-            if connection is not None:
-                try:
-                    await connection.close()
-                except Exception:  # noqa: BLE001 - preserve primary probe result
-                    cleanup_failed = True
+            cleanup_failed = close_worker_database(cursor, connection)
+            if cleanup_failed:
+                _LOGGER.warning("Neon Worker connectivity probe cleanup failed")
 
-        if query_completed and row != 1:
+        if query_completed and row != (1,):
             raise RuntimeError("Neon connectivity probe returned an unexpected result")
         if operation_failed or cleanup_failed:
             raise RuntimeError("Neon connectivity probe failed") from None
