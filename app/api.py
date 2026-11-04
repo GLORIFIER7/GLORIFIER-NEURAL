@@ -159,17 +159,17 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
         raise HTTPException(status_code=503, detail="Readiness client identity is unavailable") from None
     try:
         result = await limiter({"key": f"ready:{client_ip}"})
-    except Exception as exc:  # noqa: BLE001 - fail closed without exposing binding details
+    except Exception:  # noqa: BLE001 - fail closed without exposing binding details
         raise HTTPException(
             status_code=503,
-            detail=f"Cloudflare readiness limiter invocation failed ({type(exc).__name__}: {str(exc)[:120]})",
+            detail="Cloudflare readiness rate limiting is temporarily unavailable",
         ) from None
     try:
         success = result.get("success") if isinstance(result, Mapping) else getattr(result, "success", None)
-    except Exception as exc:  # noqa: BLE001 - do not trust a malformed binding result
+    except Exception:  # noqa: BLE001 - do not trust a malformed binding result
         raise HTTPException(
             status_code=503,
-            detail=f"Cloudflare readiness limiter result parsing failed ({type(exc).__name__}: {str(exc)[:120]})",
+            detail="Cloudflare readiness rate limiting returned an invalid result",
         ) from None
     if not isinstance(success, bool):
         raise HTTPException(
@@ -355,10 +355,23 @@ async def readiness(request: Request) -> JSONResponse:
     else:
         providers, message, database = await _local_readiness_checks()
     audit, task_runs = _optional_readiness_persistence(worker_env, worker_request)
-    if providers == "VERIFIED" and database == "DEGRADED":
-        message = "The explicitly enabled database connectivity probe failed; provider availability is verified."
-    elif authentication == "DEGRADED" or rate_limit == "DEGRADED":
-        message = "Worker authentication or rate limiting is not configured."
+    degraded_checks = [
+        name
+        for name, status in (
+            ("provider", providers),
+            ("database", database),
+            ("authentication", authentication),
+            ("rate limiting", rate_limit),
+            ("audit persistence", audit),
+            ("task-run persistence", task_runs),
+        )
+        if status == "DEGRADED"
+    ]
+    if degraded_checks:
+        message = (
+            "Readiness is blocked because these checks are degraded: "
+            f"{', '.join(degraded_checks)}."
+        )
     elif providers == "VERIFIED":
         message = (
             "Provider and required Worker controls passed read-only/configuration checks; "
