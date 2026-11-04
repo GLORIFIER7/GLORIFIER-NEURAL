@@ -55,7 +55,9 @@ def test_rate_limiter_rejects_nonpositive_configuration():
             raise AssertionError("invalid configuration must be rejected")
 
 def test_bearer_token_fingerprint_is_keyed_per_limiter_instance():
-    token = "same-bearer-token"
+    import secrets
+
+    token = secrets.token_urlsafe(32)
     first = FixedWindowRateLimiter(clock=lambda: 0.0)
     second = FixedWindowRateLimiter(clock=lambda: 0.0)
 
