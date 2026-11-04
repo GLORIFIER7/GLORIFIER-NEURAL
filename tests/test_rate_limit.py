@@ -66,3 +66,22 @@ def test_client_address_fingerprint_is_keyed_per_limiter_instance():
     second_fingerprint = next(iter(second._windows))
     assert client_host not in first_fingerprint
     assert first_fingerprint != second_fingerprint
+
+
+def test_rate_limiter_generates_fingerprint_key_after_first_request(monkeypatch):
+    generated_sizes = []
+
+    def runtime_entropy(size):
+        generated_sizes.append(size)
+        return b"r" * size
+
+    monkeypatch.setattr("app.rate_limit.secrets.token_bytes", runtime_entropy)
+
+    limiter = FixedWindowRateLimiter(clock=lambda: 0.0)
+    assert generated_sizes == []
+
+    assert limiter.allow("203.0.113.10") == (True, 60)
+    assert generated_sizes == [32]
+
+    assert limiter.allow("203.0.113.10") == (True, 60)
+    assert generated_sizes == [32]
