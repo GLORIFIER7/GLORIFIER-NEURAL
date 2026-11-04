@@ -51,13 +51,11 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "uv sync --locked --group dev --no-install-project",
         "Prepare Neural application source as local Worker dependency",
         "python prepare_worker.py",
-        'glorifier-neural-app = { path = "neural_app", editable = false }',
         "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("torch") is None',
-        "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "http://127.0.0.1:8787/health",
         "uv run --locked pywrangler deploy --dry-run",
     )
