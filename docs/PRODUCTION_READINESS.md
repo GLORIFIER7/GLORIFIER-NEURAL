@@ -18,12 +18,14 @@ and `bash ./worker-build.sh deploy`. The repository's
 `workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
 push runs in GitHub Actions validate or dry-run only; they do not deploy production.
 
-The feature-branch Workers Builds configuration for this PR is separately scoped
-to its branch, runs from `/cloudflare`, prepares the package with
-`bash ./worker-build.sh --prepare-only`, and runs
-`npx wrangler deploy --dry-run`. Its `previews_enabled` flag is false, so it
-does not publish a Preview or production version. The main-branch production build
-configuration remains unchanged.
+The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
+#40 are separately scoped to their respective branches. They now run from
+`/cloudflare`, prepare the Worker package with
+`bash ./worker-build.sh --prepare-only`, and run
+`npx wrangler deploy --dry-run`. All three corrected builds completed successfully
+and stopped at `--dry-run`; they published neither a Preview nor a production
+version. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`. The
+main-branch production build configuration remains unchanged.
 
 ## GitHub deployment environment
 
