@@ -78,6 +78,15 @@ jobs:
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev
+      - name: Verify Cloudflare deployment credential exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || {
+            echo "::error::Missing CLOUDFLARE_API_TOKEN in the glorifier-neural-cloudflare-production environment"
+            exit 1
+          }
       - name: Deploy Neural Worker to Cloudflare
         working-directory: cloudflare
         run: uv run --locked pywrangler deploy
