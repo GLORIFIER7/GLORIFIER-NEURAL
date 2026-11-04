@@ -168,7 +168,7 @@ class SupabaseRestAuditSink(AuditSink):
                 ),
                 timeout=self._timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise RuntimeError("Audit persistence unavailable") from None
         except Exception:  # noqa: BLE001 - do not leak request or credential details
             raise RuntimeError("Audit persistence unavailable") from None
