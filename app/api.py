@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import re
 import secrets
@@ -75,6 +76,26 @@ async def add_security_headers(request: Request, call_next) -> Response:
     response.headers.update(_security_response_headers(request))
     return response
 
+
+def _request_rate_limit_client(request: Request) -> str:
+    """Resolve a client address without trusting caller-controlled proxy headers.
+
+    Cloudflare's Python ASGI adapter does not populate the ASGI client tuple.
+    On Workers, use the edge-provided CF-Connecting-IP header and fail closed
+    if it is absent or malformed so callers never share an accidental bucket.
+    Outside Workers, use the direct ASGI peer address.
+    """
+    if request.scope.get("env") is not None:
+        candidate = request.headers.get("cf-connecting-ip", "").strip()
+        try:
+            return ipaddress.ip_address(candidate).compressed
+        except ValueError:
+            raise HTTPException(
+                status_code=503,
+                detail="Client address unavailable; task rate limiting cannot be enforced",
+            ) from None
+
+    return request.client.host if request.client else "unknown"
 
 def _request_environment_value(request: Request, name: str) -> str | None:
     """Read a Cloudflare Worker binding or, outside Workers, the local process env.
@@ -214,8 +235,8 @@ def run_task(
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Use the direct peer address; never trust spoofable forwarded headers here.
-    client_host = request.client.host if request.client else "unknown"
+    # Workers have no ASGI client tuple; use Cloudflare's edge-set peer address.
+    client_host = _request_rate_limit_client(request)
     allowed, retry_after = TASK_RATE_LIMITER.allow(client_host)
     if not allowed:
         raise HTTPException(
