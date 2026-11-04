@@ -1,14 +1,10 @@
 """Cloudflare Worker request-scoped API tests."""
-import hashlib
-import hmac
 import secrets
 import uuid
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from app.api import app
-from app.orchestrator import Orchestrator
 
 
 def test_cloudflare_environment_reads_attribute_style_bindings():
@@ -258,7 +254,6 @@ def test_worker_readiness_is_rate_limited_before_upstream_probes():
             return {"success": False}
 
     limiter = DenyReadinessLimiter()
-    ready_token = secrets.token_urlsafe(32)
     ready_token = secrets.token_urlsafe(32)
     worker_client = TestClient(
         _WorkerEnvironmentASGI(

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import ssl
 from collections.abc import Mapping
 from urllib.parse import urlparse
 

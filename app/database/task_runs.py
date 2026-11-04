@@ -9,9 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 from collections.abc import Mapping
-from urllib.parse import urlparse
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
