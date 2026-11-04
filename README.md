@@ -77,16 +77,20 @@ the binding inventory. `/ready` currently returns HTTP 503; do not treat this as
 provider-ready safe mode until the structured response confirms the expected database,
 authentication, and rate-limit states. `/health` reports process liveness only.
 
-Pull requests build the Worker bundle in dry-run mode. The connected Cloudflare
-Workers Builds integration has also built and deployed `main` commits. The latest
-Cloudflare deployment record observed during this audit was created through the
-dashboard; it is reported above. Separately,
-the **Cloudflare Neural Worker** GitHub Actions workflow retains a manual-only
-`workflow_dispatch` deployment path, gated by `deploy=true` on `main` and the
-`CLOUDFLARE_API_TOKEN` secret plus `CLOUDFLARE_ACCOUNT_ID` variable in the
-`glorifier-neural-cloudflare-production` GitHub Environment. The most recent
-production version was created by the connected Workers Builds/Wrangler path;
-the GitHub Actions push run validated the bundle but skipped its manual deploy job.
+Pull requests build and validate the Worker bundle in GitHub Actions dry-run mode.
+The previous Cloudflare Workers Builds configuration for the temporary feature branch
+used `npx wrangler preview`, but previews are disabled and the command required a
+preview configuration. To preserve the no-preview policy, that stale branch-specific
+trigger was removed. Cloudflare's API no longer reports a Worker Builds repository
+configuration associated with this Worker. The live production Worker was not
+deleted or modified by removing that trigger and remains on the deployment/version
+recorded above.
+
+The repository-controlled production release path is the **Cloudflare Neural Worker**
+GitHub Actions workflow's manual-only `workflow_dispatch`, gated by `deploy=true`
+on `main` and the `CLOUDFLARE_API_TOKEN` secret plus `CLOUDFLARE_ACCOUNT_ID`
+variable in the `glorifier-neural-cloudflare-production` GitHub Environment.
+Push and pull-request runs validate or dry-run only; they do not deploy production.
 
 ## API access
 
