@@ -47,10 +47,12 @@ Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway ser
 The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
 `cloudflare/worker.py` and the `python_workers` compatibility flag in
 `cloudflare/wrangler.jsonc`. Before validation or deployment, the workflow runs
-`cloudflare/prepare_worker.py` to stage the repository's `app/` package under
-`cloudflare/python_modules/app/`, the directory Cloudflare bundles for Python
-Workers. The dedicated `cloudflare/pyproject.toml` contains only Worker-compatible
-runtime and tooling dependencies.
+`cloudflare/prepare_worker.py` to stage the repository's `app/` package as a
+local Python project under `cloudflare/neural_app/`. Pywrangler resolves that
+local project dependency and vendors it into `cloudflare/python_modules/`, the
+directory Cloudflare bundles for Python Workers. The workflow asserts that the
+vendored package contains the API, Neon, and PyTorch adapter modules before
+starting the Pyodide runtime.
 
 The account's current Workers subdomain is `glorifier`; after an operator-triggered
 deployment, the expected Worker address is
