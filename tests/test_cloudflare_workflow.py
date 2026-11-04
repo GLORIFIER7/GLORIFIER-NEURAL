@@ -1,5 +1,6 @@
 """Regression tests for the Neural Cloudflare deployment workflow."""
 
+import json
 from pathlib import Path
 import re
 
@@ -176,12 +177,12 @@ def test_cloudflare_worker_excludes_duplicate_entry_point_metadata():
         / "cloudflare"
         / "wrangler.jsonc"
     )
-    config = config_path.read_text(encoding="utf-8")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    excluded = config.get("python_modules", {}).get("exclude", [])
 
-    assert '"python_modules"' in config
-    assert '"**/*.dist-info/*.txt"' in config, (
+    assert "**/*.dist-info/*.txt" in excluded, (
         "Wrangler must not add duplicate optional Python distribution text metadata"
     )
-    assert '"**/*.dist-info/METADATA"' not in config, (
+    assert "**/*.dist-info/METADATA" not in excluded, (
         "Keep package METADATA available for runtime version and package inspection"
     )
