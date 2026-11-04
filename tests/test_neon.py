@@ -234,6 +234,7 @@ def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
 
     assert calls["kwargs"]["host"] == "hyperdrive.internal"
     assert calls["kwargs"]["database"] == "glorifier"
+    assert calls["kwargs"]["timeout"] == 15
     assert calls["kwargs"]["ssl_context"] is False
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
