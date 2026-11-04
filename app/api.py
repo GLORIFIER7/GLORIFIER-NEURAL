@@ -2,6 +2,7 @@ import os
 import re
 import secrets
 import uuid
+from collections.abc import Mapping
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -73,6 +74,24 @@ async def add_security_headers(request: Request, call_next) -> Response:
         response = await call_next(request)
     response.headers.update(_security_response_headers(request))
     return response
+
+
+def _request_environment_value(request: Request, name: str) -> str | None:
+    """Read a Cloudflare Worker binding from the ASGI scope, then local process env.
+
+    Cloudflare exposes Worker bindings through the per-request ASGI scope. Avoid
+    copying them into os.environ: that global mutation is unsafe across concurrent
+    requests and would make isolate-local secrets harder to reason about.
+    """
+    worker_env = request.scope.get("env")
+    if worker_env is not None:
+        if isinstance(worker_env, Mapping):
+            value = worker_env.get(name)
+        else:
+            value = getattr(worker_env, name, None)
+        if value is not None:
+            return str(value)
+    return os.getenv(name)
 
 
 def _security_response_headers(request: Request) -> dict[str, str]:
@@ -186,7 +205,7 @@ def run_task(
         HTTPException: 503 when required audit persistence fails before or after
             orchestration. Pre-execution audit failures prevent task processing.
     """
-    api_token = os.getenv("GLORIFIER_API_TOKEN")
+    api_token = _request_environment_value(request, "GLORIFIER_API_TOKEN")
     if not api_token:
         raise HTTPException(
             status_code=503,

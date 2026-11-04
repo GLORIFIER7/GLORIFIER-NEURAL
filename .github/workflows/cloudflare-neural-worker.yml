@@ -1,0 +1,64 @@
+name: Cloudflare Neural Worker
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "worker.py"
+      - "wrangler.jsonc"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cloudflare-neural-worker.yml"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy the Neural Worker to Cloudflare production"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: cloudflare-neural-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false
+          version: "0.13.6"
+      - name: Validate dependency lock
+        run: uv lock --check
+      - name: Build Cloudflare Python Worker bundle without deployment
+        run: uvx --python 3.13 --from workers-py==1.17.8 pywrangler deploy --dry-run
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: glorifier-neural-cloudflare-production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false
+          version: "0.13.6"
+      - name: Deploy Neural Worker to Cloudflare
+        run: uvx --python 3.13 --from workers-py==1.17.8 pywrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
