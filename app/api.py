@@ -367,7 +367,20 @@ async def readiness(request: Request) -> JSONResponse:
         )
         if status == "DEGRADED"
     ]
-    if degraded_checks:
+    if providers == "VERIFIED" and database == "DEGRADED":
+        message = (
+            "The explicitly enabled database connectivity probe failed; "
+            "provider availability is verified."
+        )
+        other_degraded_checks = [
+            name for name in degraded_checks if name != "database"
+        ]
+        if other_degraded_checks:
+            message += (
+                " Readiness is also blocked because these checks are degraded: "
+                f"{', '.join(other_degraded_checks)}."
+            )
+    elif degraded_checks:
         message = (
             "Readiness is blocked because these checks are degraded: "
             f"{', '.join(degraded_checks)}."
