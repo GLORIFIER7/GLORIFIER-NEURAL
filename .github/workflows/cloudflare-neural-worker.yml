@@ -57,6 +57,7 @@ jobs:
           import importlib.util
 
           assert importlib.util.find_spec("psycopg") is None
+          assert importlib.util.find_spec("pg8000") is not None
           assert importlib.util.find_spec("torch") is None
           PY
 
