@@ -594,7 +594,8 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
 
 
 def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
-    """Cloudflare ASGI bindings must provide the API token without process env mutation."""
+    """Cloudflare bindings are authoritative and never fall back to host env."""
+    import secrets
     from types import SimpleNamespace
 
     from fastapi.testclient import TestClient
@@ -604,35 +605,50 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
     from app.orchestrator import Orchestrator
     from app.rate_limit import FixedWindowRateLimiter
 
+    worker_token = secrets.token_urlsafe(32)
+    process_token = secrets.token_urlsafe(32)
+
     class CloudflareEnvironment:
-        def __init__(self, inner: ASGIApp) -> None:
+        def __init__(self, inner: ASGIApp, token: str | None) -> None:
             self.inner = inner
+            self.token = token
 
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
             if scope["type"] == "http":
-                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="cloudflare-worker-secret")
+                worker_env = SimpleNamespace()
+                if self.token is not None:
+                    worker_env.GLORIFIER_API_TOKEN = self.token
+                scope["env"] = worker_env
             await self.inner(scope, receive, send)
 
-    monkeypatch.setenv("GLORIFIER_API_TOKEN", "different-host-process-secret")
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", process_token)
     monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
     monkeypatch.setattr("app.api.orchestrator", Orchestrator())
     monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=10))
     monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
 
-    response = TestClient(CloudflareEnvironment(app)).post(
+    accepted = TestClient(CloudflareEnvironment(app, worker_token)).post(
         "/v1/tasks",
-        headers={"Authorization": "Bearer cloudflare-worker-secret"},
+        headers={"Authorization": f"Bearer {worker_token}"},
         json={"task": "safe read-only task", "require_approval": False},
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "NOT VERIFIED"
-    assert response.json()["evidence"] == ["inference:disabled", "execution:none"]
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "NOT VERIFIED"
+    assert accepted.json()["evidence"] == ["inference:disabled", "execution:none"]
 
-    # The request-scoped Cloudflare secret must win over any process-level value.
-    rejected = TestClient(CloudflareEnvironment(app)).post(
+    # A different process-level token must not authenticate against the Worker binding.
+    rejected_process_token = TestClient(CloudflareEnvironment(app, worker_token)).post(
         "/v1/tasks",
-        headers={"Authorization": "Bearer different-host-process-secret"},
+        headers={"Authorization": f"Bearer {process_token}"},
         json={"task": "safe read-only task", "require_approval": False},
     )
-    assert rejected.status_code == 401
+    assert rejected_process_token.status_code == 401
+
+    # A present Worker env with a missing token must fail closed, not use os.environ.
+    rejected_missing_binding = TestClient(CloudflareEnvironment(app, None)).post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {process_token}"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+    assert rejected_missing_binding.status_code == 503
