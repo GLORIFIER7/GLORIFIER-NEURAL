@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import Protocol, cast
 import asyncio
 import threading
 import time
@@ -29,13 +29,18 @@ def _async_readiness_probe(
     return cast(Callable[[], Awaitable[None]], candidate)
 
 
-def _async_inference(
+class _AsyncInferenceProvider(Protocol):
+    async def ainfer(self, prompt: str) -> InferenceResult:
+        """Run one explicitly authorized async inference request."""
+
+
+def _async_inference_provider(
     provider: ProviderAdapter,
-) -> Callable[[str], Awaitable[InferenceResult]] | None:
+) -> _AsyncInferenceProvider | None:
     candidate = getattr(provider, "ainfer", None)
     if not callable(candidate):
         return None
-    return cast(Callable[[str], Awaitable[InferenceResult]], candidate)
+    return cast(_AsyncInferenceProvider, provider)
 
 class Orchestrator:
     """Safe orchestration shell; provider inference is disabled unless explicitly opted in."""
@@ -189,8 +194,8 @@ class Orchestrator:
                 evidence=["provider:unavailable", "execution:none"],
             )
 
-        async_infer = _async_inference(provider)
-        if async_infer is None:
+        async_provider = _async_inference_provider(provider)
+        if async_provider is None:
             return TaskResponse(
                 status="DEGRADED",
                 provider=self._provider_name,
@@ -198,7 +203,7 @@ class Orchestrator:
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
             )
         try:
-            result = await async_infer(request.task)
+            result = await async_provider.ainfer(request.task)
         except Exception as exc:  # noqa: BLE001 - sanitize any provider failure
             return TaskResponse(
                 status="DEGRADED",
