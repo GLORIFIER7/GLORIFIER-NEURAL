@@ -60,6 +60,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
+        "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("pg8000") is not None',
         'importlib.util.find_spec("torch") is None',
