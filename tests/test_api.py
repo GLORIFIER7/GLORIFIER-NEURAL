@@ -619,6 +619,11 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
                 if self.token is not None:
                     worker_env.GLORIFIER_API_TOKEN = self.token
                 scope["env"] = worker_env
+                if not any(key.lower() == b"cf-connecting-ip" for key, _ in scope["headers"]):
+                    scope["headers"] = [
+                        *scope["headers"],
+                        (b"cf-connecting-ip", b"203.0.113.9"),
+                    ]
             await self.inner(scope, receive, send)
 
     monkeypatch.setenv("GLORIFIER_API_TOKEN", process_token)
