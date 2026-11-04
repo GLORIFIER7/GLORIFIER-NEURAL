@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import asyncio
 import threading
 import time
@@ -75,8 +75,9 @@ class Orchestrator:
 
         probe = getattr(provider, "acheck_readiness", None)
         if callable(probe):
+            readiness_probe: Callable[[], Awaitable[None]] = probe
             try:
-                await probe()
+                await readiness_probe()
             except Exception as exc:  # noqa: BLE001 - never leak upstream details
                 return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
             return "VERIFIED", "Configured provider passed its read-only model availability probe."
@@ -130,8 +131,9 @@ class Orchestrator:
                 message="The selected provider has no async transport supported by this runtime.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
             )
+        async_infer: Callable[[str], Awaitable[InferenceResult]] = infer
         try:
-            result = await infer(request.task)
+            result = await async_infer(request.task)
         except Exception as exc:  # noqa: BLE001 - sanitize any provider failure
             return TaskResponse(
                 status="DEGRADED",
