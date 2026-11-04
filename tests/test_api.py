@@ -433,7 +433,7 @@ def test_task_run_write_failure_returns_completed_outcome_without_retry(monkeypa
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "VERIFIED"
+    assert response.json()["status"] == "PARTIALLY VERIFIED"
     assert response.json()["result"] == "completed result"
     assert "persistence:task_runs:degraded" in response.json()["evidence"]
     assert "returned to avoid an unsafe automatic retry" in response.json()["message"]
