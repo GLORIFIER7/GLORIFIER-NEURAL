@@ -184,7 +184,10 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
     binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
     limiter = getattr(binding, "limit", None) if binding is not None else None
     if not callable(limiter):
-        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Required Cloudflare readiness rate-limit binding is missing or invalid",
+        )
     raw_client_ip = request.headers.get("cf-connecting-ip", "").strip()
     try:
         client_ip = str(ipaddress.ip_address(raw_client_ip))
@@ -193,10 +196,16 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
     try:
         result = await limiter.limit({"key": f"ready:{client_ip}"})
         success = result.get("success") if isinstance(result, Mapping) else getattr(result, "success", None)
-    except Exception:  # noqa: BLE001 - fail closed without exposing binding details
-        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable") from None
+    except Exception as exc:  # noqa: BLE001 - fail closed without exposing binding details
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cloudflare readiness rate-limit call failed ({type(exc).__name__})",
+        ) from None
     if not isinstance(success, bool):
-        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Cloudflare readiness rate-limit binding returned an invalid result",
+        )
     if not success:
         raise HTTPException(
             status_code=429,
