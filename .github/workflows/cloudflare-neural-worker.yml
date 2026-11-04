@@ -151,6 +151,49 @@ jobs:
             echo "::error::Missing CLOUDFLARE_ACCOUNT_ID in the glorifier-neural-cloudflare-production environment variables"
             exit 1
           }
+      - name: Verify required Neural API token is provisioned before publishing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          from cloudflare.deployment_smoke import require_worker_api_token_secret
+
+          account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          request = urllib.request.Request(
+              f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/glorifier-neural/secrets",
+              headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_API_TOKEN']}"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  payload = json.load(response)
+          except (OSError, urllib.error.URLError, json.JSONDecodeError):
+              print("::error::Could not verify Cloudflare Worker secret bindings; deployment blocked.")
+              raise SystemExit(1) from None
+
+          if payload.get("success") is not True:
+              print("::error::Cloudflare did not confirm Worker secret bindings; deployment blocked.")
+              raise SystemExit(1)
+
+          names = [
+              item.get("name")
+              for item in payload.get("result", [])
+              if isinstance(item, dict) and isinstance(item.get("name"), str)
+          ]
+          try:
+              require_worker_api_token_secret(names)
+          except ValueError as exc:
+              print(f"::error::{exc}")
+              raise SystemExit(1) from None
+
+          print("Required Neural API token secret is present; its value was not read.")
+          PY
       - name: Deploy Neural Worker to Cloudflare
         working-directory: cloudflare
         run: uv run --locked pywrangler deploy
@@ -164,42 +207,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify deployed health endpoint
         env:
           NEURAL_URL: https://glorifier-neural.glorifier.workers.dev
         run: |
           set -euo pipefail
           curl --silent --show-error --fail --max-time 20 "${NEURAL_URL}/health" > /tmp/neural-health.json
-          python - <<'PY'
-          import json
-
-          with open("/tmp/neural-health.json", encoding="utf-8") as source:
-              health = json.load(source)
-          assert health.get("service") == "glorifier-neural"
-          assert health.get("checks", {}).get("process") == "VERIFIED"
-          print(json.dumps(health, sort_keys=True))
-          PY
-      - name: Require live provider, database, authentication and rate-limit readiness
+      - name: Verify live readiness or explicitly configured provider-disabled safe mode
         env:
           NEURAL_URL: https://glorifier-neural.glorifier.workers.dev
         run: |
           set -euo pipefail
           status="$(curl --silent --show-error --max-time 30 --output /tmp/neural-ready.json --write-out '%{http_code}' "${NEURAL_URL}/ready")"
           cat /tmp/neural-ready.json
-          test "${status}" = "200" || {
-            echo "::error::Neural readiness returned HTTP ${status}; production release is not verified"
-            exit 1
-          }
-          python - <<'PY'
-          import json
-
-          with open("/tmp/neural-ready.json", encoding="utf-8") as source:
-              ready = json.load(source)
-          checks = ready.get("checks", {})
-          required = ("providers", "database", "authentication", "rate_limit")
-          missing = [name for name in required if checks.get(name) != "VERIFIED"]
-          assert ready.get("status") == "READY", "Worker did not report READY"
-          assert not missing, f"Required readiness controls did not pass: {missing}"
-          assert ready.get("execution", {}).get("inference_performed") is False
-          print("Production smoke checks passed; no inference was performed.")
-          PY
+          python cloudflare/deployment_smoke.py \
+            --health-file /tmp/neural-health.json \
+            --readiness-file /tmp/neural-ready.json \
+            --readiness-status "${status}"
