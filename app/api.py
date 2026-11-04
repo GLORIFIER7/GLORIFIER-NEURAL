@@ -1,7 +1,9 @@
+import ipaddress
 import os
 import re
 import secrets
 import uuid
+from collections.abc import Mapping
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -73,6 +75,44 @@ async def add_security_headers(request: Request, call_next) -> Response:
         response = await call_next(request)
     response.headers.update(_security_response_headers(request))
     return response
+
+
+def _request_rate_limit_client(request: Request) -> str:
+    """Resolve a client address without trusting caller-controlled proxy headers.
+
+    Cloudflare's Python ASGI adapter does not populate the ASGI client tuple.
+    On Workers, use the edge-provided CF-Connecting-IP header and fail closed
+    if it is absent or malformed so callers never share an accidental bucket.
+    Outside Workers, use the direct ASGI peer address.
+    """
+    if request.scope.get("env") is not None:
+        candidate = request.headers.get("cf-connecting-ip", "").strip()
+        try:
+            return ipaddress.ip_address(candidate).compressed
+        except ValueError:
+            raise HTTPException(
+                status_code=503,
+                detail="Client address unavailable; task rate limiting cannot be enforced",
+            ) from None
+
+    return request.client.host if request.client else "unknown"
+
+def _request_environment_value(request: Request, name: str) -> str | None:
+    """Read a Cloudflare Worker binding or, outside Workers, the local process env.
+
+    A present Worker environment is authoritative: a missing binding must fail
+    closed rather than fall back to an unrelated process-level credential.
+    Avoid copying request-scoped bindings into os.environ because that global
+    mutation is unsafe across concurrent requests.
+    """
+    worker_env = request.scope.get("env")
+    if worker_env is not None:
+        if isinstance(worker_env, Mapping):
+            value = worker_env.get(name)
+        else:
+            value = getattr(worker_env, name, None)
+        return str(value) if value is not None else None
+    return os.getenv(name)
 
 
 def _security_response_headers(request: Request) -> dict[str, str]:
@@ -186,7 +226,7 @@ def run_task(
         HTTPException: 503 when required audit persistence fails before or after
             orchestration. Pre-execution audit failures prevent task processing.
     """
-    api_token = os.getenv("GLORIFIER_API_TOKEN")
+    api_token = _request_environment_value(request, "GLORIFIER_API_TOKEN")
     if not api_token:
         raise HTTPException(
             status_code=503,
@@ -195,9 +235,9 @@ def run_task(
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Use the direct peer address; never trust spoofable forwarded headers here.
-    client_host = request.client.host if request.client else "unknown"
-    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host, api_token)
+    # Workers have no ASGI client tuple; use Cloudflare's edge-set peer address.
+    client_host = _request_rate_limit_client(request)
+    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host)
     if not allowed:
         raise HTTPException(
             status_code=429,

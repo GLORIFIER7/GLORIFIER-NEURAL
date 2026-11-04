@@ -591,3 +591,203 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
     assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
     assert body["execution"]["inference_performed"] is False
     assert "readiness-test-secret" not in response.text
+
+
+def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
+    """Cloudflare bindings are authoritative and never fall back to host env."""
+    import secrets
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+    from app.rate_limit import FixedWindowRateLimiter
+
+    worker_token = secrets.token_urlsafe(32)
+    process_token = secrets.token_urlsafe(32)
+
+    class CloudflareEnvironment:
+        def __init__(self, inner: ASGIApp, token: str | None) -> None:
+            self.inner = inner
+            self.token = token
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                worker_env = SimpleNamespace()
+                if self.token is not None:
+                    worker_env.GLORIFIER_API_TOKEN = self.token
+                scope["env"] = worker_env
+                if not any(key.lower() == b"cf-connecting-ip" for key, _ in scope["headers"]):
+                    scope["headers"] = [
+                        *scope["headers"],
+                        (b"cf-connecting-ip", b"203.0.113.9"),
+                    ]
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", process_token)
+    monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=10))
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+
+    accepted = TestClient(CloudflareEnvironment(app, worker_token)).post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {worker_token}"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "NOT VERIFIED"
+    assert accepted.json()["evidence"] == ["inference:disabled", "execution:none"]
+
+    # A different process-level token must not authenticate against the Worker binding.
+    rejected_process_token = TestClient(CloudflareEnvironment(app, worker_token)).post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {process_token}"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+    assert rejected_process_token.status_code == 401
+
+    # A present Worker env with a missing token must fail closed, not use os.environ.
+    rejected_missing_binding = TestClient(CloudflareEnvironment(app, None)).post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {process_token}"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+    assert rejected_missing_binding.status_code == 503
+
+
+def test_cloudflare_rate_limit_uses_edge_client_ip_when_asgi_client_is_missing(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+    from app.rate_limit import FixedWindowRateLimiter
+
+    class CloudflareEnvironment:
+        def __init__(self, inner: ASGIApp, edge_ip: str) -> None:
+            self.inner = inner
+            self.edge_ip = edge_ip
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="worker-token")
+                scope.pop("client", None)
+                headers = [
+                    (key, value)
+                    for key, value in scope["headers"]
+                    if key.lower() != b"cf-connecting-ip"
+                ]
+                headers.append((b"cf-connecting-ip", self.edge_ip.encode("ascii")))
+                scope["headers"] = headers
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "host-token")
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+
+    def post_from(edge_ip: str):
+        return TestClient(CloudflareEnvironment(app, edge_ip)).post(
+            "/v1/tasks",
+            headers={"Authorization": "Bearer worker-token"},
+            json={"task": "safe read-only task", "require_approval": False},
+        )
+
+    first_client = post_from("203.0.113.10")
+    second_client = post_from("203.0.113.11")
+    first_client_again = post_from("203.0.113.10")
+
+    assert first_client.status_code == 200
+    assert second_client.status_code == 200
+    assert first_client_again.status_code == 429
+
+
+@pytest.mark.parametrize("edge_ip", ["", "not-an-ip"])
+def test_cloudflare_task_endpoint_fails_closed_without_valid_edge_ip(monkeypatch, edge_ip):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+    from app.rate_limit import FixedWindowRateLimiter
+
+    class CloudflareEnvironment:
+        def __init__(self, inner: ASGIApp) -> None:
+            self.inner = inner
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="worker-token")
+                scope.pop("client", None)
+                if edge_ip:
+                    headers = [
+                        (key, value)
+                        for key, value in scope["headers"]
+                        if key.lower() != b"cf-connecting-ip"
+                    ]
+                    headers.append((b"cf-connecting-ip", edge_ip.encode("ascii")))
+                    scope["headers"] = headers
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+
+    response = TestClient(CloudflareEnvironment(app)).post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer worker-token"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Client address unavailable; task rate limiting cannot be enforced"
+    )
+
+
+def test_cloudflare_environment_reads_mapping_style_bindings():
+    from starlette.requests import Request
+
+    from app.api import _request_environment_value
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "env": {"GLORIFIER_API_TOKEN": "mapping-worker-token"},
+        }
+    )
+
+    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "mapping-worker-token"
+
+
+def test_cloudflare_environment_reads_attribute_style_bindings():
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from app.api import _request_environment_value
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "env": SimpleNamespace(GLORIFIER_API_TOKEN="attribute-worker-token"),
+        }
+    )
+
+    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "attribute-worker-token"

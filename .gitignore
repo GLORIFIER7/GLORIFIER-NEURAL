@@ -30,3 +30,8 @@ build/
 *.pfx
 *.jks
 .DS_Store
+
+# Generated Cloudflare Worker source staging
+cloudflare/neural_app/app/
+cloudflare/python_modules/
+

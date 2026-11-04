@@ -1,0 +1,149 @@
+name: Cloudflare Neural Worker
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "cloudflare/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cloudflare-neural-worker.yml"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy the Neural Worker to Cloudflare production"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: cloudflare-neural-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false
+          version: "0.13.6"
+      - name: Prepare Neural application source as local Worker dependency
+        working-directory: cloudflare
+        run: python prepare_worker.py
+      - name: Resolve Cloudflare-only dependency lock
+        working-directory: cloudflare
+        run: uv lock
+      - name: Install Cloudflare Worker dependencies
+        working-directory: cloudflare
+        run: uv sync --locked --group dev --no-install-project
+      - name: Verify Cloudflare Python Worker runtime startup without optional drivers
+        working-directory: cloudflare
+        run: |
+          set -euo pipefail
+          uv run --locked python - <<'PY'
+          import importlib.util
+
+          assert importlib.util.find_spec("psycopg") is None
+          assert importlib.util.find_spec("torch") is None
+          PY
+
+          uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787 > /tmp/glorifier-neural-worker.log 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if response="$(curl --silent --show-error --fail http://127.0.0.1:8787/health)"; then
+              printf '%s\\n' "$response"
+              test -f python_modules/app/api.py
+              test -f python_modules/app/database/neon.py
+              test -f python_modules/app/neural/torch_status.py
+              exit 0
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat /tmp/glorifier-neural-worker.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+          cat /tmp/glorifier-neural-worker.log
+          echo "Cloudflare Python Worker did not become healthy within 120 seconds"
+          exit 1
+      - name: Build Cloudflare Python Worker bundle without deployment
+        working-directory: cloudflare
+        run: uv run --locked pywrangler deploy --dry-run
+      - name: Upload validated Cloudflare dependency lock
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cloudflare-neural-uv-lock
+          path: cloudflare/uv.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: glorifier-neural-cloudflare-production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false
+          version: "0.13.6"
+      - name: Download the exact dependency lock validated by the build job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cloudflare-neural-uv-lock
+          path: cloudflare
+      - name: Prepare Neural application source as local Worker dependency
+        working-directory: cloudflare
+        run: python prepare_worker.py
+      - name: Install locked Cloudflare Worker dependencies
+        working-directory: cloudflare
+        run: uv sync --locked --group dev --no-install-project
+      - name: Build final Cloudflare Worker bundle without publishing
+        working-directory: cloudflare
+        run: uv run --locked pywrangler deploy --dry-run
+      - name: Verify Neural application package was vendored by Pywrangler
+        working-directory: cloudflare
+        run: |
+          set -euo pipefail
+          test -f python_modules/app/api.py
+          test -f python_modules/app/database/neon.py
+          test -f python_modules/app/neural/torch_status.py
+      - name: Verify Cloudflare deployment credential exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || {
+            echo "::error::Missing CLOUDFLARE_API_TOKEN in the glorifier-neural-cloudflare-production environment"
+            exit 1
+          }
+      - name: Deploy Neural Worker to Cloudflare
+        working-directory: cloudflare
+        run: uv run --locked pywrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

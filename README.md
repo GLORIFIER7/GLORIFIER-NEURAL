@@ -41,11 +41,48 @@ uvicorn app.api:app --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only check against the explicitly configured provider; for NVIDIA NIM it queries `GET https://integrate.api.nvidia.com/v1/models` and requires the selected model ID to be present. This does not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. With no provider configured, `/ready` remains HTTP 503.
 
+## Cloudflare deployment
+
+Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway service.
+The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
+`cloudflare/worker.py` and the `python_workers` compatibility flag in
+`cloudflare/wrangler.jsonc`. Before validation or deployment, the workflow runs
+`cloudflare/prepare_worker.py` to stage the repository's `app/` package as a
+local Python project under `cloudflare/neural_app/`. Pywrangler resolves that
+local project dependency and vendors it into `cloudflare/python_modules/`, the
+directory Cloudflare bundles for Python Workers. The workflow asserts that the
+vendored package contains the API, Neon, and PyTorch adapter modules before
+starting the Pyodide runtime.
+
+The account's current Workers subdomain is `glorifier`; after an operator-triggered
+deployment, the expected Worker address is
+`https://glorifier-neural.glorifier.workers.dev`. This URL is an expected address,
+not evidence that the Worker has been deployed or is healthy.
+
+The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
+`env` binding. Add it as a Worker secret in Cloudflare before enabling task calls.
+No credential is stored in this repository or Wrangler configuration.
+
+This first Cloudflare runtime stage keeps provider inference, external data egress,
+Neon connectivity, and Supabase audit persistence disabled. The current NVIDIA,
+Neon, and Supabase adapters use conventional Python networking/database drivers;
+they are not enabled by this Worker until separately ported and verified against
+Cloudflare's fetch and binding APIs. Consequently, `/ready` is expected to remain
+HTTP 503 while no supported provider is configured. `/health` reports process
+liveness only.
+
+Pull requests build the Worker bundle in dry-run mode using only the supported
+Cloudflare runtime dependencies. Production deployment is manual through the
+**Cloudflare Neural Worker** workflow, requires the
+`CLOUDFLARE_API_TOKEN` repository secret, and requires setting its `deploy`
+input to `true`. The workflow uses a dedicated
+`glorifier-neural-cloudflare-production` GitHub environment.
+
 ## API access
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
 
-Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP and bearer token per minute, returning HTTP 429 with `Retry-After`. Forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
+Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP per minute, returning HTTP 429 with `Retry-After`. On Cloudflare Workers it uses the edge-provided `CF-Connecting-IP` address and rejects task requests with HTTP 503 when that address is absent or invalid; outside Workers it uses the direct ASGI peer address. Other forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
 
 ## Explicit inference configuration
 

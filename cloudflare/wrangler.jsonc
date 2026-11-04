@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "glorifier-neural",
+  "main": "worker.py",
+  "account_id": "8d18ea5dc25319e78fc2124cafff56b0",
+  "compatibility_date": "2026-11-04",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1.0,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "persist": true,
+      "head_sampling_rate": 0.01
+    },
+    "issues": {
+      "enabled": true
+    }
+  }
+}
