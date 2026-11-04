@@ -29,6 +29,7 @@ app = FastAPI(
 orchestrator = build_orchestrator_from_environment()
 MAX_REQUEST_BODY_BYTES = 65_536
 TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
+WORKER_DATABASE_LOCK = asyncio.Lock()
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
@@ -242,7 +243,10 @@ async def readiness(request: Request) -> JSONResponse:
         )
         if probe is not None:
             if worker_request:
-                await asyncio.to_thread(probe.check_worker)
+                # Cloudflare's Python runtime uses async TCP sockets under synchronous
+                # database drivers; serialize shared database work with an asyncio lock.
+                async with WORKER_DATABASE_LOCK:
+                    probe.check_worker()
             else:
                 await asyncio.to_thread(probe.check)
             database_status = "VERIFIED"
@@ -407,15 +411,17 @@ async def run_task(
     if task_run_repository is not None:
         try:
             if worker_request:
-                await asyncio.to_thread(
-                    task_run_repository.record_worker,
-                    request_id=request_id,
-                    action_class=task_request.action_class,
-                    status=result.status,
-                    provider=result.provider,
-                    evidence=result.evidence[:20],
-                    hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
-                )
+                # Hyperdrive/pg8000 uses the Worker TCP socket implementation.
+                # Serialize synchronous database operations as recommended for Python Workers.
+                async with WORKER_DATABASE_LOCK:
+                    task_run_repository.record_worker(
+                        request_id=request_id,
+                        action_class=task_request.action_class,
+                        status=result.status,
+                        provider=result.provider,
+                        evidence=result.evidence[:20],
+                        hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
+                    )
             else:
                 await asyncio.to_thread(
                     task_run_repository.record,
