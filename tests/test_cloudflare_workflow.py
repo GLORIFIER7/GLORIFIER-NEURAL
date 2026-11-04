@@ -179,6 +179,9 @@ def test_cloudflare_worker_excludes_duplicate_entry_point_metadata():
     config = config_path.read_text(encoding="utf-8")
 
     assert '"python_modules"' in config
-    assert '"**/*.dist-info/entry_points.txt"' in config, (
-        "Wrangler must not add duplicate Python entry-point metadata modules"
+    assert '"**/*.dist-info/*.txt"' in config, (
+        "Wrangler must not add duplicate optional Python distribution text metadata"
+    )
+    assert '"**/*.dist-info/METADATA"' not in config, (
+        "Keep package METADATA available for runtime version and package inspection"
     )
