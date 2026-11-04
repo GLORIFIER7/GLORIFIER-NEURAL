@@ -7,7 +7,7 @@ import time
 
 
 class FixedWindowRateLimiter:
-    """Bounded, process-local limiter. Do not treat this as distributed protection."""
+    """Bounded, process-local limiter keyed by client address, not credentials."""
 
     def __init__(
         self,
@@ -22,15 +22,18 @@ class FixedWindowRateLimiter:
         self.window_seconds = window_seconds
         self.max_keys = max_keys
         self._clock = clock
-        # Ephemeral per-instance key; rate-limit state is process-local too.
+        # Ephemeral key protects client addresses in the in-memory rate-limit map.
         self._fingerprint_key = secrets.token_bytes(32)
         self._lock = threading.Lock()
         self._windows: dict[str, tuple[int, int]] = {}
 
-    def allow(self, client_host: str, token: str) -> tuple[bool, int]:
-        # Store a keyed fingerprint, never the bearer token itself.
-        message = f"{client_host}\0{token}".encode()
-        key = hmac.digest(self._fingerprint_key, message, "sha256").hex()
+    def allow(self, client_host: str) -> tuple[bool, int]:
+        """Apply one quota per client address without retaining credentials or raw IPs."""
+        key = hmac.digest(
+            self._fingerprint_key,
+            client_host.encode("utf-8"),
+            "sha256",
+        ).hex()
         now = self._clock()
         window = int(now // self.window_seconds)
         retry_after = max(1, int((window + 1) * self.window_seconds - now))
