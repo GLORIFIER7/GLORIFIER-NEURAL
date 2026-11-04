@@ -269,7 +269,7 @@ def test_worker_task_run_write_is_committed_and_verified_by_readback(monkeypatch
     assert connection.committed is True
     assert connection.closed is True
     assert calls[1][0].lstrip().startswith("INSERT INTO glorifier.task_runs")
-    assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+    assert calls[2][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
     assert "execution:none" in calls[1][1][4]
 
 
@@ -372,4 +372,4 @@ def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
     assert connection_args["host"] == "hyperdrive.internal"
     assert connection_args["user"] == "neon_writer"
     assert connection_args["ssl_context"] is False
-    assert calls[2][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+    assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
