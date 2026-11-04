@@ -87,11 +87,12 @@ manual GitHub Actions `workflow_dispatch` deployment path is available, gated by
 `CLOUDFLARE_ACCOUNT_ID` variable in the
 `glorifier-neural-cloudflare-production` GitHub Environment.
 
-The feature-branch Workers Builds configuration for this PR has been corrected to
-run from `/cloudflare`, prepare the Worker package with
+The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
+#40 are corrected to run from `/cloudflare`, prepare the Worker package with
 `bash ./worker-build.sh --prepare-only`, and finish with
-`npx wrangler deploy --dry-run`. Its `previews_enabled` flag is false, so this
-branch build validates the bundle without publishing a Preview or production version.
+`npx wrangler deploy --dry-run`. All three corrected Cloudflare builds completed
+successfully and stopped at `--dry-run`; no Preview or production version was
+published. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`.
 The main-branch production deployment configuration remains unchanged.
 ## API access
 
