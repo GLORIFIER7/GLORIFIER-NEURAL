@@ -53,8 +53,6 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         "Resolve Cloudflare-only dependency lock",
         "run: uv lock",
         "Upload validated Cloudflare dependency lock",
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-        "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
         "cloudflare-neural-uv-lock",
         "uv sync --locked --group dev --no-install-project",
         "Prepare Neural application source as local Worker dependency",
@@ -66,7 +64,6 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("pg8000") is not None',
         'importlib.util.find_spec("asyncpg") is not None',
-        'importlib.util.find_spec("asyncpg") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "bash ./worker-build.sh --prepare-only",
@@ -75,6 +72,16 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
+
+    # Dependabot may update the immutable action commit; pinning is the invariant.
+    for artifact_action in ("upload-artifact", "download-artifact"):
+        action_pin = re.search(
+            rf"(?m)^\s+uses:\s+actions/{re.escape(artifact_action)}@[0-9a-f]{{40}}(?:\s+#.*)?$",
+            workflow,
+        )
+        assert action_pin is not None, (
+            f"Cloudflare workflow must pin actions/{artifact_action} to an immutable SHA"
+        )
 
     assert "contents: write" not in workflow
     assert "git push origin" not in workflow
