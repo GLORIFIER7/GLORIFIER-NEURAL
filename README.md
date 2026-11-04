@@ -46,8 +46,11 @@ Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status
 Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway service.
 The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
 `cloudflare/worker.py` and the `python_workers` compatibility flag in
-`cloudflare/wrangler.jsonc`. Its dedicated `cloudflare/pyproject.toml` keeps the
-Worker bundle independent of the conventional Uvicorn server extras used by Docker.
+`cloudflare/wrangler.jsonc`. Before validation or deployment, the workflow runs
+`cloudflare/prepare_worker.py` to stage the repository's `app/` package beside the
+Worker entrypoint; this keeps application modules in the Worker source tree while
+the dedicated `cloudflare/pyproject.toml` contains only Worker-compatible runtime
+and tooling dependencies.
 
 The account's current Workers subdomain is `glorifier`; after an operator-triggered
 deployment, the expected Worker address is
@@ -77,7 +80,7 @@ input to `true`. The workflow uses a dedicated
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
 
-Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP per minute, returning HTTP 429 with `Retry-After`. Requests from clients sharing an IP share the same bucket. Forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
+Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP per minute, returning HTTP 429 with `Retry-After`. On Cloudflare Workers it uses the edge-provided `CF-Connecting-IP` address and rejects task requests with HTTP 503 when that address is absent or invalid; outside Workers it uses the direct ASGI peer address. Other forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
 
 ## Explicit inference configuration
 
