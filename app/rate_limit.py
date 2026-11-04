@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
 import secrets
 import threading
@@ -31,7 +30,7 @@ class FixedWindowRateLimiter:
     def allow(self, client_host: str, token: str) -> tuple[bool, int]:
         # Store a keyed fingerprint, never the bearer token itself.
         message = f"{client_host}\0{token}".encode()
-        key = hmac.new(self._fingerprint_key, message, hashlib.sha256).hexdigest()
+        key = hmac.digest(self._fingerprint_key, message, "sha256").hex()
         now = self._clock()
         window = int(now // self.window_seconds)
         retry_after = max(1, int((window + 1) * self.window_seconds - now))
