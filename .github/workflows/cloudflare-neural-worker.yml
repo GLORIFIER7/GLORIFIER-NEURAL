@@ -49,7 +49,7 @@ jobs:
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Verify Cloudflare Python Worker runtime startup without optional drivers
+      - name: Verify Cloudflare Python Worker runtime startup including asyncpg
         working-directory: cloudflare
         env:
           # Local-only Hyperdrive stand-in; the health smoke test does not open a DB connection.
@@ -61,6 +61,7 @@ jobs:
 
           assert importlib.util.find_spec("psycopg") is None
           assert importlib.util.find_spec("pg8000") is not None
+assert importlib.util.find_spec("asyncpg") is not None
           assert importlib.util.find_spec("torch") is None
           PY
 
