@@ -43,20 +43,40 @@ jobs:
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev
-      - name: Verify Cloudflare ASGI application startup without optional drivers
+      - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
         run: |
+          set -euo pipefail
           uv run --locked python - <<'PY'
           import importlib.util
 
           assert importlib.util.find_spec("psycopg") is None
           assert importlib.util.find_spec("torch") is None
-
-          from workers import asgi
-          from app.api import app
-
-          assert asgi.entrypoint(app) is not None
           PY
+
+          uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787 > /tmp/glorifier-neural-worker.log 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if response="$(curl --silent --show-error --fail http://127.0.0.1:8787/health)"; then
+              printf '%s\\n' "$response"
+              exit 0
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat /tmp/glorifier-neural-worker.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+          cat /tmp/glorifier-neural-worker.log
+          echo "Cloudflare Python Worker did not become healthy within 120 seconds"
+          exit 1
       - name: Build Cloudflare Python Worker bundle without deployment
         working-directory: cloudflare
         run: uv run --locked pywrangler deploy --dry-run
