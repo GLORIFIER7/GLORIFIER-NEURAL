@@ -43,6 +43,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "uv sync --locked --group dev --no-install-project",
         "Prepare Neural application source beside the Worker entrypoint",
         "python prepare_worker.py",
+        "WORKER_ROOT / \"python_modules\" / \"app\"",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("torch") is None',
