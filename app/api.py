@@ -244,13 +244,16 @@ async def readiness(request: Request) -> JSONResponse:
         provider_status, provider_message = await _request_orchestrator(
             request
         ).acheck_readiness()
-        probe = NeonConnectivityProbe.from_environment(request.scope.get("env"))
     else:
         provider_status, provider_message = orchestrator.check_readiness()
-        probe = NeonConnectivityProbe.from_environment()
 
     database_status = "NOT CONFIGURED (OPTIONAL)"
     try:
+        probe = (
+            NeonConnectivityProbe.from_environment(request.scope.get("env"))
+            if worker_request
+            else NeonConnectivityProbe.from_environment()
+        )
         if probe is not None:
             probe.check()
             database_status = "VERIFIED"
