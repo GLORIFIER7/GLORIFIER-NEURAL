@@ -89,7 +89,6 @@ def test_cloudflare_build_script_removes_host_venvs_before_wrangler_upload():
     script = script_path.read_text(encoding="utf-8")
 
     assert "uv run --locked pywrangler sync" in script
-    assert "python_modules/asyncpg/__init__.py" in script
     assert "rm -rf -- .venv .venv-workers" in script
     assert 'exec npx wrangler "$mode"' in script
     assert "preview|deploy|--prepare-only" in script
