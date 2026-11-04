@@ -7,6 +7,16 @@
   "compatibility_flags": ["python_workers"],
   "workers_dev": true,
   "preview_urls": false,
+  "ratelimits": [
+    {
+      "name": "GLORIFIER_RATE_LIMITER",
+      "namespace_id": "47041104",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1.0,
