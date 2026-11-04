@@ -43,8 +43,8 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("torch") is None',
-        "uv run --locked pywrangler dev",
-        "curl --silent --show-error --fail http://127.0.0.1:8787/health",
+        "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
+        "http://127.0.0.1:8787/health",
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
