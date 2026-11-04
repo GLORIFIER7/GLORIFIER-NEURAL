@@ -220,7 +220,7 @@ async def _cached_worker_readiness(request: Request, worker_env) -> tuple[str, s
             if probe is not None:
                 # Cloudflare Python Workers use async TCP sockets underneath synchronous drivers.
                 async with WORKER_DATABASE_LOCK:
-                    probe.check_worker()
+                    await probe.check_worker()
                 database_status = "VERIFIED"
         except Exception:  # noqa: BLE001 - do not leak connection details
             database_status = "DEGRADED"
