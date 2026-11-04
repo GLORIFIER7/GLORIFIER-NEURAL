@@ -216,7 +216,7 @@ def run_task(
 
     # Use the direct peer address; never trust spoofable forwarded headers here.
     client_host = request.client.host if request.client else "unknown"
-    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host, api_token)
+    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host)
     if not allowed:
         raise HTTPException(
             status_code=429,
