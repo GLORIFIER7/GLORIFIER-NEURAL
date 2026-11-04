@@ -11,15 +11,19 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 - Task-run writes: a separately provisioned `NEON_WRITE` binding or a writer `NEON_DATABASE_URL` secret
 - Model: `nvidia/nemotron-3.5-super-vl-120b-a12b`
 
-The repository-controlled production release path is the `.github/workflows/cloudflare-neural-worker.yml`
-manual `workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
-push runs validate or dry-run only; they do not publish production. The former
-Cloudflare Workers Builds configuration on the temporary feature branch used
-`npx wrangler preview` despite previews being disabled and no preview configuration
-being present. To preserve the no-preview policy, that stale branch-specific trigger
-was removed. Cloudflare's API no longer reports a Worker Builds repository
-configuration associated with this Worker. The live production Worker and its
-active version were not deleted or modified by this cleanup.
+The Cloudflare deployment has two production paths. Cloudflare Workers Builds
+automatically builds and deploys commits on `main`, using the `/cloudflare` root
+and `bash ./worker-build.sh deploy`. The repository's
+`.github/workflows/cloudflare-neural-worker.yml` also provides a separate manual
+`workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
+push runs in GitHub Actions validate or dry-run only; they do not deploy production.
+
+The feature-branch Workers Builds configuration for this PR is separately scoped
+to its branch, runs from `/cloudflare`, prepares the package with
+`bash ./worker-build.sh --prepare-only`, and runs
+`npx wrangler deploy --dry-run`. Its `previews_enabled` flag is false, so it
+does not publish a Preview or production version. The main-branch production build
+configuration remains unchanged.
 
 ## GitHub deployment environment
 
@@ -116,7 +120,7 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 1. Make code changes on a branch and open a pull request. The active repository ruleset requires one approving review, CodeQL/code-scanning and code-quality constraints, and prohibits deletion and non-fast-forward updates.
 2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
-3. After an approved merge to `main`, manually dispatch the **Cloudflare Neural Worker** workflow with `deploy=true`, using the configured GitHub Environment credentials. Verify the deployment job and the intended Worker version/traffic before announcing release.
+3. After an approved merge to `main`, verify the automatic Cloudflare Workers Builds production build and active deployment. The separate GitHub Actions path can be manually dispatched with `deploy=true` using the configured GitHub Environment credentials. Verify the deployment job and intended Worker version/traffic before announcing release.
 4. Require live `/health` and `/ready` checks. A 503 is acceptable only for the explicit provider-disabled safe-mode response when database, authentication, and rate-limit controls are verified and `inference_performed=false`; it is not evidence of provider readiness.
 5. Separately perform a controlled authenticated inference request only after the owner provisions a valid NVIDIA key, approves sending task content to NVIDIA, and approves any applicable usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
 
