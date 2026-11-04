@@ -61,6 +61,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
+        'importlib.util.find_spec("pg8000") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "uv run --locked pywrangler deploy --dry-run",
