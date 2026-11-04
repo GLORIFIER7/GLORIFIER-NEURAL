@@ -76,7 +76,7 @@ class NvidiaNimAdapter(ProviderAdapter):
         self._fetch_fn = fetch_fn
         self._api_key = (api_key if api_key is not None else os.getenv("NVIDIA_NIM_API_KEY", "")).strip()
         self._model = (model if model is not None else os.getenv(
-            "NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct"
+            "NVIDIA_NIM_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b"
         )).strip()
         if not 0 < timeout_seconds <= 30:
             raise ValueError("timeout_seconds must be greater than 0 and at most 30")
@@ -244,6 +244,8 @@ class NvidiaNimAdapter(ProviderAdapter):
                 "model": self._model,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": self.max_output_tokens,
+                "temperature": 1.0,
+                "top_p": 0.95,
                 "stream": False,
             },
             separators=(",", ":"),
