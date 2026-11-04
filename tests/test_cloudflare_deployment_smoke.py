@@ -15,6 +15,7 @@ _smoke_spec.loader.exec_module(_smoke_module)
 classify_readiness = _smoke_module.classify_readiness
 require_worker_api_token_secret = _smoke_module.require_worker_api_token_secret
 validate_health = _smoke_module.validate_health
+run_smoke = _smoke_module.main
 
 
 def test_deployment_smoke_accepts_fully_ready_worker():
@@ -149,3 +150,34 @@ def test_deployment_smoke_validates_health_endpoint_without_overclaiming_depende
                 "checks": {"process": "DEGRADED"},
             }
         )
+
+
+
+def test_smoke_main_reports_non_object_endpoint_payload_without_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    import sys
+
+    health_file = tmp_path / "health.json"
+    readiness_file = tmp_path / "ready.json"
+    health_file.write_text("[]", encoding="utf-8")
+    readiness_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "deployment_smoke.py",
+            "--health-file",
+            str(health_file),
+            "--readiness-file",
+            str(readiness_file),
+            "--readiness-status",
+            "503",
+        ],
+    )
+
+    assert run_smoke() == 1
+    output = capsys.readouterr().out
+    assert output.startswith("::error::")
+    assert "JSON objects" in output
+    assert "Traceback" not in output
