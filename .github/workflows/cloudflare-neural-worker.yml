@@ -46,13 +46,6 @@ jobs:
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Verify Neural application package was vendored by Pywrangler
-        working-directory: cloudflare
-        run: |
-          set -euo pipefail
-          test -f python_modules/app/api.py
-          test -f python_modules/app/database/neon.py
-          test -f python_modules/app/neural/torch_status.py
       - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
         run: |
@@ -75,6 +68,9 @@ jobs:
           for attempt in $(seq 1 60); do
             if response="$(curl --silent --show-error --fail http://127.0.0.1:8787/health)"; then
               printf '%s\\n' "$response"
+              test -f python_modules/app/api.py
+              test -f python_modules/app/database/neon.py
+              test -f python_modules/app/neural/torch_status.py
               exit 0
             fi
             if ! kill -0 "$worker_pid" 2>/dev/null; then
