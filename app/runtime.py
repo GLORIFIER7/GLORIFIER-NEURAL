@@ -59,7 +59,7 @@ def build_orchestrator_from_environment(
         model = _environment_value(
             environment,
             "NVIDIA_NIM_MODEL",
-            "meta/llama-3.1-8b-instruct",
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
         )
         registry.register(
             NvidiaNimAdapter(
