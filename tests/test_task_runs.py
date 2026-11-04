@@ -374,3 +374,56 @@ def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
     assert connection_args["user"] == "neon_writer"
     assert connection_args["ssl_context"] is False
     assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+
+def test_worker_task_run_readback_mismatch_is_reported_without_masking(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    request_id = str(uuid4())
+    other_request_id = str(uuid4())
+
+    class Cursor:
+        def execute(self, _query, _params):
+            return None
+
+        def fetchone(self):
+            return (other_request_id,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pg8000",
+        SimpleNamespace(connect=lambda **_kwargs: Connection()),
+    )
+    repository = TaskRunRepository.from_environment(
+        {
+            "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+            "NEON_WRITE": SimpleNamespace(
+                user="neon_writer",
+                password=secrets.token_urlsafe(32),
+                host="hyperdrive.internal",
+                port="5432",
+                database="glorifier",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="readback did not match"):
+        repository.record_worker(
+            request_id=request_id,
+            action_class="read_only",
+            status="NOT VERIFIED",
+            evidence=["execution:none"],
+        )
