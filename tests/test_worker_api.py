@@ -1,15 +1,18 @@
 """Cloudflare Worker request-scoped API tests."""
+import hashlib
+import hmac
 import secrets
+import uuid
+from types import SimpleNamespace
 import uuid
 
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.orchestrator import Orchestrator
 
 
 def test_cloudflare_environment_reads_attribute_style_bindings():
-    from types import SimpleNamespace
-
     from starlette.requests import Request
 
     from app.api import _request_environment_value
@@ -121,11 +124,7 @@ def test_worker_task_endpoint_rejects_rate_limited_credentials():
 
 
 def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatch):
-    from types import SimpleNamespace
-
     from app.orchestrator import Orchestrator
-    from types import SimpleNamespace
-
     from fastapi.testclient import TestClient
     from starlette.types import ASGIApp, Receive, Scope, Send
 
