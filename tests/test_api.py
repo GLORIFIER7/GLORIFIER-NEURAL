@@ -591,3 +591,40 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
     assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
     assert body["execution"]["inference_performed"] is False
     assert "readiness-test-secret" not in response.text
+
+
+def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
+    """Cloudflare ASGI bindings must provide the API token without process env mutation."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+    from app.rate_limit import FixedWindowRateLimiter
+
+    class CloudflareEnvironment:
+        def __init__(self, inner: ASGIApp) -> None:
+            self.inner = inner
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="cloudflare-worker-secret")
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "different-host-process-secret")
+    monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=10))
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+
+    response = TestClient(CloudflareEnvironment(app)).post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer cloudflare-worker-secret"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "NOT VERIFIED"
+    assert response.json()["evidence"] == ["inference:disabled", "execution:none"]
