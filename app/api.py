@@ -516,6 +516,8 @@ async def run_task(
                     evidence=result.evidence[:20],
                 )
         except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
+            if result.status == "VERIFIED":
+                result.status = "PARTIALLY VERIFIED"
             result.evidence = [*result.evidence[:19], "persistence:task_runs:degraded"]
             result.message = (
                 f"{result.message} Task-run persistence degraded after processing; "
@@ -539,6 +541,8 @@ async def run_task(
                 worker_request=worker_request,
             )
         except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
+            if result.status == "VERIFIED":
+                result.status = "PARTIALLY VERIFIED"
             result.evidence = [*result.evidence[:19], "persistence:audit:degraded"]
             result.message = (
                 f"{result.message} Final audit persistence degraded after processing; "
