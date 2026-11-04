@@ -8,7 +8,8 @@ from app.api import app
 
 
 def test_cloudflare_environment_reads_attribute_style_bindings():
-    
+    from types import SimpleNamespace
+
     from starlette.requests import Request
 
     from app.api import _request_environment_value
@@ -41,7 +42,9 @@ class _WorkerEnvironmentASGI:
 
 
 def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
-        
+    import hashlib
+    import hmac
+
     from fastapi.testclient import TestClient
 
     class RateLimitBinding:
@@ -118,6 +121,9 @@ def test_worker_task_endpoint_rejects_rate_limited_credentials():
 
 
 def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.orchestrator import Orchestrator
     from types import SimpleNamespace
 
     from fastapi.testclient import TestClient
