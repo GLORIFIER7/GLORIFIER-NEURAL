@@ -751,3 +751,43 @@ def test_cloudflare_task_endpoint_fails_closed_without_valid_edge_ip(monkeypatch
     assert response.json()["detail"] == (
         "Client address unavailable; task rate limiting cannot be enforced"
     )
+
+
+def test_cloudflare_environment_reads_mapping_style_bindings():
+    from starlette.requests import Request
+
+    from app.api import _request_environment_value
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "env": {"GLORIFIER_API_TOKEN": "mapping-worker-token"},
+        }
+    )
+
+    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "mapping-worker-token"
+
+
+def test_cloudflare_environment_reads_attribute_style_bindings():
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from app.api import _request_environment_value
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "env": SimpleNamespace(GLORIFIER_API_TOKEN="attribute-worker-token"),
+        }
+    )
+
+    assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "attribute-worker-token"
