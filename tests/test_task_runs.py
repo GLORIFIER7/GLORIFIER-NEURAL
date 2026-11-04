@@ -373,6 +373,7 @@ def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
     assert connection_args["host"] == "hyperdrive.internal"
     assert connection_args["user"] == "neon_writer"
     assert connection_args["ssl_context"] is False
+    assert connection_args["timeout"] == 15
     assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
 
 def test_worker_task_run_readback_mismatch_is_reported_without_masking(monkeypatch):

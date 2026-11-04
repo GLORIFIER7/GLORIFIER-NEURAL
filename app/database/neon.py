@@ -1,11 +1,16 @@
 """Opt-in Neon PostgreSQL connectivity checks for local and Cloudflare runtimes."""
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from app.database.worker_connection import close_worker_database, connect_worker_database
+
+
+_LOGGER = logging.getLogger(__name__)
+WORKER_CONNECT_TIMEOUT_SECONDS = 15
 
 
 def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
@@ -115,7 +120,12 @@ class NeonConnectivityProbe:
             raise RuntimeError("Neon connectivity probe failed") from None
 
     def check_worker(self) -> None:
-        """Verify a read-only Neon connection using the Cloudflare Workers driver."""
+        """Verify a read-only Neon connection using the Cloudflare Workers driver.
+
+        The 15-second budget matches Cloudflare Hyperdrive's documented initial
+        origin-connection window and allows a suspended Neon compute to wake up.
+        """
+
         try:
             import pg8000
         except ImportError:
@@ -125,17 +135,30 @@ class NeonConnectivityProbe:
         row = None
         query_completed = operation_failed = cleanup_failed = False
         try:
+            timeout = (
+                WORKER_CONNECT_TIMEOUT_SECONDS
+                if self._hyperdrive is not None
+                else self._timeout
+            )
             connection = connect_worker_database(
-                pg8000, self._database_url, self._hyperdrive, self._timeout
+                pg8000,
+                self._database_url,
+                self._hyperdrive,
+                timeout,
             )
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
             row = cursor.fetchone()
             query_completed = True
-        except Exception:  # noqa: BLE001 - never expose DSN or database details
+        except Exception as exc:  # noqa: BLE001 - never expose DSN or database details
             operation_failed = True
+            _LOGGER.warning(
+                "Neon Worker connectivity probe failed (%s)", type(exc).__name__
+            )
         finally:
             cleanup_failed = close_worker_database(cursor, connection)
+            if cleanup_failed:
+                _LOGGER.warning("Neon Worker connectivity probe cleanup failed")
 
         if query_completed and row != (1,):
             raise RuntimeError("Neon connectivity probe returned an unexpected result")
