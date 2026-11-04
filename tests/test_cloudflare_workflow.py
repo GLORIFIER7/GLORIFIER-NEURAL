@@ -41,10 +41,8 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
 
     required_runtime_checks = (
         "uv sync --locked --group dev --no-install-project",
-        "Build and install the Neural application wheel for Cloudflare bundling",
-        "uv build --wheel",
-        'assert "app/api.py" in names',
-        "uv pip install --python .venv/bin/python --no-deps",
+        "Prepare Neural application source beside the Worker entrypoint",
+        "python prepare_worker.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("torch") is None',
