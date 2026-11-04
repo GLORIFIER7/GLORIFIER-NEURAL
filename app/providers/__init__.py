@@ -186,7 +186,7 @@ class NvidiaNimAdapter(ProviderAdapter):
                     raise RuntimeError("NVIDIA NIM returned an invalid content length") from None
 
             raw = await response.text()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise RuntimeError("NVIDIA NIM request exceeded its timeout") from None
         except RuntimeError:
             raise
@@ -201,7 +201,7 @@ class NvidiaNimAdapter(ProviderAdapter):
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise RuntimeError("NVIDIA NIM returned an invalid JSON response") from None
         if not isinstance(payload, dict):
-            raise RuntimeError("NVIDIA NIM returned an invalid JSON response")
+            raise TypeError("NVIDIA NIM returned an invalid JSON response")
         return payload
 
     async def acheck_readiness(self) -> None:
