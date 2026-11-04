@@ -120,6 +120,12 @@ class NeonConnectivityProbe:
         except ImportError:
             raise RuntimeError("Neon connectivity driver is not installed") from None
 
+        connection = None
+        cursor = None
+        row = None
+        query_completed = False
+        operation_failed = False
+        cleanup_failed = False
         try:
             if self._hyperdrive is not None:
                 connection = pg8000.connect(
@@ -142,16 +148,25 @@ class NeonConnectivityProbe:
                     ssl_context=ssl.create_default_context(),
                     timeout=self._timeout,
                 )
-            try:
-                cursor = connection.cursor()
-                try:
-                    cursor.execute("SELECT 1")
-                    row = cursor.fetchone()
-                finally:
-                    cursor.close()
-            finally:
-                connection.close()
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
+            query_completed = True
         except Exception:  # noqa: BLE001 - do not leak DSN, server errors, or query context
-            raise RuntimeError("Neon connectivity probe failed") from None
-        if row != (1,):
+            operation_failed = True
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:  # noqa: BLE001 - preserve the authoritative probe result
+                    cleanup_failed = True
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:  # noqa: BLE001 - preserve the authoritative probe result
+                    cleanup_failed = True
+
+        if query_completed and row != (1,):
             raise RuntimeError("Neon connectivity probe returned an unexpected result")
+        if operation_failed or cleanup_failed:
+            raise RuntimeError("Neon connectivity probe failed") from None
