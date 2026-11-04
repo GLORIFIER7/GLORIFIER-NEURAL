@@ -78,20 +78,19 @@ provider-ready safe mode until the structured response confirms the expected dat
 authentication, and rate-limit states. `/health` reports process liveness only.
 
 Pull requests build and validate the Worker bundle in GitHub Actions dry-run mode.
-The previous Cloudflare Workers Builds configuration for the temporary feature branch
-used `npx wrangler preview`, but previews are disabled and the command required a
-preview configuration. To preserve the no-preview policy, that stale branch-specific
-trigger was removed. Cloudflare's API no longer reports a Worker Builds repository
-configuration associated with this Worker. The live production Worker was not
-deleted or modified by removing that trigger and remains on the deployment/version
-recorded above.
+Cloudflare Workers Builds also has an automatic `main`-branch production deployment
+path configured under `/cloudflare` with `bash ./worker-build.sh deploy`. A separate
+manual GitHub Actions `workflow_dispatch` deployment path is available, gated by
+`deploy=true` on `main` and the `CLOUDFLARE_API_TOKEN` secret plus
+`CLOUDFLARE_ACCOUNT_ID` variable in the
+`glorifier-neural-cloudflare-production` GitHub Environment.
 
-The repository-controlled production release path is the **Cloudflare Neural Worker**
-GitHub Actions workflow's manual-only `workflow_dispatch`, gated by `deploy=true`
-on `main` and the `CLOUDFLARE_API_TOKEN` secret plus `CLOUDFLARE_ACCOUNT_ID`
-variable in the `glorifier-neural-cloudflare-production` GitHub Environment.
-Push and pull-request runs validate or dry-run only; they do not deploy production.
-
+The feature-branch Workers Builds configuration for this PR has been corrected to
+run from `/cloudflare`, prepare the Worker package with
+`bash ./worker-build.sh --prepare-only`, and finish with
+`npx wrangler deploy --dry-run`. Its `previews_enabled` flag is false, so this
+branch build validates the bundle without publishing a Preview or production version.
+The main-branch production deployment configuration remains unchanged.
 ## API access
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
