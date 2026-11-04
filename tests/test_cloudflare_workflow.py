@@ -30,7 +30,7 @@ def test_cloudflare_production_deployment_is_restricted_to_main():
     )
 
 
-def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
+def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drivers():
     workflow_path = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -59,10 +59,11 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "python prepare_worker.py",
         "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
-        "Verify Cloudflare Python Worker runtime startup without optional drivers",
+        "Verify Cloudflare Python Worker runtime startup including asyncpg",
         "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("pg8000") is not None',
+        'importlib.util.find_spec("asyncpg") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "uv run --locked pywrangler deploy --dry-run",
