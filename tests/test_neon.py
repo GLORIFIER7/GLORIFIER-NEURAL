@@ -1,3 +1,4 @@
+import secrets
 import sys
 import types
 
@@ -217,7 +218,7 @@ def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
     monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
     hyperdrive = types.SimpleNamespace(
         user="neon_readonly",
-        password="bound-secret",
+        password=secrets.token_urlsafe(32),
         host="hyperdrive.internal",
         port="5432",
         database="glorifier",
