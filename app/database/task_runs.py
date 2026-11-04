@@ -162,6 +162,11 @@ class TaskRunRepository:
         except ImportError:
             raise RuntimeError("Neon task-run driver is not installed") from None
 
+        connection = None
+        cursor = None
+        operation_failed = False
+        cleanup_failed = False
+        readback_mismatch = False
         try:
             selected_hyperdrive = hyperdrive or self._hyperdrive
             if selected_hyperdrive is not None:
@@ -185,31 +190,40 @@ class TaskRunRepository:
                     ssl_context=ssl.create_default_context(),
                     timeout=self._connect_timeout,
                 )
-            try:
-                cursor = connection.cursor()
-                try:
-                    cursor.execute(
-                        """INSERT INTO glorifier.task_runs
-                           (request_id, action_class, status, provider, evidence, created_at, expires_at)
-                           VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
-                        (
-                            values[0], values[1], values[2], values[3],
-                            json.dumps(values[4]), values[5], values[6],
-                        ),
-                    )
-                    connection.commit()
-                    cursor.execute(
-                        "SELECT request_id FROM glorifier.task_runs WHERE request_id = %s",
-                        (values[0],),
-                    )
-                    row = cursor.fetchone()
-                    if row is None or str(row[0]) != values[0]:
-                        raise RuntimeError("Task-run readback did not match the inserted record")
-                finally:
-                    cursor.close()
-            finally:
-                connection.close()
+            cursor = connection.cursor()
+            cursor.execute(
+                """INSERT INTO glorifier.task_runs
+                   (request_id, action_class, status, provider, evidence, created_at, expires_at)
+                   VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
+                (
+                    values[0], values[1], values[2], values[3],
+                    json.dumps(values[4]), values[5], values[6],
+                ),
+            )
+            connection.commit()
+            cursor.execute(
+                "SELECT request_id FROM glorifier.task_runs WHERE request_id = %s",
+                (values[0],),
+            )
+            row = cursor.fetchone()
+            readback_mismatch = row is None or str(row[0]) != values[0]
         except Exception:  # noqa: BLE001 - never leak DSN or database details
+            operation_failed = True
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:  # noqa: BLE001 - never mask read-back evidence
+                    cleanup_failed = True
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:  # noqa: BLE001 - never mask read-back evidence
+                    cleanup_failed = True
+
+        if readback_mismatch:
+            raise RuntimeError("Task-run readback did not match the inserted record")
+        if operation_failed or cleanup_failed:
             raise RuntimeError("Neon task-run persistence failed") from None
 
     def delete_expired(self, *, batch_size: int = 500, now: datetime | None = None) -> int:
