@@ -43,25 +43,9 @@ jobs:
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
-      - name: Build and install the Neural application wheel for Cloudflare bundling
+      - name: Prepare Neural application source beside the Worker entrypoint
         working-directory: cloudflare
-        run: |
-          set -euo pipefail
-          uv build --wheel
-          wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          python - "$wheel" <<'PY'
-          import sys
-          from zipfile import ZipFile
-
-          with ZipFile(sys.argv[1]) as package:
-              names = set(package.namelist())
-          assert "app/api.py" in names, "Cloudflare wheel does not contain app/api.py"
-          assert "app/database/neon.py" in names
-          assert "app/neural/torch_status.py" in names
-          PY
-          uv pip install --python .venv/bin/python --no-deps "$wheel"
-          uv run --locked python -c 'from app.api import app; assert app is not None'
+        run: python prepare_worker.py
       - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
         run: |
@@ -130,7 +114,10 @@ jobs:
 
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
-        run: uv sync --locked --group dev
+        run: uv sync --locked --group dev --no-install-project
+      - name: Prepare Neural application source beside the Worker entrypoint
+        working-directory: cloudflare
+        run: python prepare_worker.py
       - name: Verify Cloudflare deployment credential exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
