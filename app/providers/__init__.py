@@ -142,10 +142,10 @@ class NvidiaNimAdapter(ProviderAdapter):
         return fetch
 
     @staticmethod
-    def _request_options(method: str, body: str | None) -> dict:
+    def _request_options(method: str, body: str | None, api_key: str) -> dict:
         """Create a redirect-free JSON request with only the necessary headers."""
         headers = {
-            "Authorization": "Bearer " + "REDACTED",
+            "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
         }
         options = {"method": method, "headers": headers, "redirect": "manual"}
@@ -217,8 +217,7 @@ class NvidiaNimAdapter(ProviderAdapter):
     ) -> dict:
         """Fetch a bounded JSON object from NVIDIA using Cloudflare Fetch."""
         fetch_fn = self._resolve_fetch()
-        options = self._request_options(method, body)
-        options["headers"]["Authorization"] = f"Bearer {self._api_key}"
+        options = self._request_options(method, body, self._api_key)
         raw = await self._fetch_text(
             fetch_fn,
             url,
