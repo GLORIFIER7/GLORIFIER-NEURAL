@@ -195,11 +195,17 @@ async def _enforce_readiness_rate_limit(request: Request) -> None:
         raise HTTPException(status_code=503, detail="Readiness client identity is unavailable") from None
     try:
         result = await limiter.limit({"key": f"ready:{client_ip}"})
-        success = result.get("success") if isinstance(result, Mapping) else getattr(result, "success", None)
     except Exception as exc:  # noqa: BLE001 - fail closed without exposing binding details
         raise HTTPException(
             status_code=503,
-            detail=f"Cloudflare readiness rate-limit call failed ({type(exc).__name__})",
+            detail=f"Cloudflare readiness limiter invocation failed ({type(exc).__name__}: {str(exc)[:120]})",
+        ) from None
+    try:
+        success = result.get("success") if isinstance(result, Mapping) else getattr(result, "success", None)
+    except Exception as exc:  # noqa: BLE001 - do not trust a malformed binding result
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cloudflare readiness limiter result parsing failed ({type(exc).__name__}: {str(exc)[:120]})",
         ) from None
     if not isinstance(success, bool):
         raise HTTPException(
