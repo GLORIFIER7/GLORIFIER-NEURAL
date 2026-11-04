@@ -82,9 +82,17 @@ def main() -> int:
     try:
         health = json.loads(Path(args.health_file).read_text(encoding="utf-8"))
         readiness = json.loads(Path(args.readiness_file).read_text(encoding="utf-8"))
+        if not isinstance(health, dict) or not isinstance(readiness, dict):
+            raise TypeError("Neural health and readiness responses must be JSON objects.")
         validate_health(health)
         mode = classify_readiness(args.readiness_status, readiness)
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
+    except (
+        OSError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+        AttributeError,
+    ) as exc:
         print(f"::error::{exc}")
         return 1
 
