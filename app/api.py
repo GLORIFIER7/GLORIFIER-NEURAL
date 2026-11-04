@@ -77,11 +77,12 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 
 def _request_environment_value(request: Request, name: str) -> str | None:
-    """Read a Cloudflare Worker binding from the ASGI scope, then local process env.
+    """Read a Cloudflare Worker binding or, outside Workers, the local process env.
 
-    Cloudflare exposes Worker bindings through the per-request ASGI scope. Avoid
-    copying them into os.environ: that global mutation is unsafe across concurrent
-    requests and would make isolate-local secrets harder to reason about.
+    A present Worker environment is authoritative: a missing binding must fail
+    closed rather than fall back to an unrelated process-level credential.
+    Avoid copying request-scoped bindings into os.environ because that global
+    mutation is unsafe across concurrent requests.
     """
     worker_env = request.scope.get("env")
     if worker_env is not None:
@@ -89,8 +90,7 @@ def _request_environment_value(request: Request, name: str) -> str | None:
             value = worker_env.get(name)
         else:
             value = getattr(worker_env, name, None)
-        if value is not None:
-            return str(value)
+        return str(value) if value is not None else None
     return os.getenv(name)
 
 
