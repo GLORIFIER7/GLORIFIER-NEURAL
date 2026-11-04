@@ -1,5 +1,6 @@
 """Regression tests for the Neural Cloudflare deployment workflow."""
 
+import json
 from pathlib import Path
 import re
 
@@ -30,7 +31,7 @@ def test_cloudflare_production_deployment_is_restricted_to_main():
     )
 
 
-def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
+def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drivers():
     workflow_path = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -45,6 +46,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
 
     assert 'glorifier-neural-app = { path = "neural_app", editable = false }' in cloudflare_project
     assert 'include = ["app*"]' in package_project
+    assert '"asyncpg==0.31.0"' in cloudflare_project
     assert 'WORKER_APP = WORKER_ROOT / "neural_app" / "app"' in preparation_script
 
     required_runtime_checks = (
@@ -59,13 +61,17 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "python prepare_worker.py",
         "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
-        "Verify Cloudflare Python Worker runtime startup without optional drivers",
+        "Verify Cloudflare Python Worker runtime startup including asyncpg",
         "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("pg8000") is not None',
+        'importlib.util.find_spec("asyncpg") is not None',
+        'importlib.util.find_spec("asyncpg") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
-        "uv run --locked pywrangler deploy --dry-run",
+        "bash ./worker-build.sh --prepare-only",
+        "npx wrangler deploy --dry-run",
+        "bash ./worker-build.sh deploy",
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
@@ -73,6 +79,22 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
     assert "contents: write" not in workflow
     assert "git push origin" not in workflow
     assert "Verify committed Cloudflare dependency lock" not in workflow
+
+
+def test_cloudflare_build_script_removes_host_venvs_before_wrangler_upload():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "worker-build.sh"
+    )
+    script = script_path.read_text(encoding="utf-8")
+
+    assert "python prepare_worker.py" in script
+    assert "uv run --locked pywrangler sync" in script
+    assert "rm -rf -- .venv .venv-workers" in script
+    assert 'exec npx wrangler "$mode"' in script
+    assert "preview|deploy|--prepare-only" in script
+    assert "--prepare-only" in script
 
 
 def test_cloudflare_worker_preview_urls_are_explicitly_disabled():
@@ -147,3 +169,20 @@ def test_cloudflare_workflow_preflights_api_secret_and_smokes_safe_mode_truthful
     assert "--health-file /tmp/neural-health.json" in workflow
     assert "--readiness-file /tmp/neural-ready.json" in workflow
     assert "--readiness-status" in workflow
+
+
+def test_cloudflare_worker_excludes_duplicate_entry_point_metadata():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    excluded = config.get("python_modules", {}).get("exclude", [])
+
+    assert "**/*.dist-info/*.txt" in excluded, (
+        "Wrangler must not add duplicate optional Python distribution text metadata"
+    )
+    assert "**/*.dist-info/METADATA" not in excluded, (
+        "Keep package METADATA available for runtime version and package inspection"
+    )

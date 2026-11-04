@@ -8,6 +8,7 @@
   ],
   "workers_dev": true,
   "preview_urls": false,
+  "previews": {},
   "ratelimits": [
     {
       "name": "GLORIFIER_RATE_LIMITER",
@@ -51,5 +52,12 @@
       "binding": "NEON_READONLY",
       "id": "eff847b6c3c64488a989f1fa67d966a0"
     }
-  ]
+  ],
+  "python_modules": {
+    "exclude": [
+      "**/*.pyc",
+      "**/__pycache__",
+      "**/*.dist-info/*.txt"
+    ]
+  }
 }

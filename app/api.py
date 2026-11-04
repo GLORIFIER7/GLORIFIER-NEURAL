@@ -218,10 +218,9 @@ async def _cached_worker_readiness(request: Request, worker_env) -> tuple[str, s
         try:
             probe = NeonConnectivityProbe.from_environment(worker_env)
             if probe is not None:
-                # The readiness cache lock already coalesces probes. Keep this
-                # read-only connection independent from the task-run writer lock so
-                # a Hyperdrive cold start cannot delay a task's metadata commit.
-                probe.check_worker()
+                # Async Hyperdrive sockets are non-blocking; keep this read-only
+                # readiness probe independent from the task-run writer lock.
+                await probe.check_worker()
                 database_status = "VERIFIED"
         except Exception:  # noqa: BLE001 - do not leak connection details
             database_status = "DEGRADED"

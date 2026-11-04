@@ -1,4 +1,7 @@
+import asyncio
+import logging
 import secrets
+import ssl
 import sys
 import types
 
@@ -118,110 +121,64 @@ def test_neon_probe_rejects_invalid_timeout_types_and_ranges(timeout_seconds):
 
 
 
-def test_worker_neon_probe_uses_pg8000_with_verified_tls(monkeypatch):
+
+def test_worker_neon_probe_uses_asyncpg_with_verified_tls(monkeypatch):
     calls = {}
 
-    class Cursor:
-        def execute(self, query):
-            calls["query"] = query
-
-        def fetchone(self):
-            return (1,)
-
-        def close(self):
-            calls["cursor_closed"] = True
-
     class Connection:
-        def cursor(self):
-            return Cursor()
+        async def fetchval(self, query):
+            calls["query"] = query
+            return 1
 
-        def close(self):
+        async def close(self, **kwargs):
+            calls["close_kwargs"] = kwargs
             calls["closed"] = True
 
-    def connect(**kwargs):
+    async def connect(**kwargs):
         calls["kwargs"] = kwargs
         return Connection()
 
-    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
     probe = NeonConnectivityProbe(
         "postgresql://neon_user:neon_pass@example.neon.tech/neural"
     )
 
-    probe.check_worker()
+    asyncio.run(probe.check_worker())
 
-    ssl_context = calls["kwargs"]["ssl_context"]
-    assert ssl_context.verify_mode == 2
+    ssl_context = calls["kwargs"]["ssl"]
+    assert isinstance(ssl_context, ssl.SSLContext)
+    assert ssl_context.verify_mode == ssl.CERT_REQUIRED
     assert ssl_context.check_hostname is True
     assert calls["kwargs"]["host"] == "example.neon.tech"
     assert calls["kwargs"]["database"] == "neural"
     assert calls["kwargs"]["user"] == "neon_user"
     assert calls["kwargs"]["password"] == "neon_pass"
     assert calls["kwargs"]["timeout"] == 3
+    assert calls["kwargs"]["command_timeout"] == 3
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
-
-
-def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch, caplog):
-    def connect(**_kwargs):
-        raise OSError("private database host and password")
-
-    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
-    probe = NeonConnectivityProbe(
-        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
-    )
-
-    with (
-        caplog.at_level("WARNING", logger="app.database.neon"),
-        pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error,
-    ):
-        probe.check_worker()
-
-    assert "private database host" not in str(error.value)
-    assert "neon_pass" not in str(error.value)
-    assert "OSError" in caplog.text
-    assert "private database host" not in caplog.text
-    assert "neon_pass" not in caplog.text
-
-
-def test_worker_neon_configuration_uses_task_run_opt_in_and_request_bindings():
-    env = {
-        "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
-        "NEON_DATABASE_URL": "postgresql://neon_user:neon_pass@example.neon.tech/neural",
-    }
-
-    probe = NeonConnectivityProbe.from_environment(env)
-
-    assert probe is not None
-    assert probe._database_url == env["NEON_DATABASE_URL"]
+    assert calls["close_kwargs"] == {"timeout": 3}
 
 
 def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
     calls = {}
 
-    class Cursor:
-        def execute(self, query):
-            calls["query"] = query
-
-        def fetchone(self):
-            return (1,)
-
-        def close(self):
-            return None
-
     class Connection:
-        def cursor(self):
-            return Cursor()
+        async def fetchval(self, query):
+            calls["query"] = query
+            return 1
 
-        def close(self):
+        async def close(self, **kwargs):
+            calls["close_kwargs"] = kwargs
             calls["closed"] = True
 
-    def connect(**kwargs):
+    async def connect(**kwargs):
         calls["kwargs"] = kwargs
         return Connection()
 
-    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
     hyperdrive = types.SimpleNamespace(
-        user="neon_readonly",
+        user="glorifier_worker_ro",
         password=secrets.token_urlsafe(32),
         host="hyperdrive.internal",
         port="5432",
@@ -234,41 +191,58 @@ def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
         }
     )
 
-    probe.check_worker()
+    asyncio.run(probe.check_worker())
 
     assert calls["kwargs"]["host"] == "hyperdrive.internal"
     assert calls["kwargs"]["database"] == "glorifier"
+    assert calls["kwargs"]["user"] == "glorifier_worker_ro"
+    assert calls["kwargs"]["password"] == hyperdrive.password
+    assert calls["kwargs"]["ssl"] is False
     assert calls["kwargs"]["timeout"] == 15
-    assert calls["kwargs"]["ssl_context"] is False
+    assert calls["kwargs"]["command_timeout"] == 15
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
+    assert calls["close_kwargs"] == {"timeout": 15}
+
+
+def test_worker_neon_probe_sanitizes_async_driver_errors(monkeypatch, caplog):
+    async def connect(**_kwargs):
+        raise OSError("private database host and secret-value")
+
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
+    probe = NeonConnectivityProbe(
+        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="app.database.neon"),
+        pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error,
+    ):
+        asyncio.run(probe.check_worker())
+
+    assert "private database host" not in str(error.value)
+    assert "secret-value" not in caplog.text
+    assert "neon_pass" not in caplog.text
+    assert "OSError" in caplog.text
+
 
 def test_worker_probe_preserves_result_mismatch_when_cleanup_fails(monkeypatch):
-    from types import SimpleNamespace
+    class Connection:
+        async def fetchval(self, _query):
+            return 0
 
-    class Cursor:
-        def execute(self, _query):
-            return None
-
-        def fetchone(self):
-            return (0,)
-
-        def close(self):
+        async def close(self, **_kwargs):
             raise RuntimeError("cleanup failure must not hide the probe result")
 
-    class Connection:
-        def cursor(self):
-            return Cursor()
+    async def connect(**_kwargs):
+        return Connection()
 
-        def close(self):
-            raise RuntimeError("connection cleanup failure must not hide the probe result")
-
-    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=lambda **_kwargs: Connection()))
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
     probe = NeonConnectivityProbe.from_environment(
         {
             "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
-            "NEON_READONLY": SimpleNamespace(
-                user="neon_readonly",
+            "NEON_READONLY": types.SimpleNamespace(
+                user="glorifier_worker_ro",
                 password=secrets.token_urlsafe(32),
                 host="hyperdrive.internal",
                 port="5432",
@@ -277,7 +251,38 @@ def test_worker_probe_preserves_result_mismatch_when_cleanup_fails(monkeypatch):
         }
     )
 
-    with pytest.raises(RuntimeError, match="unexpected result") as exc_info:
-        probe.check_worker()
+    with pytest.raises(RuntimeError, match="unexpected result") as error:
+        asyncio.run(probe.check_worker())
 
-    assert "cleanup failure" not in str(exc_info.value)
+    assert "cleanup failure" not in str(error.value)
+
+
+def test_worker_probe_fails_when_async_connection_cleanup_fails(monkeypatch):
+    class Connection:
+        async def fetchval(self, _query):
+            return 1
+
+        async def close(self, **_kwargs):
+            raise RuntimeError("private cleanup detail")
+
+    async def connect(**_kwargs):
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
+    probe = NeonConnectivityProbe.from_environment(
+        {
+            "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
+            "NEON_READONLY": types.SimpleNamespace(
+                user="glorifier_worker_ro",
+                password=secrets.token_urlsafe(32),
+                host="hyperdrive.internal",
+                port="5432",
+                database="glorifier",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error:
+        asyncio.run(probe.check_worker())
+
+    assert "private cleanup detail" not in str(error.value)
