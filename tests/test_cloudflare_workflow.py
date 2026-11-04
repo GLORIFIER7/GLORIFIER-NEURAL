@@ -84,3 +84,22 @@ def test_cloudflare_worker_preview_urls_are_explicitly_disabled():
     assert re.search(r'"preview_urls"\s*:\s*false', config), (
         "Production Worker preview URLs must be explicitly disabled"
     )
+
+
+
+def test_cloudflare_worker_uses_native_rate_limit_binding():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+    api_path = config_path.parents[1] / "app" / "api.py"
+    api_source = api_path.read_text(encoding="utf-8")
+
+    assert '"name": "GLORIFIER_RATE_LIMITER"' in config
+    assert '"namespace_id": "47041104"' in config
+    assert '"limit": 60' in config
+    assert '"period": 60' in config
+    assert "GLORIFIER_RATE_LIMITER" in api_source
+    assert "await rate_limit_binding.limit" in api_source
