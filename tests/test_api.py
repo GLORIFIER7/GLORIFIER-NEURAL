@@ -245,10 +245,16 @@ def test_readiness_does_not_claim_database_or_provider_health(isolated_readiness
     response = client.get("/ready")
     body = response.json()
     assert body["status"] == "NOT READY"
-    assert set(body["checks"]) == {"providers", "database"}
+    assert set(body["checks"]) == {
+        "providers", "database", "authentication", "rate_limit", "audit", "task_runs"
+    }
     assert body["checks"]["providers"] == "NOT VERIFIED"
     assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
-    assert body["requirements"]["database"] == "optional"
+    assert body["checks"]["authentication"] == "NOT REQUIRED (LOCAL)"
+    assert body["checks"]["rate_limit"] == "NOT REQUIRED (LOCAL)"
+    assert body["checks"]["audit"] == "NOT CONFIGURED (OPTIONAL)"
+    assert body["checks"]["task_runs"] == "NOT CONFIGURED (OPTIONAL)"
+    assert "optional unless" in body["requirements"]["database"]
     assert body["execution"]["inference_performed"] is False
 
 def test_declared_oversized_request_body_is_rejected():
