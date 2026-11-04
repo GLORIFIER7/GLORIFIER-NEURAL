@@ -22,22 +22,25 @@ class FixedWindowRateLimiter:
         self.window_seconds = window_seconds
         self.max_keys = max_keys
         self._clock = clock
-        # Ephemeral key protects client addresses in the in-memory rate-limit map.
-        self._fingerprint_key = secrets.token_bytes(32)
+        # Cloudflare Workers forbid entropy during module startup. Generate the
+        # per-isolate fingerprint key lazily on the first request instead.
+        self._fingerprint_key: bytes | None = None
         self._lock = threading.Lock()
         self._windows: dict[str, tuple[int, int]] = {}
 
     def allow(self, client_host: str) -> tuple[bool, int]:
         """Apply one quota per client address without retaining credentials or raw IPs."""
-        key = hmac.digest(
-            self._fingerprint_key,
-            client_host.encode("utf-8"),
-            "sha256",
-        ).hex()
         now = self._clock()
         window = int(now // self.window_seconds)
         retry_after = max(1, int((window + 1) * self.window_seconds - now))
         with self._lock:
+            if self._fingerprint_key is None:
+                self._fingerprint_key = secrets.token_bytes(32)
+            key = hmac.digest(
+                self._fingerprint_key,
+                client_host.encode("utf-8"),
+                "sha256",
+            ).hex()
             current = self._windows.get(key)
             if current is None or current[0] != window:
                 if len(self._windows) >= self.max_keys:
