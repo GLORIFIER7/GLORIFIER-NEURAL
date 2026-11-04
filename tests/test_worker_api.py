@@ -298,3 +298,55 @@ def test_worker_readiness_requires_trusted_cloudflare_client_ip():
 
     assert response.status_code == 503
     assert response.json()["checks"]["rate_limit"] == "DEGRADED"
+
+
+def test_worker_readiness_hides_rate_limit_binding_error_details():
+    class BrokenReadinessRateLimitBinding:
+        async def limit(self, _options):
+            raise RuntimeError("private-binding-credential-detail")
+
+    token = secrets.token_urlsafe(32)
+    env = {
+        "GLORIFIER_API_TOKEN": token,
+        "GLORIFIER_RATE_LIMITER": _AllowReadinessRateLimitBinding(),
+        "GLORIFIER_READINESS_LIMITER": BrokenReadinessRateLimitBinding(),
+    }
+    response = TestClient(_WorkerEnvironmentASGI(app, env)).get(
+        "/ready", headers={"CF-Connecting-IP": "198.51.100.20"}
+    )
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rate_limit"] == "DEGRADED"
+    assert "private-binding-credential-detail" not in response.text
+    assert "unavailable" in response.json()["message"].lower()
+
+
+def test_worker_readiness_reports_degraded_optional_persistence_truthfully(monkeypatch):
+    class VerifiedProvider:
+        async def acheck_readiness(self):
+            return "VERIFIED", "provider read-only probe passed"
+
+    token = secrets.token_urlsafe(32)
+    monkeypatch.setattr("app.api.WORKER_READINESS_CACHE", {})
+    monkeypatch.setattr("app.api._request_orchestrator", lambda _request: VerifiedProvider())
+    monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda _env: None)
+    monkeypatch.setattr(
+        "app.api.SupabaseRestAuditSink.from_environment",
+        lambda *_args: (_ for _ in ()).throw(ValueError("invalid persistence configuration")),
+    )
+    monkeypatch.setattr("app.api.TaskRunRepository.from_environment", lambda *_args: None)
+    env = {
+        "GLORIFIER_API_TOKEN": token,
+        "GLORIFIER_RATE_LIMITER": _AllowReadinessRateLimitBinding(),
+        "GLORIFIER_READINESS_LIMITER": _AllowReadinessRateLimitBinding(),
+    }
+    response = TestClient(_WorkerEnvironmentASGI(app, env)).get(
+        "/ready", headers={"CF-Connecting-IP": "198.51.100.21"}
+    )
+
+    body = response.json()
+    assert response.status_code == 503
+    assert body["status"] == "NOT READY"
+    assert body["checks"]["audit"] == "DEGRADED"
+    assert "passed read-only/configuration checks" not in body["message"]
+    assert "persistence" in body["message"].lower()
