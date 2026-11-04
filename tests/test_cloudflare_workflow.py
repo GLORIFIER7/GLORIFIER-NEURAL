@@ -124,7 +124,7 @@ def test_cloudflare_worker_binds_existing_readonly_neon_hyperdrive():
     assert '"GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"' in config
 
 
-def test_cloudflare_workflow_requires_live_production_smoke_after_deploy():
+def test_cloudflare_workflow_preflights_api_secret_and_smokes_safe_mode_truthfully():
     workflow_path = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -133,10 +133,17 @@ def test_cloudflare_workflow_requires_live_production_smoke_after_deploy():
     )
     workflow = workflow_path.read_text(encoding="utf-8")
 
+    assert "Verify required Neural API token is provisioned before publishing" in workflow
+    assert "/workers/scripts/glorifier-neural/secrets" in workflow
+    assert '"GLORIFIER_API_TOKEN" not in names' in workflow
+    assert "Required Neural API token secret is present; its value was not read." in workflow
+
     assert "  smoke:" in workflow
     assert "needs: deploy" in workflow
     assert "/health" in workflow
     assert "/ready" in workflow
-    assert 'required = ("providers", "database", "authentication", "rate_limit")' in workflow
-    assert 'checks.get(name) != "VERIFIED"' in workflow
-    assert "production release is not verified" in workflow
+    assert "Verify live readiness or explicitly configured provider-disabled safe mode" in workflow
+    assert "cloudflare/deployment_smoke.py" in workflow
+    assert "--health-file /tmp/neural-health.json" in workflow
+    assert "--readiness-file /tmp/neural-ready.json" in workflow
+    assert "--readiness-status" in workflow
