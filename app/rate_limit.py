@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import secrets
 import threading
 import time
 
@@ -21,12 +23,15 @@ class FixedWindowRateLimiter:
         self.window_seconds = window_seconds
         self.max_keys = max_keys
         self._clock = clock
+        # Ephemeral per-instance key; rate-limit state is process-local too.
+        self._fingerprint_key = secrets.token_bytes(32)
         self._lock = threading.Lock()
         self._windows: dict[str, tuple[int, int]] = {}
 
     def allow(self, client_host: str, token: str) -> tuple[bool, int]:
-        # Store a digest, never the bearer token itself.
-        key = hashlib.sha256(f"{client_host}\0{token}".encode()).hexdigest()
+        # Store a keyed fingerprint, never the bearer token itself.
+        message = f"{client_host}\\0{token}".encode()
+        key = hmac.new(self._fingerprint_key, message, hashlib.sha256).hexdigest()
         now = self._clock()
         window = int(now // self.window_seconds)
         retry_after = max(1, int((window + 1) * self.window_seconds - now))
