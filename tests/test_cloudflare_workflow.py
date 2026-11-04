@@ -117,3 +117,22 @@ def test_cloudflare_worker_binds_existing_readonly_neon_hyperdrive():
     assert '"binding": "NEON_READONLY"' in config
     assert '"id": "eff847b6c3c64488a989f1fa67d966a0"' in config
     assert '"GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"' in config
+
+
+def test_cloudflare_workflow_requires_live_production_smoke_after_deploy():
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "cloudflare-neural-worker.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "  smoke:" in workflow
+    assert "needs: deploy" in workflow
+    assert "/health" in workflow
+    assert "/ready" in workflow
+    assert "checks.get(\"providers\")" in workflow
+    assert "checks.get(\"authentication\")" in workflow
+    assert "checks.get(\"rate_limit\")" in workflow
+    assert "production release is not verified" in workflow
