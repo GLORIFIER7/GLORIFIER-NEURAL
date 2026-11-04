@@ -370,7 +370,7 @@ def test_task_rate_limit_does_not_apply_before_authentication(monkeypatch):
     assert second.status_code == 401
 
 
-def test_final_audit_write_failure_returns_503_without_leaking_details(monkeypatch):
+def test_final_audit_write_failure_returns_outcome_without_inviting_retry(monkeypatch):
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
     writes = {"count": 0}
 
@@ -390,12 +390,55 @@ def test_final_audit_write_failure_returns_503_without_leaking_details(monkeypat
         json={"task": "safe test task", "require_approval": False},
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == (
-        "Audit persistence failed after task processing; inspect audit status"
-    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "NOT VERIFIED"
+    assert "persistence:audit:degraded" in response.json()["evidence"]
+    assert "returned to avoid an unsafe automatic retry" in response.json()["message"]
     assert "secret-key-and-private-payload" not in response.text
     assert writes["count"] == 2
+
+
+def test_task_run_write_failure_returns_completed_outcome_without_retry(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "task-run-write-token")
+    monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
+    calls = {"task": 0, "write": 0}
+
+    class BrokenTaskRunRepository:
+        def record(self, **_values):
+            calls["write"] += 1
+            raise RuntimeError("private database detail")
+
+    def completed_task(_task_request):
+        calls["task"] += 1
+        from app.schemas import TaskResponse
+
+        return TaskResponse(
+            status="VERIFIED",
+            result="completed result",
+            evidence=["execution:inference"],
+            message="Task processing completed.",
+        )
+
+    monkeypatch.setattr(
+        "app.api.TaskRunRepository.from_environment",
+        lambda *_args: BrokenTaskRunRepository(),
+    )
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
+    monkeypatch.setattr("app.api.orchestrator.run", completed_task)
+
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer task-run-write-token"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "VERIFIED"
+    assert response.json()["result"] == "completed result"
+    assert "persistence:task_runs:degraded" in response.json()["evidence"]
+    assert "returned to avoid an unsafe automatic retry" in response.json()["message"]
+    assert "private database detail" not in response.text
+    assert calls == {"task": 1, "write": 1}
 
 
 
@@ -878,10 +921,14 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
             return SimpleNamespace(success=True)
 
     class WorkerEnvironment:
-        def __init__(self, inner: ASGIApp, *, include_auth=True, include_limiter=True):
+        def __init__(
+            self, inner: ASGIApp, *, include_auth=True, include_limiter=True,
+            include_readiness_limiter=True,
+        ):
             self.inner = inner
             self.include_auth = include_auth
             self.include_limiter = include_limiter
+            self.include_readiness_limiter = include_readiness_limiter
 
         async def __call__(self, scope: Scope, receive: Receive, send: Send):
             if scope["type"] == "http":
@@ -890,6 +937,8 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
                     env["GLORIFIER_API_TOKEN"] = ready_token
                 if self.include_limiter:
                     env["GLORIFIER_RATE_LIMITER"] = AllowRateLimitBinding()
+                if self.include_readiness_limiter:
+                    env["GLORIFIER_READINESS_LIMITER"] = AllowRateLimitBinding()
                 scope = dict(scope)
                 scope["env"] = env
             await self.inner(scope, receive, send)
@@ -902,7 +951,23 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
     monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
     monkeypatch.setattr("app.api.TaskRunRepository.from_environment", lambda *_args: None)
 
-    ready = TestClient(WorkerEnvironment(app)).get("/ready")
+    calls = {"provider": 0, "database": 0}
+    monkeypatch.setattr("app.api.WORKER_READINESS_CACHE", {})
+
+    class CountingOrchestrator:
+        async def acheck_readiness(self):
+            calls["provider"] += 1
+            return "VERIFIED", "provider read-only probe passed"
+
+    class CountingNeonProbe:
+        def check_worker(self):
+            calls["database"] += 1
+
+    monkeypatch.setattr("app.api._request_orchestrator", lambda _request: CountingOrchestrator())
+    monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda _env: CountingNeonProbe())
+    with TestClient(WorkerEnvironment(app)) as ready_client:
+        ready = ready_client.get("/ready", headers={"CF-Connecting-IP": "198.51.100.10"})
+        cached_ready = ready_client.get("/ready", headers={"CF-Connecting-IP": "198.51.100.10"})
 
     assert ready.status_code == 200
     assert ready.json()["checks"]["providers"] == "VERIFIED"
@@ -910,15 +975,73 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
     assert ready.json()["checks"]["authentication"] == "VERIFIED"
     assert ready.json()["checks"]["rate_limit"] == "VERIFIED"
     assert ready.json()["execution"]["inference_performed"] is False
+    assert cached_ready.status_code == 200
+    assert calls == {"provider": 1, "database": 1}
 
     missing_auth = TestClient(
         WorkerEnvironment(app, include_auth=False)
-    ).get("/ready")
+    ).get("/ready", headers={"CF-Connecting-IP": "198.51.100.11"})
     assert missing_auth.status_code == 503
     assert missing_auth.json()["checks"]["authentication"] == "DEGRADED"
 
     missing_limiter = TestClient(
         WorkerEnvironment(app, include_limiter=False)
-    ).get("/ready")
+    ).get("/ready", headers={"CF-Connecting-IP": "198.51.100.12"})
     assert missing_limiter.status_code == 503
     assert missing_limiter.json()["checks"]["rate_limit"] == "DEGRADED"
+
+
+def test_worker_readiness_is_rate_limited_before_upstream_probes():
+    from fastapi.testclient import TestClient
+
+    class DenyReadinessLimiter:
+        def __init__(self):
+            self.calls = 0
+
+        async def limit(self, _options):
+            self.calls += 1
+            return {"success": False}
+
+    limiter = DenyReadinessLimiter()
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(
+            app,
+            {
+                "GLORIFIER_API_TOKEN": "ready-token",
+                "GLORIFIER_RATE_LIMITER": type(
+                    "TaskLimiter", (), {"limit": staticmethod(lambda _options: {"success": True})}
+                )(),
+                "GLORIFIER_READINESS_LIMITER": limiter,
+            },
+        )
+    )
+    response = worker_client.get(
+        "/ready", headers={"CF-Connecting-IP": "198.51.100.50"}
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert limiter.calls == 1
+
+
+def test_worker_readiness_requires_trusted_cloudflare_client_ip():
+    from fastapi.testclient import TestClient
+
+    class AllowReadinessLimiter:
+        async def limit(self, _options):
+            return {"success": True}
+
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(
+            app,
+            {
+                "GLORIFIER_API_TOKEN": "ready-token",
+                "GLORIFIER_RATE_LIMITER": object(),
+                "GLORIFIER_READINESS_LIMITER": AllowReadinessLimiter(),
+            },
+        )
+    )
+    response = worker_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rate_limit"] == "DEGRADED"
