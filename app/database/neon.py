@@ -6,11 +6,6 @@ import os
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
-from app.database.worker_connection import close_worker_database, connect_worker_database
-
-_LOGGER = logging.getLogger(__name__)
-
-
 _LOGGER = logging.getLogger(__name__)
 WORKER_CONNECT_TIMEOUT_SECONDS = 15
 
@@ -42,7 +37,7 @@ def _environment_value(environment, name: str, default: str = "") -> str:
 
 
 class NeonConnectivityProbe:
-    """Run a bounded SELECT 1 probe using psycopg locally or pg8000 on Workers."""
+    """Run a bounded SELECT 1 probe using psycopg locally or asyncpg on Workers."""
 
     def __init__(
         self,
@@ -121,52 +116,75 @@ class NeonConnectivityProbe:
         except Exception:  # noqa: BLE001 - do not leak DSN, server errors, or query context
             raise RuntimeError("Neon connectivity probe failed") from None
 
-    def check_worker(self) -> None:
-        """Verify a read-only Neon connection using the Cloudflare Workers driver.
+    async def check_worker(self) -> None:
+        """Verify a read-only Neon connection through Cloudflare Hyperdrive.
 
-        The 15-second budget matches Cloudflare Hyperdrive's documented initial
-        origin-connection window and allows a suspended Neon compute to wake up.
+        Hyperdrive terminates upstream TLS, so its Worker driver connection uses
+        ssl=False. Direct Worker DSNs still use a verifying SSL context.
         """
-
         try:
-            import pg8000
+            import asyncpg
         except ImportError:
+            _LOGGER.error("Neon Worker connectivity driver is not installed")
             raise RuntimeError("Neon connectivity driver is not installed") from None
 
-        connection = cursor = None
+        connection = None
         row = None
         query_completed = operation_failed = cleanup_failed = False
+        timeout = (
+            WORKER_CONNECT_TIMEOUT_SECONDS
+            if self._hyperdrive is not None
+            else self._timeout
+        )
+        stage = "connect"
         try:
-            timeout = (
-                WORKER_CONNECT_TIMEOUT_SECONDS
-                if self._hyperdrive is not None
-                else self._timeout
-            )
-            connection = connect_worker_database(
-                pg8000,
-                self._database_url,
-                self._hyperdrive,
-                timeout,
-            )
-            cursor = connection.cursor()
-            cursor.execute("SELECT 1")
-            row = cursor.fetchone()
+            if self._hyperdrive is not None:
+                connection = await asyncpg.connect(
+                    user=str(self._hyperdrive.user),
+                    password=str(self._hyperdrive.password),
+                    host=str(self._hyperdrive.host),
+                    port=int(self._hyperdrive.port),
+                    database=str(self._hyperdrive.database),
+                    ssl=False,
+                    timeout=timeout,
+                    command_timeout=timeout,
+                )
+            else:
+                parsed = urlparse(self._database_url)
+                import ssl
+
+                connection = await asyncpg.connect(
+                    user=parsed.username,
+                    password=parsed.password,
+                    host=parsed.hostname,
+                    port=parsed.port or 5432,
+                    database=parsed.path.lstrip("/"),
+                    ssl=ssl.create_default_context(),
+                    timeout=timeout,
+                    command_timeout=timeout,
+                )
+            stage = "query"
+            row = await connection.fetchval("SELECT 1")
             query_completed = True
         except Exception as exc:  # noqa: BLE001 - never expose DSN or database details
-            _LOGGER.warning(
-                "Neon Worker connectivity probe failed (%s)",
-                type(exc).__name__,
-            )
             operation_failed = True
             _LOGGER.warning(
-                "Neon Worker connectivity probe failed (%s)", type(exc).__name__
+                "Neon Worker connectivity probe failed at stage=%s (%s)",
+                stage,
+                type(exc).__name__,
             )
         finally:
-            cleanup_failed = close_worker_database(cursor, connection)
-            if cleanup_failed:
-                _LOGGER.warning("Neon Worker connectivity probe cleanup failed")
+            if connection is not None:
+                try:
+                    await connection.close(timeout=timeout)
+                except Exception as exc:  # noqa: BLE001 - preserve the primary probe result
+                    cleanup_failed = True
+                    _LOGGER.warning(
+                        "Neon Worker connectivity probe cleanup failed (%s)",
+                        type(exc).__name__,
+                    )
 
-        if query_completed and row != (1,):
+        if query_completed and row != 1:
             raise RuntimeError("Neon connectivity probe returned an unexpected result")
         if operation_failed or cleanup_failed:
             raise RuntimeError("Neon connectivity probe failed") from None
