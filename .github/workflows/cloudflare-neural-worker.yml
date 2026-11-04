@@ -26,8 +26,6 @@ permissions:
 jobs:
   validate:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,37 +43,9 @@ jobs:
       - name: Prepare Neural application source as local Worker dependency
         working-directory: cloudflare
         run: python prepare_worker.py
-      - name: Verify or create the committed Cloudflare dependency lock
+      - name: Resolve Cloudflare-only dependency lock
         working-directory: cloudflare
-        run: |
-          if [ -f uv.lock ]; then
-            uv lock --check
-          else
-            uv lock
-          fi
-      - name: Commit initial dependency lock to this repository's PR branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: |
-          set -euo pipefail
-          cp cloudflare/uv.lock "$RUNNER_TEMP/neural-uv.lock"
-          git fetch origin "$BRANCH"
-          git checkout -B "$BRANCH" "origin/$BRANCH"
-          python cloudflare/prepare_worker.py
-          cp "$RUNNER_TEMP/neural-uv.lock" cloudflare/uv.lock
-          if ! (cd cloudflare && uv lock --check); then
-            (cd cloudflare && uv lock)
-          fi
-          git add cloudflare/uv.lock
-          if git diff --cached --quiet; then
-            echo "Committed Cloudflare lockfile is already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "build(cloudflare): commit pinned Neural Worker dependencies [skip ci]"
-          git push origin "HEAD:refs/heads/${BRANCH}"
+        run: uv lock
       - name: Install Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
@@ -119,6 +89,13 @@ jobs:
       - name: Build Cloudflare Python Worker bundle without deployment
         working-directory: cloudflare
         run: uv run --locked pywrangler deploy --dry-run
+      - name: Upload validated Cloudflare dependency lock
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cloudflare-neural-uv-lock
+          path: cloudflare/uv.lock
+          if-no-files-found: error
+          retention-days: 7
 
   deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy == true && github.ref == 'refs/heads/main'
@@ -135,12 +112,14 @@ jobs:
         with:
           enable-cache: false
           version: "0.13.6"
+      - name: Download the exact dependency lock validated by the build job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cloudflare-neural-uv-lock
+          path: cloudflare
       - name: Prepare Neural application source as local Worker dependency
         working-directory: cloudflare
         run: python prepare_worker.py
-      - name: Verify committed Cloudflare dependency lock
-        working-directory: cloudflare
-        run: uv lock --check
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
         run: uv sync --locked --group dev --no-install-project
