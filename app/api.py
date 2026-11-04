@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import os
 import re
 import secrets
@@ -30,6 +31,9 @@ orchestrator = build_orchestrator_from_environment()
 MAX_REQUEST_BODY_BYTES = 65_536
 TASK_RATE_LIMITER = FixedWindowRateLimiter(max_requests=60, window_seconds=60)
 WORKER_DATABASE_LOCK = asyncio.Lock()
+WORKER_READINESS_CACHE_TTL_SECONDS = 30.0
+WORKER_READINESS_CACHE: dict[tuple[str, ...], tuple[float, str, str, str]] = {}
+WORKER_READINESS_CACHE_LOCK = asyncio.Lock()
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
@@ -173,6 +177,80 @@ async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -
         await asyncio.to_thread(sink.write, event)
 
 
+async def _enforce_readiness_rate_limit(request: Request) -> None:
+    """Bound public Worker readiness probes before they contact NVIDIA or Neon."""
+    if request.scope.get("env") is None:
+        return
+    binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
+    limiter = getattr(binding, "limit", None) if binding is not None else None
+    if not callable(limiter):
+        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable")
+    raw_client_ip = request.headers.get("cf-connecting-ip", "").strip()
+    try:
+        client_ip = str(ipaddress.ip_address(raw_client_ip))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Readiness client identity is unavailable") from None
+    try:
+        result = await limiter.limit({"key": f"ready:{client_ip}"})
+        success = result.get("success") if isinstance(result, Mapping) else getattr(result, "success", None)
+    except Exception:  # noqa: BLE001 - fail closed without exposing binding details
+        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable") from None
+    if not isinstance(success, bool):
+        raise HTTPException(status_code=503, detail="Readiness rate limiting is unavailable")
+    if not success:
+        raise HTTPException(
+            status_code=429,
+            detail="Readiness probe rate limit exceeded; retry after the current minute window",
+            headers={"Retry-After": "60"},
+        )
+
+
+def _worker_readiness_cache_key(request: Request) -> tuple[str, ...]:
+    """Key cached probes by non-secret configuration, never by credential contents."""
+    names = (
+        "GLORIFIER_ENABLE_INFERENCE",
+        "GLORIFIER_PROVIDER",
+        "NVIDIA_NIM_MODEL",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
+        "GLORIFIER_NEON_CONNECTIVITY_ENABLED",
+    )
+    values = tuple(_request_environment_value(request, name) or "" for name in names)
+    return (
+        *values,
+        "nvidia-key-present" if _request_environment_value(request, "NVIDIA_NIM_API_KEY") else "nvidia-key-absent",
+        "neon-readonly-bound" if _request_worker_binding(request, "NEON_READONLY") is not None else "neon-readonly-unbound",
+    )
+
+
+async def _cached_worker_readiness(request: Request, worker_env) -> tuple[str, str, str]:
+    """Coalesce public upstream/database probes and cache results briefly."""
+    cache_key = _worker_readiness_cache_key(request)
+    loop = asyncio.get_running_loop()
+    async with WORKER_READINESS_CACHE_LOCK:
+        cached = WORKER_READINESS_CACHE.get(cache_key)
+        if cached is not None and loop.time() - cached[0] < WORKER_READINESS_CACHE_TTL_SECONDS:
+            return cached[1], cached[2], cached[3]
+        try:
+            provider_status, provider_message = await _request_orchestrator(request).acheck_readiness()
+        except Exception as exc:  # noqa: BLE001 - readiness never exposes provider secrets
+            provider_status = "DEGRADED"
+            provider_message = f"Provider readiness probe failed ({type(exc).__name__})."
+        database_status = "NOT CONFIGURED (OPTIONAL)"
+        try:
+            probe = NeonConnectivityProbe.from_environment(worker_env)
+            if probe is not None:
+                # Cloudflare Python Workers use async TCP sockets underneath synchronous drivers.
+                async with WORKER_DATABASE_LOCK:
+                    probe.check_worker()
+                database_status = "VERIFIED"
+        except Exception:  # noqa: BLE001 - do not leak connection details
+            database_status = "DEGRADED"
+        WORKER_READINESS_CACHE[cache_key] = (
+            loop.time(), provider_status, provider_message, database_status
+        )
+        return provider_status, provider_message, database_status
+
+
 def _security_response_headers(request: Request) -> dict[str, str]:
     """Build the bounded tracing and security headers for every response path."""
     request_id = getattr(request.state, "request_id", None)
@@ -223,71 +301,77 @@ def health() -> HealthResponse:
 
 @app.get("/ready", tags=["operations"])
 async def readiness(request: Request) -> JSONResponse:
-    """Probe request-scoped provider and optional database availability without inference."""
+    """Report cached, rate-limited provider and optional database readiness."""
     worker_request = request.scope.get("env") is not None
+    worker_env = request.scope.get("env") if worker_request else None
+    auth_status = "NOT REQUIRED (LOCAL)"
+    task_rate_limit_status = "NOT REQUIRED (LOCAL)"
+    readiness_rate_limit_status = "NOT REQUIRED (LOCAL)"
     if worker_request:
-        provider_status, provider_message = await _request_orchestrator(
-            request
-        ).acheck_readiness()
+        auth_status = "VERIFIED" if _request_environment_value(request, "GLORIFIER_API_TOKEN") else "DEGRADED"
+        task_rate_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
+        task_rate_limit_status = (
+            "VERIFIED" if task_rate_binding is not None and callable(getattr(task_rate_binding, "limit", None)) else "DEGRADED"
+        )
+        readiness_binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
+        readiness_rate_limit_status = (
+            "VERIFIED" if readiness_binding is not None and callable(getattr(readiness_binding, "limit", None)) else "DEGRADED"
+        )
+        try:
+            await _enforce_readiness_rate_limit(request)
+        except HTTPException as exc:
+            rate_limit_status = (
+                "DEGRADED" if exc.status_code == 503 or task_rate_limit_status == "DEGRADED" else "VERIFIED"
+            )
+            return JSONResponse(
+                status_code=exc.status_code,
+                headers=exc.headers,
+                content={
+                    "status": "NOT READY",
+                    "checks": {
+                        "providers": "NOT CHECKED",
+                        "database": "NOT CHECKED",
+                        "authentication": auth_status,
+                        "rate_limit": rate_limit_status,
+                        "audit": "NOT CHECKED",
+                        "task_runs": "NOT CHECKED",
+                    },
+                    "requirements": {
+                        "authentication": "required for Worker task execution",
+                        "rate_limit": "required for Worker task execution and readiness probes",
+                        "database": "optional unless connectivity or task-run persistence is enabled",
+                        "audit": "optional unless explicitly enabled",
+                        "task_runs": "optional unless explicitly enabled",
+                    },
+                    "execution": {"inference_performed": False},
+                    "message": exc.detail,
+                },
+            )
+        rate_limit_status = (
+            "VERIFIED" if task_rate_limit_status == "VERIFIED" and readiness_rate_limit_status == "VERIFIED" else "DEGRADED"
+        )
+        provider_status, provider_message, database_status = await _cached_worker_readiness(request, worker_env)
     else:
         provider_status, provider_message = await asyncio.to_thread(orchestrator.check_readiness)
-
-    worker_env = request.scope.get("env") if worker_request else None
-
-    database_status = "NOT CONFIGURED (OPTIONAL)"
-    try:
-        probe = (
-            NeonConnectivityProbe.from_environment(worker_env)
-            if worker_request
-            else NeonConnectivityProbe.from_environment()
-        )
-        if probe is not None:
-            if worker_request:
-                # Cloudflare's Python runtime uses async TCP sockets under synchronous
-                # database drivers; serialize shared database work with an asyncio lock.
-                async with WORKER_DATABASE_LOCK:
-                    probe.check_worker()
-            else:
+        database_status = "NOT CONFIGURED (OPTIONAL)"
+        try:
+            probe = NeonConnectivityProbe.from_environment()
+            if probe is not None:
                 await asyncio.to_thread(probe.check)
-            database_status = "VERIFIED"
-    except Exception:  # noqa: BLE001 - readiness must not leak connection details
-        database_status = "DEGRADED"
-
-    auth_status = "NOT REQUIRED (LOCAL)"
-    rate_limit_status = "NOT REQUIRED (LOCAL)"
-    if worker_request:
-        auth_status = (
-            "VERIFIED"
-            if _request_environment_value(request, "GLORIFIER_API_TOKEN")
-            else "DEGRADED"
-        )
-        rate_limit_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
-        rate_limit_status = (
-            "VERIFIED"
-            if rate_limit_binding is not None
-            and callable(getattr(rate_limit_binding, "limit", None))
-            else "DEGRADED"
-        )
+                database_status = "VERIFIED"
+        except Exception:  # noqa: BLE001 - readiness must not leak connection details
+            database_status = "DEGRADED"
 
     audit_status = "NOT CONFIGURED (OPTIONAL)"
     try:
-        audit_sink = (
-            SupabaseRestAuditSink.from_environment(worker_env)
-            if worker_request
-            else SupabaseRestAuditSink.from_environment()
-        )
+        audit_sink = SupabaseRestAuditSink.from_environment(worker_env) if worker_request else SupabaseRestAuditSink.from_environment()
         if audit_sink is not None:
             audit_status = "CONFIGURED (WRITE NOT VERIFIED)"
     except Exception:  # noqa: BLE001 - never expose persistence configuration
         audit_status = "DEGRADED"
-
     task_runs_status = "NOT CONFIGURED (OPTIONAL)"
     try:
-        task_runs = (
-            TaskRunRepository.from_environment(worker_env)
-            if worker_request
-            else TaskRunRepository.from_environment()
-        )
+        task_runs = TaskRunRepository.from_environment(worker_env) if worker_request else TaskRunRepository.from_environment()
         if task_runs is not None:
             task_runs_status = "CONFIGURED (WRITE NOT VERIFIED)"
     except Exception:  # noqa: BLE001 - never expose persistence configuration
@@ -315,19 +399,17 @@ async def readiness(request: Request) -> JSONResponse:
             },
             "requirements": {
                 "authentication": "required for Worker task execution",
-                "rate_limit": "required for Worker task execution",
+                "rate_limit": "required for Worker task execution and readiness probes",
                 "database": "optional unless connectivity or task-run persistence is enabled",
                 "audit": "optional unless explicitly enabled",
                 "task_runs": "optional unless explicitly enabled",
             },
             "execution": {"inference_performed": False},
             "message": (
-                "Provider and required Worker controls passed read-only/configuration checks; "
-                "no inference was performed and optional persistence writes were not tested."
+                "Provider and required Worker controls passed read-only/configuration checks; no inference was performed and optional persistence writes were not tested."
                 if ready
                 else (
-                    "The explicitly enabled database connectivity probe failed; "
-                    "provider availability is verified."
+                    "The explicitly enabled database connectivity probe failed; provider availability is verified."
                     if provider_status == "VERIFIED" and database_status == "DEGRADED"
                     else (
                         "Worker authentication or rate limiting is not configured."
@@ -338,6 +420,7 @@ async def readiness(request: Request) -> JSONResponse:
             ),
         },
     )
+
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
 async def run_task(
@@ -431,11 +514,12 @@ async def run_task(
                     provider=result.provider,
                     evidence=result.evidence[:20],
                 )
-        except Exception:  # noqa: BLE001 - persistence failure must be explicit and sanitized
-            raise HTTPException(
-                status_code=503,
-                detail="Task-run persistence failed after task processing; outcome may have been produced",
-            ) from None
+        except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
+            result.evidence = [*result.evidence[:19], "persistence:task_runs:degraded"]
+            result.message = (
+                f"{result.message} Task-run persistence degraded after processing; "
+                "the task outcome is returned to avoid an unsafe automatic retry."
+            )
 
     if audit_sink is not None:
         event_type = _audit_event_type(result)
@@ -453,12 +537,12 @@ async def run_task(
                 ),
                 worker_request=worker_request,
             )
-        except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
-            # Processing may have completed; report the audit failure without leaking internals.
-            raise HTTPException(
-                status_code=503,
-                detail="Audit persistence failed after task processing; inspect audit status",
-            ) from None
+        except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
+            result.evidence = [*result.evidence[:19], "persistence:audit:degraded"]
+            result.message = (
+                f"{result.message} Final audit persistence degraded after processing; "
+                "the task outcome is returned to avoid an unsafe automatic retry."
+            )
     return result
 
 
