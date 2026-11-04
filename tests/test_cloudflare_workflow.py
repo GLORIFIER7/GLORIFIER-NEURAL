@@ -101,9 +101,13 @@ def test_cloudflare_worker_uses_native_rate_limit_binding():
 
     assert '"name": "GLORIFIER_RATE_LIMITER"' in config
     assert '"namespace_id": "47041104"' in config
+    assert '"name": "GLORIFIER_READINESS_LIMITER"' in config
+    assert '"namespace_id": "47041105"' in config
+    assert '"limit": 10' in config
     assert '"limit": 60' in config
     assert '"period": 60' in config
     assert "GLORIFIER_RATE_LIMITER" in api_source
+    assert "GLORIFIER_READINESS_LIMITER" in api_source
     assert "await rate_limit_binding.limit" in api_source
 
 
