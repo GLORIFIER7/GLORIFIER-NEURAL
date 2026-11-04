@@ -1,6 +1,6 @@
 """Opt-in, metadata-only Neon task-run persistence.
 
-This repository is intentionally not wired into request execution. It is disabled
+This repository is wired into execution only when explicitly enabled. It is disabled
 unless explicitly enabled, validates every persisted field, and never accepts task
 prompts, outputs, request bodies, credentials, or arbitrary evidence payloads.
 """
@@ -9,6 +9,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
+from collections.abc import Mapping
+from urllib.parse import urlparse
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -38,12 +41,21 @@ class TaskRunRepository:
         self._connect_timeout = connect_timeout
 
     @classmethod
-    def from_environment(cls) -> TaskRunRepository | None:
+    def from_environment(cls, environment=None) -> TaskRunRepository | None:
         """Return a repository only after explicit opt-in and valid configuration."""
-        enabled = os.getenv("GLORIFIER_NEON_TASK_RUNS_ENABLED", "").strip().casefold() == "true"
+        def value(name: str) -> str:
+            if environment is None:
+                return os.getenv(name, "")
+            if isinstance(environment, Mapping):
+                raw = environment.get(name, "")
+            else:
+                raw = getattr(environment, name, "")
+            return str(raw) if raw is not None else ""
+
+        enabled = value("GLORIFIER_NEON_TASK_RUNS_ENABLED").strip().casefold() == "true"
         if not enabled:
             return None
-        url = os.getenv("NEON_DATABASE_URL", "").strip()
+        url = value("NEON_DATABASE_URL").strip()
         if not url:
             raise ValueError("Neon task-run persistence is enabled but its URL is missing")
         return cls(url)
@@ -120,6 +132,61 @@ class TaskRunRepository:
         except Exception:  # noqa: BLE001 - never leak DSN or database details
             raise RuntimeError("Neon task-run persistence failed") from None
 
+
+    def record_worker(
+        self, *, request_id: str, action_class: str, status: str,
+        provider: str | None = None, evidence: list[str] | None = None,
+    ) -> None:
+        """Write and read back metadata through pg8000 on Cloudflare Python Workers."""
+        values = self.validate_record(
+            request_id=request_id,
+            action_class=action_class,
+            status=status,
+            provider=provider,
+            evidence=evidence,
+        )
+        try:
+            import pg8000
+        except ImportError:
+            raise RuntimeError("Neon task-run driver is not installed") from None
+
+        try:
+            parsed = urlparse(self._database_url)
+            connection = pg8000.connect(
+                user=parsed.username,
+                password=parsed.password,
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                database=parsed.path.lstrip("/"),
+                ssl_context=ssl.create_default_context(),
+                timeout=self._connect_timeout,
+            )
+            try:
+                cursor = connection.cursor()
+                try:
+                    cursor.execute(
+                        """INSERT INTO glorifier.task_runs
+                           (request_id, action_class, status, provider, evidence, created_at, expires_at)
+                           VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)""",
+                        (
+                            values[0], values[1], values[2], values[3],
+                            json.dumps(values[4]), values[5], values[6],
+                        ),
+                    )
+                    connection.commit()
+                    cursor.execute(
+                        "SELECT request_id FROM glorifier.task_runs WHERE request_id = %s",
+                        (values[0],),
+                    )
+                    row = cursor.fetchone()
+                    if row is None or str(row[0]) != values[0]:
+                        raise RuntimeError("Task-run readback did not match the inserted record")
+                finally:
+                    cursor.close()
+            finally:
+                connection.close()
+        except Exception:  # noqa: BLE001 - never leak DSN or database details
+            raise RuntimeError("Neon task-run persistence failed") from None
 
     def delete_expired(self, *, batch_size: int = 500, now: datetime | None = None) -> int:
         """Delete only expired task-run metadata in a bounded, explicit cleanup batch.
