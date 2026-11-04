@@ -26,12 +26,9 @@ def test_enabled_neon_probe_requires_url(monkeypatch):
     [
         "https://example.neon.tech/db",
         "postgresql://example.neon.tech/db",
-        "postgresql://user:pass@example.neon.tech/db",
     ],
 )
 def test_neon_probe_rejects_invalid_database_url(url):
-    if "user:pass@" in url:
-        return
     with pytest.raises(ValueError, match="URL or timeout is invalid"):
         NeonConnectivityProbe(url)
 
@@ -160,11 +157,12 @@ def test_worker_neon_probe_uses_pg8000_with_verified_tls(monkeypatch):
     assert calls["kwargs"]["database"] == "neural"
     assert calls["kwargs"]["user"] == "neon_user"
     assert calls["kwargs"]["password"] == "neon_pass"
+    assert calls["kwargs"]["timeout"] == 3
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
 
 
-def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch):
+def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch, caplog):
     def connect(**_kwargs):
         raise OSError("private database host and password")
 
@@ -173,11 +171,17 @@ def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch):
         "postgresql://neon_user:neon_pass@example.neon.tech/neural"
     )
 
-    with pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error:
+    with (
+        caplog.at_level("WARNING", logger="app.database.neon"),
+        pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error,
+    ):
         probe.check_worker()
 
     assert "private database host" not in str(error.value)
     assert "neon_pass" not in str(error.value)
+    assert "OSError" in caplog.text
+    assert "private database host" not in caplog.text
+    assert "neon_pass" not in caplog.text
 
 
 def test_worker_neon_configuration_uses_task_run_opt_in_and_request_bindings():
@@ -235,6 +239,7 @@ def test_neon_probe_uses_cloudflare_readonly_hyperdrive_binding(monkeypatch):
 
     assert calls["kwargs"]["host"] == "hyperdrive.internal"
     assert calls["kwargs"]["database"] == "glorifier"
+    assert calls["kwargs"]["timeout"] == 15
     assert calls["kwargs"]["ssl_context"] is False
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True

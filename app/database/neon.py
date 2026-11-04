@@ -11,6 +11,10 @@ from app.database.worker_connection import close_worker_database, connect_worker
 _LOGGER = logging.getLogger(__name__)
 
 
+_LOGGER = logging.getLogger(__name__)
+WORKER_CONNECT_TIMEOUT_SECONDS = 15
+
+
 def neon_connection_options(timeout_seconds: int = 3) -> dict[str, int | str]:
     """Return mandatory TLS server-authentication options for psycopg."""
     if (
@@ -118,7 +122,12 @@ class NeonConnectivityProbe:
             raise RuntimeError("Neon connectivity probe failed") from None
 
     def check_worker(self) -> None:
-        """Verify a read-only Neon connection using the Cloudflare Workers driver."""
+        """Verify a read-only Neon connection using the Cloudflare Workers driver.
+
+        The 15-second budget matches Cloudflare Hyperdrive's documented initial
+        origin-connection window and allows a suspended Neon compute to wake up.
+        """
+
         try:
             import pg8000
         except ImportError:
@@ -128,8 +137,16 @@ class NeonConnectivityProbe:
         row = None
         query_completed = operation_failed = cleanup_failed = False
         try:
+            timeout = (
+                WORKER_CONNECT_TIMEOUT_SECONDS
+                if self._hyperdrive is not None
+                else self._timeout
+            )
             connection = connect_worker_database(
-                pg8000, self._database_url, self._hyperdrive, self._timeout
+                pg8000,
+                self._database_url,
+                self._hyperdrive,
+                timeout,
             )
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
@@ -141,6 +158,9 @@ class NeonConnectivityProbe:
                 type(exc).__name__,
             )
             operation_failed = True
+            _LOGGER.warning(
+                "Neon Worker connectivity probe failed (%s)", type(exc).__name__
+            )
         finally:
             cleanup_failed = close_worker_database(cursor, connection)
             if cleanup_failed:

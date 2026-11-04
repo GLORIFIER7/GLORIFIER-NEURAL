@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from app.database.neon import neon_connection_options
+from app.database.neon import WORKER_CONNECT_TIMEOUT_SECONDS, neon_connection_options
 from app.database.worker_connection import close_worker_database, connect_worker_database
 
 
@@ -192,11 +192,19 @@ class TaskRunRepository:
         connection = cursor = None
         operation_failed = cleanup_failed = readback_mismatch = False
         try:
+            active_hyperdrive = (
+                hyperdrive if hyperdrive is not None else self._hyperdrive
+            )
+            timeout = (
+                WORKER_CONNECT_TIMEOUT_SECONDS
+                if active_hyperdrive is not None
+                else self._connect_timeout
+            )
             connection = connect_worker_database(
                 pg8000,
                 self._database_url,
-                hyperdrive or self._hyperdrive,
-                self._connect_timeout,
+                active_hyperdrive,
+                timeout,
             )
             cursor = connection.cursor()
             _insert_worker_task_run(cursor, values)
