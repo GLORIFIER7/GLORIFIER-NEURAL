@@ -41,9 +41,11 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
 
     required_runtime_checks = (
         "uv sync --locked --group dev --no-install-project",
-        "Prepare Neural application source beside the Worker entrypoint",
+        "Prepare Neural application source as local Worker dependency",
         "python prepare_worker.py",
-        "WORKER_ROOT / \"python_modules\" / \"app\"",
+        'glorifier-neural-app = { path = "neural_app", editable = false }',
+        "Verify Neural application package was vendored by Pywrangler",
+        "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
         'importlib.util.find_spec("psycopg") is None',
         'importlib.util.find_spec("torch") is None',
