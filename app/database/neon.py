@@ -36,22 +36,32 @@ def _environment_value(environment, name: str, default: str = "") -> str:
 class NeonConnectivityProbe:
     """Run a bounded SELECT 1 probe using psycopg locally or pg8000 on Workers."""
 
-    def __init__(self, database_url: str, *, timeout_seconds: int = 3) -> None:
+    def __init__(
+        self,
+        database_url: str | None,
+        *,
+        hyperdrive=None,
+        timeout_seconds: int = 3,
+    ) -> None:
         neon_connection_options(timeout_seconds)
-        try:
-            parsed = urlparse(database_url)
-            parsed_port = parsed.port
-        except (TypeError, ValueError):
-            raise ValueError("Neon database URL or timeout is invalid") from None
-        if (
-            parsed.scheme not in ("postgres", "postgresql")
-            or not parsed.hostname
-            or parsed.username is None
-            or parsed.password is None
-            or (parsed_port is not None and not 1 <= parsed_port <= 65535)
-        ):
-            raise ValueError("Neon database URL or timeout is invalid")
+        if database_url:
+            try:
+                parsed = urlparse(database_url)
+                parsed_port = parsed.port
+            except (TypeError, ValueError):
+                raise ValueError("Neon database URL or timeout is invalid") from None
+            if (
+                parsed.scheme not in ("postgres", "postgresql")
+                or not parsed.hostname
+                or parsed.username is None
+                or parsed.password is None
+                or (parsed_port is not None and not 1 <= parsed_port <= 65535)
+            ):
+                raise ValueError("Neon database URL or timeout is invalid")
+        elif hyperdrive is None:
+            raise ValueError("Neon database URL or Hyperdrive binding is required")
         self._database_url = database_url
+        self._hyperdrive = hyperdrive
         self._timeout = timeout_seconds
 
     @classmethod
@@ -70,9 +80,17 @@ class NeonConnectivityProbe:
         if not connectivity_enabled and not task_runs_enabled:
             return None
         database_url = _environment_value(environment, "NEON_DATABASE_URL").strip()
-        if not database_url:
-            raise ValueError("Neon connectivity is enabled but its URL is missing")
-        return cls(database_url)
+        if isinstance(environment, Mapping):
+            hyperdrive = environment.get("NEON_READONLY") or environment.get("NEON_WRITE")
+        elif environment is not None:
+            hyperdrive = getattr(environment, "NEON_READONLY", None) or getattr(
+                environment, "NEON_WRITE", None
+            )
+        else:
+            hyperdrive = None
+        if not database_url and hyperdrive is None:
+            raise ValueError("Neon connectivity is enabled but its URL or Hyperdrive binding is missing")
+        return cls(database_url or None, hyperdrive=hyperdrive)
 
     def check(self) -> None:
         """Verify connection with psycopg and TLS verification outside Workers."""
@@ -102,17 +120,28 @@ class NeonConnectivityProbe:
         except ImportError:
             raise RuntimeError("Neon connectivity driver is not installed") from None
 
-        parsed = urlparse(self._database_url)
         try:
-            connection = pg8000.connect(
-                user=parsed.username,
-                password=parsed.password,
-                host=parsed.hostname,
-                port=parsed.port or 5432,
-                database=parsed.path.lstrip("/"),
-                ssl_context=ssl.create_default_context(),
-                timeout=self._timeout,
-            )
+            if self._hyperdrive is not None:
+                connection = pg8000.connect(
+                    user=str(self._hyperdrive.user),
+                    password=str(self._hyperdrive.password),
+                    host=str(self._hyperdrive.host),
+                    port=int(self._hyperdrive.port),
+                    database=str(self._hyperdrive.database),
+                    ssl_context=False,
+                    timeout=self._timeout,
+                )
+            else:
+                parsed = urlparse(self._database_url)
+                connection = pg8000.connect(
+                    user=parsed.username,
+                    password=parsed.password,
+                    host=parsed.hostname,
+                    port=parsed.port or 5432,
+                    database=parsed.path.lstrip("/"),
+                    ssl_context=ssl.create_default_context(),
+                    timeout=self._timeout,
+                )
             try:
                 cursor = connection.cursor()
                 try:
