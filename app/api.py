@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse, Response
 
 from app.audit import AuditEvent, SupabaseRestAuditSink
 from app.api_support import (
-    _readiness_body,
     _readiness_response,
     _request_correlation_id,
     _request_environment_value,
