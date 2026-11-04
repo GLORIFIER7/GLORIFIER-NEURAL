@@ -787,3 +787,60 @@ def test_worker_task_endpoint_rejects_rate_limited_credentials():
 
     assert response.status_code == 429
     assert response.headers["retry-after"] == "60"
+
+
+def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+
+    captured = {}
+
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
+    class FakeTaskRunRepository:
+        def record_worker(self, **values):
+            captured.update(values)
+
+    class WorkerEnvironment:
+        def __init__(self, inner: ASGIApp):
+            self.inner = inner
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send):
+            if scope["type"] == "http":
+                scope = dict(scope)
+                scope["env"] = SimpleNamespace(
+                    GLORIFIER_API_TOKEN="worker-token",
+                    GLORIFIER_RATE_LIMITER=AllowRateLimitBinding(),
+                )
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr(
+        "app.api.TaskRunRepository.from_environment",
+        lambda _env: FakeTaskRunRepository(),
+    )
+    monkeypatch.setattr(
+        "app.api.SupabaseRestAuditSink.from_environment",
+        lambda *_args: None,
+    )
+
+    response = TestClient(WorkerEnvironment(app)).post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer worker-token"},
+        json={"task": "safe metadata test", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert captured["action_class"] == "read_only"
+    assert captured["status"] == "NOT VERIFIED"
+    assert captured["evidence"] == ["inference:disabled", "execution:none"]
+    assert str(uuid.UUID(captured["request_id"])) == captured["request_id"]
+    assert "task" not in captured
+    assert "prompt" not in captured
