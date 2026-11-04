@@ -169,9 +169,11 @@ def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch, caplog):
         "postgresql://neon_user:neon_pass@example.neon.tech/neural"
     )
 
-    with caplog.at_level("WARNING", logger="app.database.neon"):
-        with pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error:
-            probe.check_worker()
+    with (
+        caplog.at_level("WARNING", logger="app.database.neon"),
+        pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error,
+    ):
+        probe.check_worker()
 
     assert "private database host" not in str(error.value)
     assert "neon_pass" not in str(error.value)
