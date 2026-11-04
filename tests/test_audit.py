@@ -211,8 +211,6 @@ def test_supabase_http_error_does_not_expose_server_body_or_secret(monkeypatch):
 
 def test_supabase_sink_reads_worker_bindings_and_uses_fetch_for_async_audit():
     import asyncio
-    from types import SimpleNamespace
-
     captured = {}
 
     class FakeResponse:
