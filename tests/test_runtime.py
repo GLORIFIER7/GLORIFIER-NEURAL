@@ -105,7 +105,7 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
             "redirect": redirect,
         })
         if method == "GET":
-            return FakeResponse({"data": [{"id": "nvidia/nemotron-3-super-120b-a12b"}]})
+            return FakeResponse({"data": [{"id": "nvidia/nemotron-3.5-super-vl-120b-a12b"}]})
         return FakeResponse({
             "choices": [{"message": {"content": "Nemotron response"}}]
         })
@@ -115,7 +115,7 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
         "GLORIFIER_PROVIDER": "nvidia_nim",
         "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
         "NVIDIA_NIM_API_KEY": "request-scoped-secret",
-        "NVIDIA_NIM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
+        "NVIDIA_NIM_MODEL": "nvidia/nemotron-3.5-super-vl-120b-a12b",
     }
     orchestrator = build_orchestrator_from_environment(
         worker_env,
@@ -139,5 +139,5 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
     assert calls[0]["method"] == "GET"
     assert calls[1]["method"] == "POST"
     assert calls[1]["headers"]["Authorization"] == "Bearer request-scoped-secret"
-    assert calls[1]["body"]["model"] == "nvidia/nemotron-3-super-120b-a12b"
+    assert calls[1]["body"]["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
     assert calls[1]["redirect"] == "manual"
