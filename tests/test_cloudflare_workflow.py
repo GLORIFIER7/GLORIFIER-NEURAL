@@ -60,7 +60,9 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         "uv run --locked pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup without optional drivers",
+        "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY",
         'importlib.util.find_spec("psycopg") is None',
+        'importlib.util.find_spec("pg8000") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "uv run --locked pywrangler deploy --dry-run",
@@ -84,3 +86,53 @@ def test_cloudflare_worker_preview_urls_are_explicitly_disabled():
     assert re.search(r'"preview_urls"\s*:\s*false', config), (
         "Production Worker preview URLs must be explicitly disabled"
     )
+
+
+
+def test_cloudflare_worker_uses_native_rate_limit_binding():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+    api_path = config_path.parents[1] / "app" / "api.py"
+    api_source = api_path.read_text(encoding="utf-8")
+
+    assert '"name": "GLORIFIER_RATE_LIMITER"' in config
+    assert '"namespace_id": "47041104"' in config
+    assert '"limit": 60' in config
+    assert '"period": 60' in config
+    assert "GLORIFIER_RATE_LIMITER" in api_source
+    assert "await rate_limit_binding.limit" in api_source
+
+
+def test_cloudflare_worker_binds_existing_readonly_neon_hyperdrive():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = config_path.read_text(encoding="utf-8")
+
+    assert '"binding": "NEON_READONLY"' in config
+    assert '"id": "eff847b6c3c64488a989f1fa67d966a0"' in config
+    assert '"GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"' in config
+
+
+def test_cloudflare_workflow_requires_live_production_smoke_after_deploy():
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "cloudflare-neural-worker.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "  smoke:" in workflow
+    assert "needs: deploy" in workflow
+    assert "/health" in workflow
+    assert "/ready" in workflow
+    assert 'required = ("providers", "database", "authentication", "rate_limit")' in workflow
+    assert 'checks.get(name) != "VERIFIED"' in workflow
+    assert "production release is not verified" in workflow

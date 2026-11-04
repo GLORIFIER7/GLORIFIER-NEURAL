@@ -51,12 +51,16 @@ jobs:
         run: uv sync --locked --group dev --no-install-project
       - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
+        env:
+          # Local-only Hyperdrive stand-in; the health smoke test does not open a DB connection.
+          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY: postgresql://local:local@127.0.0.1:5432/local
         run: |
           set -euo pipefail
           uv run --locked python - <<'PY'
           import importlib.util
 
           assert importlib.util.find_spec("psycopg") is None
+          assert importlib.util.find_spec("pg8000") is not None
           assert importlib.util.find_spec("torch") is None
           PY
 
@@ -147,3 +151,49 @@ jobs:
         run: uv run --locked pywrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  smoke:
+    if: needs.deploy.result == 'success'
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed health endpoint
+        env:
+          NEURAL_URL: https://glorifier-neural.glorifier.workers.dev
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail --max-time 20 "${NEURAL_URL}/health" > /tmp/neural-health.json
+          python - <<'PY'
+          import json
+
+          with open("/tmp/neural-health.json", encoding="utf-8") as source:
+              health = json.load(source)
+          assert health.get("service") == "glorifier-neural"
+          assert health.get("checks", {}).get("process") == "VERIFIED"
+          print(json.dumps(health, sort_keys=True))
+          PY
+      - name: Require live provider, database, authentication and rate-limit readiness
+        env:
+          NEURAL_URL: https://glorifier-neural.glorifier.workers.dev
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --max-time 30 --output /tmp/neural-ready.json --write-out '%{http_code}' "${NEURAL_URL}/ready")"
+          cat /tmp/neural-ready.json
+          test "${status}" = "200" || {
+            echo "::error::Neural readiness returned HTTP ${status}; production release is not verified"
+            exit 1
+          }
+          python - <<'PY'
+          import json
+
+          with open("/tmp/neural-ready.json", encoding="utf-8") as source:
+              ready = json.load(source)
+          checks = ready.get("checks", {})
+          required = ("providers", "database", "authentication", "rate_limit")
+          missing = [name for name in required if checks.get(name) != "VERIFIED"]
+          assert ready.get("status") == "READY", "Worker did not report READY"
+          assert not missing, f"Required readiness controls did not pass: {missing}"
+          assert ready.get("execution", {}).get("inference_performed") is False
+          print("Production smoke checks passed; no inference was performed.")
+          PY
