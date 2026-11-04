@@ -68,7 +68,9 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         'importlib.util.find_spec("asyncpg") is not None',
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
-        "uv run --locked pywrangler deploy --dry-run",
+        "bash ./worker-build.sh --prepare-only",
+        "npx wrangler deploy --dry-run",
+        "bash ./worker-build.sh deploy",
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
