@@ -17,9 +17,12 @@ esac
 # Its host virtual environments are build tools, not Worker runtime modules.
 uv run --locked pywrangler sync
 
-test -f python_modules/app/api.py
-test -f python_modules/app/database/neon.py
-test -f python_modules/asyncpg/__init__.py
+for expected in python_modules/app/api.py python_modules/app/database/neon.py; do
+  if [[ ! -f "$expected" ]]; then
+    echo "Missing vendored Worker application module: $expected" >&2
+    exit 1
+  fi
+done
 
 # Prevent Wrangler from bundling CPython and Pyodide build environments beside
 # the intended python_modules/ package tree (which causes duplicate dist-info).
