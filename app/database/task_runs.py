@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from app.database.neon import neon_connection_options
+from app.database.worker_connection import close_worker_database, connect_worker_database
 
 
 RETENTION_DAYS = 30  # Proposed default; production collection still requires approval.
@@ -145,11 +146,16 @@ class TaskRunRepository:
 
 
     def record_worker(
-        self, *, request_id: str, action_class: str, status: str,
-        provider: str | None = None, evidence: list[str] | None = None,
+        self,
+        *,
+        request_id: str,
+        action_class: str,
+        status: str,
+        provider: str | None = None,
+        evidence: list[str] | None = None,
         hyperdrive=None,
     ) -> None:
-        """Write and read back metadata through pg8000 on Cloudflare Python Workers."""
+        """Persist and read back bounded lifecycle metadata on Cloudflare Workers."""
         values = self.validate_record(
             request_id=request_id,
             action_class=action_class,
@@ -162,34 +168,15 @@ class TaskRunRepository:
         except ImportError:
             raise RuntimeError("Neon task-run driver is not installed") from None
 
-        connection = None
-        cursor = None
-        operation_failed = False
-        cleanup_failed = False
-        readback_mismatch = False
+        connection = cursor = None
+        operation_failed = cleanup_failed = readback_mismatch = False
         try:
-            selected_hyperdrive = hyperdrive or self._hyperdrive
-            if selected_hyperdrive is not None:
-                connection = pg8000.connect(
-                    user=str(selected_hyperdrive.user),
-                    password=str(selected_hyperdrive.password),
-                    host=str(selected_hyperdrive.host),
-                    port=int(selected_hyperdrive.port),
-                    database=str(selected_hyperdrive.database),
-                    ssl_context=False,
-                    timeout=self._connect_timeout,
-                )
-            else:
-                parsed = urlparse(self._database_url)
-                connection = pg8000.connect(
-                    user=parsed.username,
-                    password=parsed.password,
-                    host=parsed.hostname,
-                    port=parsed.port or 5432,
-                    database=parsed.path.lstrip("/"),
-                    ssl_context=ssl.create_default_context(),
-                    timeout=self._connect_timeout,
-                )
+            connection = connect_worker_database(
+                pg8000,
+                self._database_url,
+                hyperdrive or self._hyperdrive,
+                self._connect_timeout,
+            )
             cursor = connection.cursor()
             cursor.execute(
                 """INSERT INTO glorifier.task_runs
@@ -210,16 +197,7 @@ class TaskRunRepository:
         except Exception:  # noqa: BLE001 - never leak DSN or database details
             operation_failed = True
         finally:
-            if cursor is not None:
-                try:
-                    cursor.close()
-                except Exception:  # noqa: BLE001 - never mask read-back evidence
-                    cleanup_failed = True
-            if connection is not None:
-                try:
-                    connection.close()
-                except Exception:  # noqa: BLE001 - never mask read-back evidence
-                    cleanup_failed = True
+            cleanup_failed = close_worker_database(cursor, connection)
 
         if readback_mismatch:
             raise RuntimeError("Task-run readback did not match the inserted record")
