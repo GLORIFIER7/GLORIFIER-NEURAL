@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.audit import AuditEvent, SupabaseRestAuditSink
 from app.database.neon import NeonConnectivityProbe
+from app.database.task_runs import TaskRunRepository
 from app.neural.torch_status import pytorch_status
 from app.runtime import build_orchestrator_from_environment
 from app.request_limits import RequestBodyLimitMiddleware
@@ -255,7 +256,10 @@ async def readiness(request: Request) -> JSONResponse:
             else NeonConnectivityProbe.from_environment()
         )
         if probe is not None:
-            probe.check()
+            if worker_request:
+                probe.check_worker()
+            else:
+                probe.check()
             database_status = "VERIFIED"
     except Exception:  # noqa: BLE001 - readiness must not leak connection details
         database_status = "DEGRADED"
@@ -319,9 +323,14 @@ async def run_task(
             if worker_request
             else SupabaseRestAuditSink.from_environment()
         )
+        task_run_repository = (
+            TaskRunRepository.from_environment(worker_env)
+            if worker_request
+            else TaskRunRepository.from_environment()
+        )
     except ValueError:
         # Never include environment values or credential details in client-facing errors.
-        raise HTTPException(status_code=503, detail="Configured audit persistence is unavailable") from None
+        raise HTTPException(status_code=503, detail="Configured persistence is unavailable") from None
 
     request_id = request.state.request_id
     correlation_id = request.state.correlation_id
@@ -349,6 +358,30 @@ async def run_task(
         if worker_request
         else orchestrator.run(task_request)
     )
+    if task_run_repository is not None:
+        try:
+            if worker_request:
+                task_run_repository.record_worker(
+                    request_id=request_id,
+                    action_class=task_request.action_class,
+                    status=result.status,
+                    provider=result.provider,
+                    evidence=result.evidence[:20],
+                )
+            else:
+                task_run_repository.record(
+                    request_id=request_id,
+                    action_class=task_request.action_class,
+                    status=result.status,
+                    provider=result.provider,
+                    evidence=result.evidence[:20],
+                )
+        except Exception:  # noqa: BLE001 - persistence failure must be explicit and sanitized
+            raise HTTPException(
+                status_code=503,
+                detail="Task-run persistence failed after task processing; outcome may have been produced",
+            ) from None
+
     if audit_sink is not None:
         event_type = _audit_event_type(result)
         try:
