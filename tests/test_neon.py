@@ -118,3 +118,70 @@ def test_neon_probe_rejects_invalid_timeout_types_and_ranges(timeout_seconds):
             timeout_seconds=timeout_seconds,
         )
 
+
+
+def test_worker_neon_probe_uses_pg8000_with_verified_tls(monkeypatch):
+    calls = {}
+
+    class Cursor:
+        def execute(self, query):
+            calls["query"] = query
+
+        def fetchone(self):
+            return (1,)
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            calls["closed"] = True
+
+    def connect(**kwargs):
+        calls["kwargs"] = kwargs
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
+    probe = NeonConnectivityProbe(
+        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
+    )
+
+    probe.check_worker()
+
+    ssl_context = calls["kwargs"]["ssl_context"]
+    assert ssl_context.verify_mode == 2
+    assert ssl_context.check_hostname is True
+    assert calls["kwargs"]["host"] == "example.neon.tech"
+    assert calls["kwargs"]["database"] == "neural"
+    assert calls["kwargs"]["user"] == "neon_user"
+    assert calls["kwargs"]["password"] == "neon_pass"
+    assert calls["query"] == "SELECT 1"
+    assert calls["closed"] is True
+
+
+def test_worker_neon_probe_sanitizes_driver_errors(monkeypatch):
+    def connect(**_kwargs):
+        raise OSError("private database host and password")
+
+    monkeypatch.setitem(sys.modules, "pg8000", types.SimpleNamespace(connect=connect))
+    probe = NeonConnectivityProbe(
+        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
+    )
+
+    with pytest.raises(RuntimeError, match="Neon connectivity probe failed") as error:
+        probe.check_worker()
+
+    assert "private database host" not in str(error.value)
+    assert "neon_pass" not in str(error.value)
+
+
+def test_worker_neon_configuration_uses_task_run_opt_in_and_request_bindings():
+    env = {
+        "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+        "NEON_DATABASE_URL": "postgresql://neon_user:neon_pass@example.neon.tech/neural",
+    }
+
+    probe = NeonConnectivityProbe.from_environment(env)
+
+    assert probe is not None
+    assert probe._database_url == env["NEON_DATABASE_URL"]
