@@ -245,10 +245,16 @@ def test_readiness_does_not_claim_database_or_provider_health(isolated_readiness
     response = client.get("/ready")
     body = response.json()
     assert body["status"] == "NOT READY"
-    assert set(body["checks"]) == {"providers", "database"}
+    assert set(body["checks"]) == {
+        "providers", "database", "authentication", "rate_limit", "audit", "task_runs"
+    }
     assert body["checks"]["providers"] == "NOT VERIFIED"
     assert body["checks"]["database"] == "NOT CONFIGURED (OPTIONAL)"
-    assert body["requirements"]["database"] == "optional"
+    assert body["checks"]["authentication"] == "NOT REQUIRED (LOCAL)"
+    assert body["checks"]["rate_limit"] == "NOT REQUIRED (LOCAL)"
+    assert body["checks"]["audit"] == "NOT CONFIGURED (OPTIONAL)"
+    assert body["checks"]["task_runs"] == "NOT CONFIGURED (OPTIONAL)"
+    assert "optional unless" in body["requirements"]["database"]
     assert body["execution"]["inference_performed"] is False
 
 def test_declared_oversized_request_body_is_rejected():
@@ -512,7 +518,7 @@ def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
     ("catalogue_data", "expected_status", "expected_provider_status", "expected_readiness_status"),
     [
         (
-            [{"id": "meta/llama-3.1-8b-instruct"}],
+            [{"id": "nvidia/nemotron-3.5-super-vl-120b-a12b"}],
             200,
             "VERIFIED",
             "READY",
@@ -540,7 +546,7 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
     monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
     monkeypatch.setenv("GLORIFIER_PROVIDER", "nvidia_nim")
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "readiness-test-secret")
-    monkeypatch.setenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
+    monkeypatch.setenv("NVIDIA_NIM_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b")
     monkeypatch.setattr("app.api.orchestrator", build_orchestrator_from_environment())
     monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda: None)
 
@@ -608,6 +614,10 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
     worker_token = secrets.token_urlsafe(32)
     process_token = secrets.token_urlsafe(32)
 
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
     class CloudflareEnvironment:
         def __init__(self, inner: ASGIApp, token: str | None) -> None:
             self.inner = inner
@@ -615,22 +625,17 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
 
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
             if scope["type"] == "http":
-                worker_env = SimpleNamespace()
+                worker_env = SimpleNamespace(GLORIFIER_RATE_LIMITER=AllowRateLimitBinding())
                 if self.token is not None:
                     worker_env.GLORIFIER_API_TOKEN = self.token
                 scope["env"] = worker_env
-                if not any(key.lower() == b"cf-connecting-ip" for key, _ in scope["headers"]):
-                    scope["headers"] = [
-                        *scope["headers"],
-                        (b"cf-connecting-ip", b"203.0.113.9"),
-                    ]
             await self.inner(scope, receive, send)
 
     monkeypatch.setenv("GLORIFIER_API_TOKEN", process_token)
     monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
     monkeypatch.setattr("app.api.orchestrator", Orchestrator())
     monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=10))
-    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
 
     accepted = TestClient(CloudflareEnvironment(app, worker_token)).post(
         "/v1/tasks",
@@ -657,100 +662,6 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
         json={"task": "safe read-only task", "require_approval": False},
     )
     assert rejected_missing_binding.status_code == 503
-
-
-def test_cloudflare_rate_limit_uses_edge_client_ip_when_asgi_client_is_missing(monkeypatch):
-    from types import SimpleNamespace
-
-    from fastapi.testclient import TestClient
-    from starlette.types import ASGIApp, Receive, Scope, Send
-
-    from app.api import app
-    from app.orchestrator import Orchestrator
-    from app.rate_limit import FixedWindowRateLimiter
-
-    class CloudflareEnvironment:
-        def __init__(self, inner: ASGIApp, edge_ip: str) -> None:
-            self.inner = inner
-            self.edge_ip = edge_ip
-
-        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "http":
-                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="worker-token")
-                scope.pop("client", None)
-                headers = [
-                    (key, value)
-                    for key, value in scope["headers"]
-                    if key.lower() != b"cf-connecting-ip"
-                ]
-                headers.append((b"cf-connecting-ip", self.edge_ip.encode("ascii")))
-                scope["headers"] = headers
-            await self.inner(scope, receive, send)
-
-    monkeypatch.setenv("GLORIFIER_API_TOKEN", "host-token")
-    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
-    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
-    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
-
-    def post_from(edge_ip: str):
-        return TestClient(CloudflareEnvironment(app, edge_ip)).post(
-            "/v1/tasks",
-            headers={"Authorization": "Bearer worker-token"},
-            json={"task": "safe read-only task", "require_approval": False},
-        )
-
-    first_client = post_from("203.0.113.10")
-    second_client = post_from("203.0.113.11")
-    first_client_again = post_from("203.0.113.10")
-
-    assert first_client.status_code == 200
-    assert second_client.status_code == 200
-    assert first_client_again.status_code == 429
-
-
-@pytest.mark.parametrize("edge_ip", ["", "not-an-ip"])
-def test_cloudflare_task_endpoint_fails_closed_without_valid_edge_ip(monkeypatch, edge_ip):
-    from types import SimpleNamespace
-
-    from fastapi.testclient import TestClient
-    from starlette.types import ASGIApp, Receive, Scope, Send
-
-    from app.api import app
-    from app.orchestrator import Orchestrator
-    from app.rate_limit import FixedWindowRateLimiter
-
-    class CloudflareEnvironment:
-        def __init__(self, inner: ASGIApp) -> None:
-            self.inner = inner
-
-        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "http":
-                scope["env"] = SimpleNamespace(GLORIFIER_API_TOKEN="worker-token")
-                scope.pop("client", None)
-                if edge_ip:
-                    headers = [
-                        (key, value)
-                        for key, value in scope["headers"]
-                        if key.lower() != b"cf-connecting-ip"
-                    ]
-                    headers.append((b"cf-connecting-ip", edge_ip.encode("ascii")))
-                    scope["headers"] = headers
-            await self.inner(scope, receive, send)
-
-    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
-    monkeypatch.setattr("app.api.TASK_RATE_LIMITER", FixedWindowRateLimiter(max_requests=1))
-    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda: None)
-
-    response = TestClient(CloudflareEnvironment(app)).post(
-        "/v1/tasks",
-        headers={"Authorization": "Bearer worker-token"},
-        json={"task": "safe read-only task", "require_approval": False},
-    )
-
-    assert response.status_code == 503
-    assert response.json()["detail"] == (
-        "Client address unavailable; task rate limiting cannot be enforced"
-    )
 
 
 def test_cloudflare_environment_reads_mapping_style_bindings():
@@ -791,3 +702,218 @@ def test_cloudflare_environment_reads_attribute_style_bindings():
     )
 
     assert _request_environment_value(request, "GLORIFIER_API_TOKEN") == "attribute-worker-token"
+
+
+
+class _WorkerEnvironmentASGI:
+    def __init__(self, app, env):
+        self.app = app
+        self.env = env
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            scope = dict(scope)
+            scope["env"] = self.env
+        await self.app(scope, receive, send)
+
+
+def test_worker_task_endpoint_uses_rate_limit_binding_and_hashed_credential():
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    class RateLimitBinding:
+        def __init__(self):
+            self.keys = []
+
+        async def limit(self, options):
+            self.keys.append(options["key"])
+            return {"success": True}
+
+    token = "worker-scoped-api-token"
+    limiter = RateLimitBinding()
+    worker_env = {
+        "GLORIFIER_API_TOKEN": token,
+        "GLORIFIER_RATE_LIMITER": limiter,
+    }
+    worker_client = TestClient(_WorkerEnvironmentASGI(app, worker_env))
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert limiter.keys == [hashlib.sha256(token.encode()).hexdigest()]
+    assert token not in limiter.keys[0]
+
+
+def test_worker_task_endpoint_fails_closed_when_rate_limit_binding_is_missing():
+    from fastapi.testclient import TestClient
+
+    token = "worker-scoped-api-token"
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(app, {"GLORIFIER_API_TOKEN": token})
+    )
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Task rate limiting is unavailable"
+
+
+def test_worker_task_endpoint_rejects_rate_limited_credentials():
+    from fastapi.testclient import TestClient
+
+    class DenyBinding:
+        async def limit(self, options):
+            return {"success": False}
+
+    token = "worker-scoped-api-token"
+    worker_client = TestClient(
+        _WorkerEnvironmentASGI(
+            app,
+            {
+                "GLORIFIER_API_TOKEN": token,
+                "GLORIFIER_RATE_LIMITER": DenyBinding(),
+            },
+        )
+    )
+
+    response = worker_client.post(
+        "/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"task": "worker request", "require_approval": False},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+
+
+def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+    from app.orchestrator import Orchestrator
+
+    captured = {}
+
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
+    class FakeTaskRunRepository:
+        def record_worker(self, **values):
+            captured.update(values)
+
+    class WorkerEnvironment:
+        def __init__(self, inner: ASGIApp):
+            self.inner = inner
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send):
+            if scope["type"] == "http":
+                scope = dict(scope)
+                scope["env"] = SimpleNamespace(
+                    GLORIFIER_API_TOKEN="worker-token",
+                    GLORIFIER_RATE_LIMITER=AllowRateLimitBinding(),
+                )
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setattr("app.api.orchestrator", Orchestrator())
+    monkeypatch.setattr(
+        "app.api.TaskRunRepository.from_environment",
+        lambda _env: FakeTaskRunRepository(),
+    )
+    monkeypatch.setattr(
+        "app.api.SupabaseRestAuditSink.from_environment",
+        lambda *_args: None,
+    )
+
+    response = TestClient(WorkerEnvironment(app)).post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer worker-token"},
+        json={"task": "safe metadata test", "require_approval": False},
+    )
+
+    assert response.status_code == 200
+    assert captured["action_class"] == "read_only"
+    assert captured["status"] == "NOT VERIFIED"
+    assert captured["evidence"] == ["inference:disabled", "execution:none"]
+    assert str(uuid.UUID(captured["request_id"])) == captured["request_id"]
+    assert "task" not in captured
+    assert "prompt" not in captured
+
+
+def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+
+    class ReadyOrchestrator:
+        async def acheck_readiness(self):
+            return "VERIFIED", "provider read-only probe passed"
+
+    class ReadyNeonProbe:
+        def check_worker(self):
+            return None
+
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
+    class WorkerEnvironment:
+        def __init__(self, inner: ASGIApp, *, include_auth=True, include_limiter=True):
+            self.inner = inner
+            self.include_auth = include_auth
+            self.include_limiter = include_limiter
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send):
+            if scope["type"] == "http":
+                env = {}
+                if self.include_auth:
+                    env["GLORIFIER_API_TOKEN"] = "ready-token"
+                if self.include_limiter:
+                    env["GLORIFIER_RATE_LIMITER"] = AllowRateLimitBinding()
+                scope = dict(scope)
+                scope["env"] = env
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setattr("app.api._request_orchestrator", lambda _request: ReadyOrchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        lambda _env: ReadyNeonProbe(),
+    )
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
+    monkeypatch.setattr("app.api.TaskRunRepository.from_environment", lambda *_args: None)
+
+    ready = TestClient(WorkerEnvironment(app)).get("/ready")
+
+    assert ready.status_code == 200
+    assert ready.json()["checks"]["providers"] == "VERIFIED"
+    assert ready.json()["checks"]["database"] == "VERIFIED"
+    assert ready.json()["checks"]["authentication"] == "VERIFIED"
+    assert ready.json()["checks"]["rate_limit"] == "VERIFIED"
+    assert ready.json()["execution"]["inference_performed"] is False
+
+    missing_auth = TestClient(
+        WorkerEnvironment(app, include_auth=False)
+    ).get("/ready")
+    assert missing_auth.status_code == 503
+    assert missing_auth.json()["checks"]["authentication"] == "DEGRADED"
+
+    missing_limiter = TestClient(
+        WorkerEnvironment(app, include_limiter=False)
+    ).get("/ready")
+    assert missing_limiter.status_code == 503
+    assert missing_limiter.json()["checks"]["rate_limit"] == "DEGRADED"

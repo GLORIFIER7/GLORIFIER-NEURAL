@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
@@ -57,7 +59,14 @@ class SupabaseRestAuditSink(AuditSink):
     migration before enabling writes. Network errors intentionally propagate to callers.
     """
 
-    def __init__(self, url: str, service_role_key: str, *, timeout_seconds: float = 2.0):
+    def __init__(
+        self,
+        url: str,
+        service_role_key: str,
+        *,
+        timeout_seconds: float = 2.0,
+        fetch_fn=None,
+    ):
         parsed = urlparse(url)
         if (
             parsed.scheme != "https"
@@ -76,17 +85,32 @@ class SupabaseRestAuditSink(AuditSink):
         self._rest_url = url.rstrip("/") + "/rest/v1/audit_events"
         self._key = service_role_key
         self._timeout = timeout_seconds
+        self._fetch_fn = fetch_fn
 
     @classmethod
-    def from_environment(cls) -> SupabaseRestAuditSink | None:
+    def from_environment(
+        cls,
+        environment=None,
+        *,
+        fetch_fn=None,
+    ) -> SupabaseRestAuditSink | None:
         """Return a sink only when explicitly enabled and fully configured."""
-        if os.getenv("GLORIFIER_AUDIT_ENABLED", "").lower() != "true":
+        def value(name: str) -> str:
+            if environment is None:
+                return os.getenv(name, "")
+            if isinstance(environment, Mapping):
+                raw = environment.get(name, "")
+            else:
+                raw = getattr(environment, name, "")
+            return str(raw) if raw is not None else ""
+
+        if value("GLORIFIER_AUDIT_ENABLED").strip().casefold() != "true":
             return None
-        url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        url = value("SUPABASE_URL")
+        key = value("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
             raise ValueError("Audit is enabled but Supabase credentials are missing")
-        return cls(url, key)
+        return cls(url, key, fetch_fn=fetch_fn)
 
     @staticmethod
     def _payload(event: AuditEvent) -> dict[str, object]:
@@ -115,6 +139,41 @@ class SupabaseRestAuditSink(AuditSink):
                 else {}
             ),
         }
+
+    async def awrite(self, event: AuditEvent) -> None:
+        """Persist one sanitized event with Cloudflare request-context Fetch."""
+        fetch_fn = self._fetch_fn
+        if fetch_fn is None:
+            try:
+                from workers import fetch as fetch_fn
+            except ImportError:
+                raise RuntimeError("Cloudflare Fetch transport is unavailable") from None
+
+        body = json.dumps(self._payload(event), separators=(",", ":"))
+        headers = {
+            "apikey": self._key,
+            "Authorization": f"Bearer {self._key}",
+            "Content-Type": "application/json",
+            "Content-Profile": "glorifier",
+            "Prefer": "return=minimal",
+        }
+        try:
+            response = await asyncio.wait_for(
+                fetch_fn(
+                    self._rest_url,
+                    method="POST",
+                    body=body,
+                    headers=headers,
+                    redirect="manual",
+                ),
+                timeout=self._timeout,
+            )
+        except TimeoutError:
+            raise RuntimeError("Audit persistence unavailable") from None
+        except Exception:  # noqa: BLE001 - do not leak request or credential details
+            raise RuntimeError("Audit persistence unavailable") from None
+        if int(response.status) not in (200, 201, 204):
+            raise RuntimeError(f"Audit persistence failed with HTTP {int(response.status)}")
 
     def write(self, event: AuditEvent) -> None:
         body = json.dumps(self._payload(event), separators=(",", ":")).encode("utf-8")

@@ -77,3 +77,67 @@ def test_nim_requires_explicit_external_egress_consent(monkeypatch):
     monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
     orchestrator = build_orchestrator_from_environment()
     assert orchestrator._providers.get("nvidia_nim") is not None
+
+
+def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
+    import asyncio
+    import json
+
+    from app.runtime import build_orchestrator_from_environment
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.status = 200
+            self.headers = {"content-length": str(len(json.dumps(payload)))}
+            self.payload = payload
+
+        async def text(self):
+            return json.dumps(self.payload)
+
+    async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
+        calls.append({
+            "url": url,
+            "method": method,
+            "headers": headers,
+            "body": json.loads(body) if body else None,
+            "redirect": redirect,
+        })
+        if method == "GET":
+            return FakeResponse({"data": [{"id": "nvidia/nemotron-3.5-super-vl-120b-a12b"}]})
+        return FakeResponse({
+            "choices": [{"message": {"content": "Nemotron response"}}]
+        })
+
+    worker_env = {
+        "GLORIFIER_ENABLE_INFERENCE": "true",
+        "GLORIFIER_PROVIDER": "nvidia_nim",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
+        "NVIDIA_NIM_API_KEY": "request-scoped-secret",
+        "NVIDIA_NIM_MODEL": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    }
+    orchestrator = build_orchestrator_from_environment(
+        worker_env,
+        fetch_fn=fake_fetch,
+    )
+
+    async def run():
+        readiness = await orchestrator.acheck_readiness()
+        result = await orchestrator.arun(
+            TaskRequest(task="controlled test prompt", require_approval=False)
+        )
+        return readiness, result
+
+    readiness, result = asyncio.run(run())
+
+    assert readiness[0] == "VERIFIED"
+    assert result.status == "VERIFIED"
+    assert result.provider == "nvidia_nim"
+    assert result.result == "Nemotron response"
+    assert len(calls) == 2
+    assert calls[0]["method"] == "GET"
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["headers"]["Authorization"] == "Bearer request-scoped-secret"
+    assert calls[1]["body"]["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    assert calls[1]["redirect"] == "manual"
