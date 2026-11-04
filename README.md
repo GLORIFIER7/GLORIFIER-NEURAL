@@ -1,6 +1,6 @@
 # GLORIFIER Neural Orchestration
 
-A governed, provider-neutral AI orchestration API built with Python and FastAPI. This repository is an implementation starter, **not** a claim that any model provider, database, agent network, or production environment is connected.
+A governed, provider-neutral AI orchestration API built with Python and FastAPI. The API is deployed as a Cloudflare Python Worker. The production process, read-only Neon connectivity, authentication binding, and rate-limit bindings have been live-verified; NVIDIA inference and optional audit/task-run persistence remain disabled or unverified as documented below.
 
 ## Current capabilities
 
@@ -43,6 +43,19 @@ Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status
 
 ## Cloudflare deployment
 
+## Current deployed state — verified 2026-11-04
+
+The production Worker `glorifier-neural` is serving version 5 (`2522a805-cca5-4778-aac3-1e76013ee758`) at 100% traffic. Its active configuration includes the `GLORIFIER_API_TOKEN` secret binding, read-only `NEON_READONLY` Hyperdrive binding, `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`, and both native rate-limit bindings.
+
+Observed live checks:
+
+- `GET /health`: HTTP 200; process status `VERIFIED`. This endpoint is liveness only and does not independently verify provider or database dependencies.
+- `GET /ready`: HTTP 503, `NOT READY`, because provider inference is disabled by configuration. In the same response, `database`, `authentication`, and `rate_limit` are `VERIFIED`; `inference_performed` is `false`.
+- The optional `audit` and `task_runs` integrations report `NOT CONFIGURED (OPTIONAL)`.
+- The Worker secret inventory contains `GLORIFIER_API_TOKEN`; no `NVIDIA_NIM_API_KEY` is configured. No NVIDIA inference request has been made.
+
+This is **deployed safe mode**, not full provider readiness. The previous Hyperdrive connection failure is resolved: the live readiness response now verifies the database connection through the Worker binding.
+
 Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway service.
 The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
 `cloudflare/worker.py` and the `python_workers` compatibility flag in
@@ -54,29 +67,36 @@ directory Cloudflare bundles for Python Workers. The workflow asserts that the
 vendored package contains the API, Neon, and PyTorch adapter modules before
 starting the Pyodide runtime.
 
-The account's current Workers subdomain is `glorifier`; after an operator-triggered
-deployment, the expected Worker address is
-`https://glorifier-neural.glorifier.workers.dev`. This URL is an expected address,
-not evidence that the Worker has been deployed or is healthy.
+The account's Workers subdomain is `glorifier`. The live Worker address is
+`https://glorifier-neural.glorifier.workers.dev`. On 2026-11-04, the deployed Worker
+was verified at version 5 (`2522a805-cca5-4778-aac3-1e76013ee758`), with 100% of
+production traffic assigned to that version. See **Current deployed state** below
+for the observed health and readiness results.
 
 The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
-`env` binding. Add it as a Worker secret in Cloudflare before enabling task calls.
-No credential is stored in this repository or Wrangler configuration.
+`env` binding. A secret binding with this name is present on the current production
+Worker; its value is not read or stored in this repository or Wrangler configuration.
+The endpoint remains protected by Cloudflare Access and bearer-token validation.
 
 This Cloudflare runtime keeps provider inference, external data egress, Supabase audit
-persistence, and Neon task-run writes disabled by default. The integration Wrangler
-configuration binds the existing read-only `NEON_READONLY` Hyperdrive and enables only
-the bounded `SELECT 1` readiness probe. It performs no schema migration or application-
-data write. NVIDIA inference remains disabled until separately authorized and
-configured; `/ready` correctly remains HTTP 503 while the provider is not configured.
-`/health` reports process liveness only.
+persistence, and Neon task-run writes disabled by default. Production binds the
+read-only `NEON_READONLY` Hyperdrive and enables only the bounded `SELECT 1`
+readiness probe; it performs no schema migration or application-data write.
+NVIDIA inference remains disabled until a valid provider secret and the explicit
+provider/egress configuration are provisioned. In this safe mode, `/ready` returns
+HTTP 503 because the provider is intentionally disabled, while the database,
+authentication, and rate-limit checks can still be verified. `/health` reports
+process liveness only.
 
-Pull requests build the Worker bundle in dry-run mode using only the supported
-Cloudflare runtime dependencies. Production deployment is manual through the
-**Cloudflare Neural Worker** workflow, requires the
-`CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable in the
-`glorifier-neural-cloudflare-production` GitHub Environment, and requires
-setting its `deploy` input to `true`. Neither value is stored in source.
+Pull requests build the Worker bundle in dry-run mode. The connected Cloudflare
+Workers Builds integration also built and deployed the merged `main` commit on
+2026-11-04 (build `e8385974-1e32-4428-b229-bf4aed6dc560`, version 5). Separately,
+the **Cloudflare Neural Worker** GitHub Actions workflow retains a manual-only
+`workflow_dispatch` deployment path, gated by `deploy=true` on `main` and the
+`CLOUDFLARE_API_TOKEN` secret plus `CLOUDFLARE_ACCOUNT_ID` variable in the
+`glorifier-neural-cloudflare-production` GitHub Environment. The most recent
+production version was created by the connected Workers Builds/Wrangler path;
+the GitHub Actions push run validated the bundle but skipped its manual deploy job.
 
 ## API access
 
@@ -88,9 +108,22 @@ Do not expose the service publicly without TLS, monitoring, secret rotation, and
 
 Inference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. The egress flag is a separate privacy control: the task text is sent to NVIDIA NIM when inference runs, so enable it only for data approved for external processing. Optionally set `NVIDIA_NIM_MODEL`; the default is `nvidia/nemotron-3.5-super-vl-120b-a12b`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.
 
+## Current deployed state — verified 2026-11-04
+
+The production Worker `glorifier-neural` is serving version 5 (`2522a805-cca5-4778-aac3-1e76013ee758`) at 100% traffic. Its active configuration includes the `GLORIFIER_API_TOKEN` secret binding, read-only `NEON_READONLY` Hyperdrive binding, `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`, and both native rate-limit bindings.
+
+Observed live checks:
+
+- `GET /health`: HTTP 200; process status `VERIFIED`. This endpoint is liveness only and does not independently verify provider or database dependencies.
+- `GET /ready`: HTTP 503, `NOT READY`, because provider inference is disabled by configuration. In the same response, `database`, `authentication`, and `rate_limit` are `VERIFIED`; `inference_performed` is `false`.
+- The optional `audit` and `task_runs` integrations report `NOT CONFIGURED (OPTIONAL)`.
+- The Worker secret inventory contains `GLORIFIER_API_TOKEN`; no `NVIDIA_NIM_API_KEY` is configured. No NVIDIA inference request has been made.
+
+This is **deployed safe mode**, not full provider readiness. The previous Hyperdrive connection failure is resolved: the live readiness response now verifies the database connection through the Worker binding.
+
 ## Database foundation
 
-A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. As observed on 2026-11-04, the production Cloudflare Worker has a `NEON_READONLY` Hyperdrive binding and `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`, but its `/ready` endpoint reports the database as `DEGRADED`. A direct read-only `SELECT 1` using the `glorifier_worker_ro` Neon role succeeded through Neon; that does not verify the Hyperdrive path. PR #36 raises the Worker-side connection timeout to match Hyperdrive's documented 15-second origin-connection window. Database connectivity remains `DEGRADED` until the updated Worker is deployed and its live Hyperdrive readiness check succeeds.
+A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Production currently has the read-only `NEON_READONLY` Hyperdrive binding and `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`; the live `/ready` response reports `database: VERIFIED`. The Worker uses the asynchronous `asyncpg` Hyperdrive connection path, with a bounded connection timeout aligned to Cloudflare's 15-second origin-connection window. The probe executes only read-only `SELECT 1`; no application data or schema is changed.
 
 ## Explicit limitations
 
