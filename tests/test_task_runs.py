@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import secrets
 from uuid import uuid4
 
 import pytest
@@ -349,7 +350,7 @@ def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
     monkeypatch.setitem(sys.modules, "pg8000", SimpleNamespace(connect=connect))
     hyperdrive = SimpleNamespace(
         user="neon_writer",
-        password="writer-binding-secret",
+        password=secrets.token_urlsafe(32),
         host="hyperdrive.internal",
         port="5432",
         database="glorifier",
