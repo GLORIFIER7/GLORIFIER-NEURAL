@@ -13,6 +13,14 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 
 The Cloudflare deployment is managed by `.github/workflows/cloudflare-neural-worker.yml`. Production deployment remains a manual `workflow_dispatch` with `deploy=true` on `main`. Pull requests never deploy production.
 
+## GitHub deployment environment
+
+The `glorifier-neural-cloudflare-production` GitHub Environment must define:
+- Secret: `CLOUDFLARE_API_TOKEN` with permission to deploy this Worker.
+- Variable: `CLOUDFLARE_ACCOUNT_ID` identifying the intended Cloudflare account.
+
+The workflow fails closed when either value is absent. The account identifier is supplied at deployment time and is not committed to the repository.
+
 ## Cloudflare Access
 
 The account-wide `All Workers` Access application remains enabled and still protects Neural task execution. A separate application named `GLORIFIER Neural Public Readiness Probes` has been created with narrowly scoped public destinations for only:
@@ -85,7 +93,7 @@ The post-deploy smoke job requires HTTP 200 from `/health` and `/ready`, and ver
 
 ## Rate limiting
 
-The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a configured limit of 60 requests per 60-second window, keyed by a SHA-256 digest of the bearer token. Cloudflare's native Workers rate-limit counters are approximate and per-location, not a strict global quota. Do not represent this as globally exact enforcement.
+The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a configured limit of 60 requests per 60-second window, keyed by an HMAC-SHA-256 digest of the bearer token. Cloudflare's native Workers rate-limit counters are approximate and per-location, not a strict global quota. Do not represent this as globally exact enforcement.
 
 ## Release procedure
 
