@@ -132,7 +132,6 @@ def test_cloudflare_workflow_requires_live_production_smoke_after_deploy():
     assert "needs: deploy" in workflow
     assert "/health" in workflow
     assert "/ready" in workflow
-    assert "checks.get(\"providers\")" in workflow
-    assert "checks.get(\"authentication\")" in workflow
-    assert "checks.get(\"rate_limit\")" in workflow
+    assert 'required = ("providers", "database", "authentication", "rate_limit")' in workflow
+    assert 'checks.get(name) != "VERIFIED"' in workflow
     assert "production release is not verified" in workflow
