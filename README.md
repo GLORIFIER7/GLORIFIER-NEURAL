@@ -74,9 +74,9 @@ liveness only.
 Pull requests build the Worker bundle in dry-run mode using only the supported
 Cloudflare runtime dependencies. Production deployment is manual through the
 **Cloudflare Neural Worker** workflow, requires the
-`CLOUDFLARE_API_TOKEN` repository secret, and requires setting its `deploy`
-input to `true`. The workflow uses a dedicated
-`glorifier-neural-cloudflare-production` GitHub environment.
+`CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable in the
+`glorifier-neural-cloudflare-production` GitHub Environment, and requires
+setting its `deploy` input to `true`. Neither value is stored in source.
 
 ## API access
 
