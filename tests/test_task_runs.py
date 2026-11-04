@@ -307,3 +307,63 @@ def test_worker_task_run_write_fails_closed_on_missing_readback(monkeypatch):
             status="NOT VERIFIED",
             evidence=["execution:none"],
         )
+
+
+def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+    request_id = str(uuid4())
+
+    class Cursor:
+        def execute(self, query, params):
+            calls.append((query, params))
+
+        def fetchone(self):
+            return (request_id,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            calls.append(("commit", None))
+
+        def close(self):
+            return None
+
+    def connect(**kwargs):
+        calls.append(("connect", kwargs))
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "pg8000", SimpleNamespace(connect=connect))
+    hyperdrive = SimpleNamespace(
+        user="neon_writer",
+        password="writer-binding-secret",
+        host="hyperdrive.internal",
+        port="5432",
+        database="glorifier",
+    )
+    repository = TaskRunRepository.from_environment(
+        {
+            "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+            "NEON_WRITE": hyperdrive,
+        }
+    )
+
+    repository.record_worker(
+        request_id=request_id,
+        action_class="read_only",
+        status="NOT VERIFIED",
+        evidence=["execution:none"],
+    )
+
+    connection_args = calls[0][1]
+    assert connection_args["host"] == "hyperdrive.internal"
+    assert connection_args["user"] == "neon_writer"
+    assert connection_args["ssl_context"] is False
+    assert calls[2][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
