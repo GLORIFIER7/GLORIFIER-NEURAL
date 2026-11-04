@@ -156,6 +156,7 @@ def test_worker_neon_probe_uses_pg8000_with_verified_tls(monkeypatch):
     assert calls["kwargs"]["database"] == "neural"
     assert calls["kwargs"]["user"] == "neon_user"
     assert calls["kwargs"]["password"] == "neon_pass"
+    assert calls["kwargs"]["timeout"] == 3
     assert calls["query"] == "SELECT 1"
     assert calls["closed"] is True
 
