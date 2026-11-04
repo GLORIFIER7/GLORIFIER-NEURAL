@@ -1,3 +1,4 @@
+import hashlib
 import ipaddress
 import os
 import re
@@ -115,6 +116,74 @@ def _request_environment_value(request: Request, name: str) -> str | None:
     return os.getenv(name)
 
 
+def _request_worker_binding(request: Request, name: str):
+    """Return the raw request-scoped Worker binding without string coercion."""
+    worker_env = request.scope.get("env")
+    if worker_env is None:
+        return None
+    if isinstance(worker_env, Mapping):
+        return worker_env.get(name)
+    return getattr(worker_env, name, None)
+
+
+def _request_orchestrator(request: Request):
+    """Use the process runtime locally and rebuild from request bindings on Workers."""
+    worker_env = request.scope.get("env")
+    if worker_env is None:
+        return orchestrator
+    return build_orchestrator_from_environment(worker_env)
+
+
+async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
+    """Apply Cloudflare's native credential-keyed limit in Workers; fail closed on errors."""
+    credential_key = hashlib.sha256(api_token.encode("utf-8")).hexdigest()
+    worker_env = request.scope.get("env")
+    if worker_env is None:
+        allowed, retry_after = TASK_RATE_LIMITER.allow(credential_key)
+    else:
+        binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
+        limiter = getattr(binding, "limit", None) if binding is not None else None
+        if not callable(limiter):
+            raise HTTPException(
+                status_code=503,
+                detail="Task rate limiting is unavailable",
+            )
+        try:
+            result = await limiter({"key": credential_key})
+            success = (
+                result.get("success")
+                if isinstance(result, Mapping)
+                else getattr(result, "success", None)
+            )
+        except Exception:  # noqa: BLE001 - fail closed without exposing binding details
+            raise HTTPException(
+                status_code=503,
+                detail="Task rate limiting is unavailable",
+            ) from None
+        if not isinstance(success, bool):
+            raise HTTPException(
+                status_code=503,
+                detail="Task rate limiting is unavailable",
+            )
+        allowed = success
+        retry_after = 60
+
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Task rate limit exceeded; retry after the current minute window",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -> None:
+    """Persist audit events through Fetch on Workers and urllib in local deployments."""
+    if worker_request:
+        await sink.awrite(event)
+    else:
+        sink.write(event)
+
+
 def _security_response_headers(request: Request) -> dict[str, str]:
     """Build the bounded tracing and security headers for every response path."""
     request_id = getattr(request.state, "request_id", None)
@@ -164,18 +233,20 @@ def health() -> HealthResponse:
 
 
 @app.get("/ready", tags=["operations"])
-def readiness() -> JSONResponse:
-    """Probe provider availability without running inference.
+async def readiness(request: Request) -> JSONResponse:
+    """Probe request-scoped provider and optional database availability without inference."""
+    worker_request = request.scope.get("env") is not None
+    if worker_request:
+        provider_status, provider_message = await _request_orchestrator(
+            request
+        ).acheck_readiness()
+        probe = NeonConnectivityProbe.from_environment(request.scope.get("env"))
+    else:
+        provider_status, provider_message = orchestrator.check_readiness()
+        probe = NeonConnectivityProbe.from_environment()
 
-    A configured Neon probe is read-only and opt-in. Database connectivity is
-    optional for this starter API; when explicitly enabled, a failed probe
-    blocks readiness. Provider readiness uses the adapter's documented
-    read-only availability check and never transmits task content.
-    """
-    provider_status, provider_message = orchestrator.check_readiness()
     database_status = "NOT CONFIGURED (OPTIONAL)"
     try:
-        probe = NeonConnectivityProbe.from_environment()
         if probe is not None:
             probe.check()
             database_status = "VERIFIED"
@@ -191,12 +262,8 @@ def readiness() -> JSONResponse:
                 "providers": provider_status,
                 "database": database_status,
             },
-            "requirements": {
-                "database": "optional",
-            },
-            "execution": {
-                "inference_performed": False,
-            },
+            "requirements": {"database": "optional"},
+            "execution": {"inference_performed": False},
             "message": (
                 "The configured provider passed a read-only availability probe; "
                 "no inference was performed."
@@ -212,7 +279,7 @@ def readiness() -> JSONResponse:
     )
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
-def run_task(
+async def run_task(
     task_request: TaskRequest,
     request: Request,
     authorization: str | None = Header(default=None),
@@ -235,18 +302,16 @@ def run_task(
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Workers have no ASGI client tuple; use Cloudflare's edge-set peer address.
-    client_host = _request_rate_limit_client(request)
-    allowed, retry_after = TASK_RATE_LIMITER.allow(client_host)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Task rate limit exceeded; retry after the current minute window",
-            headers={"Retry-After": str(retry_after)},
-        )
+    worker_env = request.scope.get("env")
+    worker_request = worker_env is not None
+    await _enforce_task_rate_limit(request, api_token)
 
     try:
-        audit_sink = SupabaseRestAuditSink.from_environment()
+        audit_sink = (
+            SupabaseRestAuditSink.from_environment(worker_env)
+            if worker_request
+            else SupabaseRestAuditSink.from_environment()
+        )
     except ValueError:
         # Never include environment values or credential details in client-facing errors.
         raise HTTPException(status_code=503, detail="Configured audit persistence is unavailable") from None
@@ -256,7 +321,8 @@ def run_task(
     if audit_sink is not None:
         try:
             # Pre-execution audit write: if it fails, do not start task processing.
-            audit_sink.write(
+            await _write_audit_event(
+                audit_sink,
                 AuditEvent(
                     request_id=request_id,
                     correlation_id=correlation_id,
@@ -264,18 +330,23 @@ def run_task(
                     status=NOT_VERIFIED,
                     action_class=task_request.action_class,
                     evidence=("execution:not-started",),
-                )
+                ),
+                worker_request=worker_request,
             )
         except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
             # Fail closed for any persistence failure without exposing implementation details.
             raise HTTPException(status_code=503, detail="Audit persistence unavailable; task not executed") from None
 
-    result = orchestrator.run(task_request)
-
+    result = (
+        await _request_orchestrator(request).arun(task_request)
+        if worker_request
+        else orchestrator.run(task_request)
+    )
     if audit_sink is not None:
         event_type = _audit_event_type(result)
         try:
-            audit_sink.write(
+            await _write_audit_event(
+                audit_sink,
                 AuditEvent(
                     request_id=request_id,
                     correlation_id=correlation_id,
@@ -284,7 +355,8 @@ def run_task(
                     action_class=task_request.action_class,
                     provider=result.provider,
                     evidence=tuple(result.evidence[:20]),
-                )
+                ),
+                worker_request=worker_request,
             )
         except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
             # Processing may have completed; report the audit failure without leaking internals.
