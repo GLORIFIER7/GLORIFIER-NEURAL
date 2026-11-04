@@ -4,8 +4,11 @@ import logging
 
 logging.basicConfig(level=logging.WARNING)
 
-# Load the Pyodide-compatible driver during startup, not on the first DB request.
-import asyncpg  # noqa: F401
+# Load and validate the Pyodide-compatible driver during Worker startup.
+import asyncpg
+
+if not callable(asyncpg.connect):
+    raise RuntimeError("Cloudflare asyncpg driver is unavailable")
 
 from workers import asgi
 
