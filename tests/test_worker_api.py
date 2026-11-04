@@ -131,8 +131,6 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
     from starlette.types import ASGIApp, Receive, Scope, Send
 
     from app.api import app
-    from app.orchestrator import Orchestrator
-
     captured = {}
     worker_token = secrets.token_urlsafe(32)
 
@@ -285,6 +283,8 @@ def test_worker_readiness_is_rate_limited_before_upstream_probes():
 
 def test_worker_readiness_requires_trusted_cloudflare_client_ip():
     from fastapi.testclient import TestClient
+
+    ready_token = secrets.token_urlsafe(32)
 
     class AllowReadinessLimiter:
         async def limit(self, _options):
