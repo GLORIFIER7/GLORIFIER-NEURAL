@@ -131,6 +131,80 @@ class NvidiaNimAdapter(ProviderAdapter):
             raise RuntimeError("Configured NVIDIA NIM model is not present in the available model catalogue")
 
 
+    def _resolve_fetch(self):
+        """Resolve the Cloudflare Fetch API without changing global runtime state."""
+        if self._fetch_fn is not None:
+            return self._fetch_fn
+        try:
+            from workers import fetch
+        except ImportError:
+            raise RuntimeError("Cloudflare Fetch transport is unavailable") from None
+        return fetch
+
+    @staticmethod
+    def _request_options(method: str, body: str | None) -> dict:
+        """Create a redirect-free JSON request with only the necessary headers."""
+        headers = {
+            "Authorization": "Bearer " + "REDACTED",
+            "Accept": "application/json",
+        }
+        options = {"method": method, "headers": headers, "redirect": "manual"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            options["body"] = body
+        return options
+
+    async def _fetch_text(
+        self,
+        fetch_fn,
+        url: str,
+        options: dict,
+        *,
+        timeout_seconds: float,
+        max_bytes: int,
+        readiness: bool,
+    ) -> str:
+        """Fetch and bound the response text before JSON decoding."""
+        try:
+            response = await asyncio.wait_for(
+                fetch_fn(url, **options),
+                timeout=min(timeout_seconds, self._timeout),
+            )
+            status = int(response.status)
+            if status != 200:
+                label = "readiness probe" if readiness else "request"
+                raise RuntimeError(f"NVIDIA NIM {label} failed with HTTP {status}")
+            response_headers = getattr(response, "headers", None)
+            length = response_headers.get("content-length") if response_headers is not None else None
+            if length:
+                try:
+                    if int(length) > max_bytes:
+                        raise RuntimeError("NVIDIA NIM response exceeded the response size limit")
+                except ValueError:
+                    raise RuntimeError("NVIDIA NIM returned an invalid content length") from None
+            raw = await response.text()
+        except TimeoutError:
+            raise RuntimeError("NVIDIA NIM request exceeded its timeout") from None
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001 - upstream details may contain secrets
+            label = "readiness endpoint" if readiness else "request"
+            raise RuntimeError(f"NVIDIA NIM {label} is unavailable") from None
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > max_bytes:
+            raise RuntimeError("NVIDIA NIM response exceeded the response size limit")
+        return raw
+
+    @staticmethod
+    def _decode_json(raw: str) -> dict:
+        """Decode only a JSON object from a bounded provider response."""
+        try:
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("NVIDIA NIM returned an invalid JSON response") from None
+        if not isinstance(payload, dict):
+            raise RuntimeError("NVIDIA NIM returned an invalid JSON response")
+        return payload
+
     async def _fetch_json(
         self,
         url: str,
@@ -141,68 +215,19 @@ class NvidiaNimAdapter(ProviderAdapter):
         max_bytes: int,
         readiness: bool = False,
     ) -> dict:
-        """Use the Worker Fetch API with a bounded timeout and no redirects."""
-        fetch_fn = self._fetch_fn
-        if fetch_fn is None:
-            try:
-                from workers import fetch as fetch_fn
-            except ImportError:
-                raise RuntimeError("Cloudflare Fetch transport is unavailable") from None
-
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Accept": "application/json",
-        }
-        options = {
-            "method": method,
-            "headers": headers,
-            "redirect": "manual",
-        }
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-            options["body"] = body
-
-        try:
-            response = await asyncio.wait_for(
-                fetch_fn(url, **options),
-                timeout=min(timeout_seconds, self._timeout),
-            )
-            status = int(response.status)
-            if status != 200:
-                label = "readiness probe" if readiness else "request"
-                raise RuntimeError(f"NVIDIA NIM {label} failed with HTTP {status}")
-
-            response_headers = getattr(response, "headers", None)
-            content_length = None
-            if response_headers is not None:
-                getter = getattr(response_headers, "get", None)
-                if callable(getter):
-                    content_length = getter("content-length")
-            if content_length:
-                try:
-                    if int(content_length) > max_bytes:
-                        raise RuntimeError("NVIDIA NIM response exceeded the response size limit")
-                except ValueError:
-                    raise RuntimeError("NVIDIA NIM returned an invalid content length") from None
-
-            raw = await response.text()
-        except TimeoutError:
-            raise RuntimeError("NVIDIA NIM request exceeded its timeout") from None
-        except RuntimeError:
-            raise
-        except Exception:  # noqa: BLE001 - upstream details may contain secrets
-            label = "readiness endpoint" if readiness else "request"
-            raise RuntimeError(f"NVIDIA NIM {label} is unavailable") from None
-
-        if not isinstance(raw, str) or len(raw.encode("utf-8")) > max_bytes:
-            raise RuntimeError("NVIDIA NIM response exceeded the response size limit")
-        try:
-            payload = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise RuntimeError("NVIDIA NIM returned an invalid JSON response") from None
-        if not isinstance(payload, dict):
-            raise RuntimeError("NVIDIA NIM returned an invalid JSON response")  # noqa: TRY004 - preserve provider transport error contract
-        return payload
+        """Fetch a bounded JSON object from NVIDIA using Cloudflare Fetch."""
+        fetch_fn = self._resolve_fetch()
+        options = self._request_options(method, body)
+        options["headers"]["Authorization"] = f"Bearer {self._api_key}"
+        raw = await self._fetch_text(
+            fetch_fn,
+            url,
+            options,
+            timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
+            readiness=readiness,
+        )
+        return self._decode_json(raw)
 
     async def acheck_readiness(self) -> None:
         """Verify model catalogue availability using request-context Fetch, without inference."""
