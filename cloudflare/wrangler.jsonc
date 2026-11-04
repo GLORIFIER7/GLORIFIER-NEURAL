@@ -2,14 +2,33 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "glorifier-neural",
   "main": "worker.py",
-  "account_id": "8d18ea5dc25319e78fc2124cafff56b0",
   "compatibility_date": "2026-11-04",
-  "compatibility_flags": ["python_workers"],
+  "compatibility_flags": [
+    "python_workers"
+  ],
   "workers_dev": true,
   "preview_urls": false,
+  "ratelimits": [
+    {
+      "name": "GLORIFIER_RATE_LIMITER",
+      "namespace_id": "47041104",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "GLORIFIER_READINESS_LIMITER",
+      "namespace_id": "47041105",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1.0,
+    "head_sampling_rate": 1,
     "logs": {
       "enabled": true,
       "invocation_logs": true,
@@ -23,5 +42,14 @@
     "issues": {
       "enabled": true
     }
-  }
+  },
+  "vars": {
+    "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"
+  },
+  "hyperdrive": [
+    {
+      "binding": "NEON_READONLY",
+      "id": "eff847b6c3c64488a989f1fa67d966a0"
+    }
+  ]
 }

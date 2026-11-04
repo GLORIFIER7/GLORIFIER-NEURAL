@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import secrets
 from uuid import uuid4
 
 import pytest
@@ -199,3 +200,230 @@ def test_task_run_repository_rejects_invalid_neon_timeouts(connect_timeout):
             connect_timeout=connect_timeout,
         )
 
+
+
+def test_task_run_repository_reads_request_scoped_worker_environment():
+    env = {
+        "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+        "NEON_DATABASE_URL": "postgresql://neon_user:neon_pass@example.neon.tech/neural",
+    }
+
+    repository = TaskRunRepository.from_environment(env)
+
+    assert repository is not None
+    assert repository._database_url == env["NEON_DATABASE_URL"]
+
+
+def test_worker_task_run_write_is_committed_and_verified_by_readback(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    request_id = str(uuid4())
+    calls = []
+    inserted_id = None
+
+    class Cursor:
+        def execute(self, query, params):
+            nonlocal inserted_id
+            calls.append((query, params))
+            if query.lstrip().startswith("INSERT"):
+                inserted_id = params[0]
+
+        def fetchone(self):
+            return (inserted_id,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def __init__(self):
+            self.cursor_instance = Cursor()
+            self.committed = False
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            self.committed = True
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    def connect(**kwargs):
+        calls.append(("connect", kwargs))
+        return connection
+
+    monkeypatch.setitem(sys.modules, "pg8000", SimpleNamespace(connect=connect))
+    repository = TaskRunRepository(
+        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
+    )
+
+    repository.record_worker(
+        request_id=request_id,
+        action_class="read_only",
+        status="NOT VERIFIED",
+        evidence=["execution:none"],
+    )
+
+    assert connection.committed is True
+    assert connection.closed is True
+    assert calls[1][0].lstrip().startswith("INSERT INTO glorifier.task_runs")
+    assert calls[2][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+    assert "execution:none" in calls[1][1][4]
+
+
+def test_worker_task_run_write_fails_closed_on_missing_readback(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    class Cursor:
+        def execute(self, _query, _params):
+            return None
+
+        def fetchone(self):
+            return None
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pg8000",
+        SimpleNamespace(connect=lambda **_kwargs: Connection()),
+    )
+    repository = TaskRunRepository(
+        "postgresql://neon_user:neon_pass@example.neon.tech/neural"
+    )
+
+    with pytest.raises(RuntimeError, match="readback did not match"):
+        repository.record_worker(
+            request_id=str(uuid4()),
+            action_class="read_only",
+            status="NOT VERIFIED",
+            evidence=["execution:none"],
+        )
+
+
+def test_worker_task_run_repository_supports_neon_write_hyperdrive(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+    request_id = str(uuid4())
+
+    class Cursor:
+        def execute(self, query, params):
+            calls.append((query, params))
+
+        def fetchone(self):
+            return (request_id,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            calls.append(("commit", None))
+
+        def close(self):
+            return None
+
+    def connect(**kwargs):
+        calls.append(("connect", kwargs))
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "pg8000", SimpleNamespace(connect=connect))
+    hyperdrive = SimpleNamespace(
+        user="neon_writer",
+        password=secrets.token_urlsafe(32),
+        host="hyperdrive.internal",
+        port="5432",
+        database="glorifier",
+    )
+    repository = TaskRunRepository.from_environment(
+        {
+            "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+            "NEON_WRITE": hyperdrive,
+        }
+    )
+
+    repository.record_worker(
+        request_id=request_id,
+        action_class="read_only",
+        status="NOT VERIFIED",
+        evidence=["execution:none"],
+    )
+
+    connection_args = calls[0][1]
+    assert connection_args["host"] == "hyperdrive.internal"
+    assert connection_args["user"] == "neon_writer"
+    assert connection_args["ssl_context"] is False
+    assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+
+def test_worker_task_run_readback_mismatch_is_reported_without_masking(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    request_id = str(uuid4())
+    other_request_id = str(uuid4())
+
+    class Cursor:
+        def execute(self, _query, _params):
+            return None
+
+        def fetchone(self):
+            return (other_request_id,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pg8000",
+        SimpleNamespace(connect=lambda **_kwargs: Connection()),
+    )
+    repository = TaskRunRepository.from_environment(
+        {
+            "GLORIFIER_NEON_TASK_RUNS_ENABLED": "true",
+            "NEON_WRITE": SimpleNamespace(
+                user="neon_writer",
+                password=secrets.token_urlsafe(32),
+                host="hyperdrive.internal",
+                port="5432",
+                database="glorifier",
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="readback did not match"):
+        repository.record_worker(
+            request_id=request_id,
+            action_class="read_only",
+            status="NOT VERIFIED",
+            evidence=["execution:none"],
+        )

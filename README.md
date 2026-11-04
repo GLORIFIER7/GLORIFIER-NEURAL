@@ -63,34 +63,34 @@ The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
 `env` binding. Add it as a Worker secret in Cloudflare before enabling task calls.
 No credential is stored in this repository or Wrangler configuration.
 
-This first Cloudflare runtime stage keeps provider inference, external data egress,
-Neon connectivity, and Supabase audit persistence disabled. The current NVIDIA,
-Neon, and Supabase adapters use conventional Python networking/database drivers;
-they are not enabled by this Worker until separately ported and verified against
-Cloudflare's fetch and binding APIs. Consequently, `/ready` is expected to remain
-HTTP 503 while no supported provider is configured. `/health` reports process
-liveness only.
+This Cloudflare runtime keeps provider inference, external data egress, Supabase audit
+persistence, and Neon task-run writes disabled by default. The integration Wrangler
+configuration binds the existing read-only `NEON_READONLY` Hyperdrive and enables only
+the bounded `SELECT 1` readiness probe. It performs no schema migration or application-
+data write. NVIDIA inference remains disabled until separately authorized and
+configured; `/ready` correctly remains HTTP 503 while the provider is not configured.
+`/health` reports process liveness only.
 
 Pull requests build the Worker bundle in dry-run mode using only the supported
 Cloudflare runtime dependencies. Production deployment is manual through the
 **Cloudflare Neural Worker** workflow, requires the
-`CLOUDFLARE_API_TOKEN` repository secret, and requires setting its `deploy`
-input to `true`. The workflow uses a dedicated
-`glorifier-neural-cloudflare-production` GitHub environment.
+`CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable in the
+`glorifier-neural-cloudflare-production` GitHub Environment, and requires
+setting its `deploy` input to `true`. Neither value is stored in source.
 
 ## API access
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
 
-Do not expose the service publicly without TLS, infrastructure-level request rate limits, monitoring, secret rotation, and an operational incident plan. The app applies a bounded, process-local limit of 60 authenticated task requests per client IP per minute, returning HTTP 429 with `Retry-After`. On Cloudflare Workers it uses the edge-provided `CF-Connecting-IP` address and rejects task requests with HTTP 503 when that address is absent or invalid; outside Workers it uses the direct ASGI peer address. Other forwarded headers are not trusted. This is defense in depth only: counters are per process and reset on restart, so enforce distributed limits at the edge/reverse proxy before multi-instance or public production use.
+Do not expose the service publicly without TLS, monitoring, secret rotation, and an operational incident plan. Local execution applies a bounded, process-local limit of 60 authenticated task requests per minute, keyed by a domain-separated HMAC-SHA-256 fingerprint of the bearer token; local counters reset on restart. Cloudflare Workers use the native `GLORIFIER_RATE_LIMITER` binding with a 60-request/60-second configuration and the same credential-keyed HMAC construction. Public `/ready` probes use a separate `GLORIFIER_READINESS_LIMITER` binding, limited to 10 requests per 60 seconds per Cloudflare client IP, and cache provider/database probe results for 30 seconds. Worker requests fail closed with HTTP 503 if the binding is missing or unavailable and return HTTP 429 when the binding denies a request. Cloudflare documents these counters as approximate and per-location, not a strict global quota; use a separately reviewed global coordination design if exact global quotas are required.
 
 ## Explicit inference configuration
 
-Inference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. The egress flag is a separate privacy control: the task text is sent to NVIDIA NIM when inference runs, so enable it only for data approved for external processing. Optionally set `NVIDIA_NIM_MODEL`; the default is `meta/llama-3.1-8b-instruct`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.
+Inference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. The egress flag is a separate privacy control: the task text is sent to NVIDIA NIM when inference runs, so enable it only for data approved for external processing. Optionally set `NVIDIA_NIM_MODEL`; the default is `nvidia/nemotron-3.5-super-vl-120b-a12b`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.
 
 ## Database foundation
 
-A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Neon remains unconfigured and unverified.
+A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. The currently deployed `main` Worker has no active Neon binding and its connectivity is not verified. The integration PR configures the existing read-only Hyperdrive for the next gated release; the live `SELECT 1` probe must still pass before connectivity is marked VERIFIED.
 
 ## Explicit limitations
 

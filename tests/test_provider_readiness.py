@@ -221,7 +221,7 @@ def test_nvidia_readiness_enforces_one_absolute_deadline(monkeypatch):
         def read(self, _limit):
             # The old one-shot read allowed the five-second budget to be exceeded.
             clock[0] += 6.0
-            return b'{"data":[{"id":"meta/llama-3.1-8b-instruct"}]}'
+            return b'{"data":[{"id":"nvidia/nemotron-3.5-super-vl-120b-a12b"}]}'
 
         def read1(self, _limit):
             # The upstream trickles data every two seconds. The second read must
