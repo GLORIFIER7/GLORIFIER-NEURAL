@@ -53,3 +53,16 @@ def test_rate_limiter_rejects_nonpositive_configuration():
             pass
         else:
             raise AssertionError("invalid configuration must be rejected")
+
+def test_bearer_token_fingerprint_is_keyed_per_limiter_instance():
+    token = "same-bearer-token"
+    first = FixedWindowRateLimiter(clock=lambda: 0.0)
+    second = FixedWindowRateLimiter(clock=lambda: 0.0)
+
+    assert first.allow("127.0.0.1", token)[0] is True
+    assert second.allow("127.0.0.1", token)[0] is True
+
+    first_fingerprint = next(iter(first._windows))
+    second_fingerprint = next(iter(second._windows))
+    assert token not in first_fingerprint
+    assert first_fingerprint != second_fingerprint
