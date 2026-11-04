@@ -844,3 +844,70 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
     assert str(uuid.UUID(captured["request_id"])) == captured["request_id"]
     assert "task" not in captured
     assert "prompt" not in captured
+
+
+def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from app.api import app
+
+    class ReadyOrchestrator:
+        async def acheck_readiness(self):
+            return "VERIFIED", "provider read-only probe passed"
+
+    class ReadyNeonProbe:
+        def check_worker(self):
+            return None
+
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
+    class WorkerEnvironment:
+        def __init__(self, inner: ASGIApp, *, include_auth=True, include_limiter=True):
+            self.inner = inner
+            self.include_auth = include_auth
+            self.include_limiter = include_limiter
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send):
+            if scope["type"] == "http":
+                env = {}
+                if self.include_auth:
+                    env["GLORIFIER_API_TOKEN"] = "ready-token"
+                if self.include_limiter:
+                    env["GLORIFIER_RATE_LIMITER"] = AllowRateLimitBinding()
+                scope = dict(scope)
+                scope["env"] = env
+            await self.inner(scope, receive, send)
+
+    monkeypatch.setattr("app.api._request_orchestrator", lambda _request: ReadyOrchestrator())
+    monkeypatch.setattr(
+        "app.api.NeonConnectivityProbe.from_environment",
+        lambda _env: ReadyNeonProbe(),
+    )
+    monkeypatch.setattr("app.api.SupabaseRestAuditSink.from_environment", lambda *_args: None)
+    monkeypatch.setattr("app.api.TaskRunRepository.from_environment", lambda *_args: None)
+
+    ready = TestClient(WorkerEnvironment(app)).get("/ready")
+
+    assert ready.status_code == 200
+    assert ready.json()["checks"]["providers"] == "VERIFIED"
+    assert ready.json()["checks"]["database"] == "VERIFIED"
+    assert ready.json()["checks"]["authentication"] == "VERIFIED"
+    assert ready.json()["checks"]["rate_limit"] == "VERIFIED"
+    assert ready.json()["execution"]["inference_performed"] is False
+
+    missing_auth = TestClient(
+        WorkerEnvironment(app, include_auth=False)
+    ).get("/ready")
+    assert missing_auth.status_code == 503
+    assert missing_auth.json()["checks"]["authentication"] == "DEGRADED"
+
+    missing_limiter = TestClient(
+        WorkerEnvironment(app, include_limiter=False)
+    ).get("/ready")
+    assert missing_limiter.status_code == 503
+    assert missing_limiter.json()["checks"]["rate_limit"] == "DEGRADED"
