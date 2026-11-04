@@ -11,7 +11,7 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 - Task-run writes: a separately provisioned `NEON_WRITE` binding or a writer `NEON_DATABASE_URL` secret
 - Model: `nvidia/nemotron-3.5-super-vl-120b-a12b`
 
-The Cloudflare deployment has two paths. The connected Cloudflare Workers Builds integration built and deployed the merged `main` commit on 2026-11-04 (build `e8385974-1e32-4428-b229-bf4aed6dc560`, version 5). The repository's `.github/workflows/cloudflare-neural-worker.yml` also provides a separate manual `workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request runs validate and dry-run only; they do not deploy production.
+The Cloudflare deployment has two paths. The connected Cloudflare Workers Builds integration has built and deployed merged `main` commits. The latest deployment record observed during this audit was a dashboard deployment at `2026-11-04T13:24:33Z`, with 100% traffic assigned to version `3481f2ac-2207-4b30-9858-32ad4bff8f0a`. The repository's `.github/workflows/cloudflare-neural-worker.yml` also provides a separate manual `workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request runs validate and dry-run only; they do not deploy production.
 
 ## GitHub deployment environment
 
@@ -30,7 +30,7 @@ The account-wide `All Workers` Access application remains enabled and still prot
 
 These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Public `GET /ready` is protected by a separate Cloudflare-native per-client rate limiter and a 30-second cache for provider/database probes. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
 
-Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. `GET /ready` returned HTTP 503 because provider inference is intentionally disabled; the same response reported `database`, `authentication`, and `rate_limit` as `VERIFIED`, and `inference_performed=false`. This is provider-disabled safe mode, not a database failure.
+Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. The latest live `GET /ready` probe returned HTTP 503, but the current fetch did not expose its response body, so the reason cannot be asserted from that probe. The latest structured failing smoke result (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546)) reported `providers: NOT VERIFIED`, `database: DEGRADED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. Do not describe this as verified provider-disabled safe mode until a fresh structured response proves all safe-mode conditions.
 
 ## Cloudflare variables and secrets
 
@@ -57,7 +57,7 @@ The readiness probe performs a read-only `GET /v1/models` request. It does not s
 
 ### Neon task-run writes (optional)
 
-The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The live `/ready` response now reports the database as `VERIFIED`. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
+The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The latest detailed smoke response reported `database: DEGRADED`, and a later live `/ready` probe returned HTTP 503 without an inspectable body. Database readiness must therefore remain unverified until a fresh structured probe succeeds. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
 
 To enable task-run persistence:
 
@@ -89,7 +89,7 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The live production observation on 2026-11-04 matches the provider-disabled safe-mode branch.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest detailed production observation did not meet the safe-mode branch because the database check was degraded. Re-run the smoke check and retain the 503 failure until a structured response verifies database, authentication, rate-limit, and inference-disabled conditions.
 
 ## Rate limiting
 
@@ -97,13 +97,12 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 ## Current production observation — 2026-11-04
 
-- `main` commit: `4f5e9106f4fd1b010875de5833df48a651d3e0b2`.
-- Deployed Worker version: 5 (`2522a805-cca5-4778-aac3-1e76013ee758`), with 100% of production traffic.
-- Cloudflare Workers Builds: successful build `e8385974-1e32-4428-b229-bf4aed6dc560`.
-- `/health`: HTTP 200; process verified.
-- `/ready`: HTTP 503 in provider-disabled safe mode; database, authentication, and rate-limit checks verified; `inference_performed=false`.
-- `GLORIFIER_API_TOKEN` is present as a Worker secret binding; `NVIDIA_NIM_API_KEY` is absent. Provider inference and external data egress remain disabled.
-- Optional audit and task-run persistence are not configured.
+- Latest Cloudflare deployment record observed at `2026-11-04T13:24:33Z`; source was the dashboard and 100% of production traffic was assigned to version `3481f2ac-2207-4b30-9858-32ad4bff8f0a`.
+- `/health`: HTTP 200; process liveness verified only.
+- `/ready`: latest live probe returned HTTP 503; the current fetch did not expose its structured JSON body.
+- The latest structured failing smoke result (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546)) reported providers `NOT VERIFIED`, database `DEGRADED`, authentication `VERIFIED`, rate limit `VERIFIED`, and `inference_performed=false`.
+- Cloudflare settings expose a `GLORIFIER_API_TOKEN` secret binding and a secret binding named `NVIDIA_NIM_API_KEY`. Secret values and credential validity are not observable from the binding inventory.
+- Provider inference remains unverified; optional audit and task-run persistence are not configured.
 
 ## Release procedure
 
