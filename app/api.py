@@ -409,6 +409,8 @@ async def _worker_readiness_gate(request: Request):
             message=exc.detail,
             status_code=exc.status_code,
         )
+        if exc.headers:
+            response.headers.update(exc.headers)
         return authentication, rate_limit, response
     rate_limit = (
         "VERIFIED" if task_limiter and readiness_limiter else "DEGRADED"
