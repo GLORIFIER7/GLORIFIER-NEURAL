@@ -6,7 +6,7 @@ import shutil
 
 WORKER_ROOT = Path(__file__).resolve().parent
 SOURCE_APP = WORKER_ROOT.parent / "app"
-WORKER_APP = WORKER_ROOT / "python_modules" / "app"
+WORKER_APP = WORKER_ROOT / "neural_app" / "app"
 
 
 def main() -> None:
