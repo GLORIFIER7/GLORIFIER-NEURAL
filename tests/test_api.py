@@ -836,7 +836,7 @@ def test_worker_task_endpoint_rejects_rate_limited_credentials():
         json={"task": "worker request", "require_approval": False},
     )
 
-    assert response.status_code == 429
+    assert response.status_code == 429, response.text
     assert response.headers["retry-after"] == "60"
 
 
@@ -969,7 +969,7 @@ def test_worker_readiness_requires_authentication_and_native_rate_limit_binding(
         ready = ready_client.get("/ready", headers={"CF-Connecting-IP": "198.51.100.10"})
         cached_ready = ready_client.get("/ready", headers={"CF-Connecting-IP": "198.51.100.10"})
 
-    assert ready.status_code == 200
+    assert ready.status_code == 200, ready.text
     assert ready.json()["checks"]["providers"] == "VERIFIED"
     assert ready.json()["checks"]["database"] == "VERIFIED"
     assert ready.json()["checks"]["authentication"] == "VERIFIED"
