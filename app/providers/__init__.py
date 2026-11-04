@@ -201,7 +201,7 @@ class NvidiaNimAdapter(ProviderAdapter):
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise RuntimeError("NVIDIA NIM returned an invalid JSON response") from None
         if not isinstance(payload, dict):
-            raise TypeError("NVIDIA NIM returned an invalid JSON response")
+            raise RuntimeError("NVIDIA NIM returned an invalid JSON response")
         return payload
 
     async def acheck_readiness(self) -> None:
