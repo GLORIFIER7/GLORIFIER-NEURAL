@@ -430,6 +430,7 @@ async def run_task(
                     status=result.status,
                     provider=result.provider,
                     evidence=result.evidence[:20],
+                    hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
                 )
             else:
                 task_run_repository.record(
