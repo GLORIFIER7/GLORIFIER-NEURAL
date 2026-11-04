@@ -57,7 +57,7 @@
     "exclude": [
       "**/*.pyc",
       "**/__pycache__",
-      "**/*.dist-info/entry_points.txt"
+      "**/*.dist-info/*.txt"
     ]
   }
 }
