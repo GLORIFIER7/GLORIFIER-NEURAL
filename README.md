@@ -43,19 +43,6 @@ Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status
 
 ## Cloudflare deployment
 
-## Current deployed state — verified 2026-11-04
-
-The production Worker `glorifier-neural` is serving version 5 (`2522a805-cca5-4778-aac3-1e76013ee758`) at 100% traffic. Its active configuration includes the `GLORIFIER_API_TOKEN` secret binding, read-only `NEON_READONLY` Hyperdrive binding, `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`, and both native rate-limit bindings.
-
-Observed live checks:
-
-- `GET /health`: HTTP 200; process status `VERIFIED`. This endpoint is liveness only and does not independently verify provider or database dependencies.
-- `GET /ready`: HTTP 503, `NOT READY`, because provider inference is disabled by configuration. In the same response, `database`, `authentication`, and `rate_limit` are `VERIFIED`; `inference_performed` is `false`.
-- The optional `audit` and `task_runs` integrations report `NOT CONFIGURED (OPTIONAL)`.
-- The Worker secret inventory contains `GLORIFIER_API_TOKEN`; no `NVIDIA_NIM_API_KEY` is configured. No NVIDIA inference request has been made.
-
-This is **deployed safe mode**, not full provider readiness. The previous Hyperdrive connection failure is resolved: the live readiness response now verifies the database connection through the Worker binding.
-
 Neural is deployed as a dedicated Cloudflare Python Worker, not as a Railway service.
 The Worker uses Cloudflare's Python runtime with the FastAPI ASGI entrypoint in
 `cloudflare/worker.py` and the `python_workers` compatibility flag in
@@ -107,6 +94,19 @@ Do not expose the service publicly without TLS, monitoring, secret rotation, and
 ## Explicit inference configuration
 
 Inference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. The egress flag is a separate privacy control: the task text is sent to NVIDIA NIM when inference runs, so enable it only for data approved for external processing. Optionally set `NVIDIA_NIM_MODEL`; the default is `nvidia/nemotron-3.5-super-vl-120b-a12b`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.
+
+## Current deployed state — verified 2026-11-04
+
+The production Worker `glorifier-neural` is serving version 5 (`2522a805-cca5-4778-aac3-1e76013ee758`) at 100% traffic. Its active configuration includes the `GLORIFIER_API_TOKEN` secret binding, read-only `NEON_READONLY` Hyperdrive binding, `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`, and both native rate-limit bindings.
+
+Observed live checks:
+
+- `GET /health`: HTTP 200; process status `VERIFIED`. This endpoint is liveness only and does not independently verify provider or database dependencies.
+- `GET /ready`: HTTP 503, `NOT READY`, because provider inference is disabled by configuration. In the same response, `database`, `authentication`, and `rate_limit` are `VERIFIED`; `inference_performed` is `false`.
+- The optional `audit` and `task_runs` integrations report `NOT CONFIGURED (OPTIONAL)`.
+- The Worker secret inventory contains `GLORIFIER_API_TOKEN`; no `NVIDIA_NIM_API_KEY` is configured. No NVIDIA inference request has been made.
+
+This is **deployed safe mode**, not full provider readiness. The previous Hyperdrive connection failure is resolved: the live readiness response now verifies the database connection through the Worker binding.
 
 ## Database foundation
 
