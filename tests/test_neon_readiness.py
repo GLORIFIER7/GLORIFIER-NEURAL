@@ -19,7 +19,7 @@ def test_worker_readiness_probe_does_not_block_task_run_database_lock(monkeypatc
     import asyncio
     from types import SimpleNamespace
 
-    import app.api as api
+    from app import api
     from starlette.requests import Request
 
     class ForbiddenDatabaseLock:
