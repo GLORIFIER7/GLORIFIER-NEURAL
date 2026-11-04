@@ -30,3 +30,6 @@ build/
 *.pfx
 *.jks
 .DS_Store
+
+# Generated Cloudflare Worker source staging
+cloudflare/app/
