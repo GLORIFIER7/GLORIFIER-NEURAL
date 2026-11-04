@@ -137,13 +137,18 @@ jobs:
           test -f python_modules/app/api.py
           test -f python_modules/app/database/neon.py
           test -f python_modules/app/neural/torch_status.py
-      - name: Verify Cloudflare deployment credential exists
+      - name: Verify Cloudflare deployment credentials and account selection
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}" || {
             echo "::error::Missing CLOUDFLARE_API_TOKEN in the glorifier-neural-cloudflare-production environment"
+            exit 1
+          }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || {
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID in the glorifier-neural-cloudflare-production environment variables"
             exit 1
           }
       - name: Deploy Neural Worker to Cloudflare
@@ -151,6 +156,7 @@ jobs:
         run: uv run --locked pywrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
   smoke:
     if: needs.deploy.result == 'success'
