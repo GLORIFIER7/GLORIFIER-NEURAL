@@ -6,7 +6,11 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115,<1.0",
     "pydantic>=2.8,<3.0",
+    "glorifier-neural-app",
 ]
+
+[tool.uv.sources]
+glorifier-neural-app = { path = "neural_app", editable = false }
 
 [dependency-groups]
 dev = [
