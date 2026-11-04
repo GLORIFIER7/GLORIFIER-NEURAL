@@ -644,6 +644,7 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
 
 def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
     """Cloudflare bindings are authoritative and never fall back to host env."""
+    import secrets
     from types import SimpleNamespace
 
     from fastapi.testclient import TestClient
