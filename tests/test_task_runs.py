@@ -231,6 +231,9 @@ def test_worker_task_run_write_is_committed_and_verified_by_readback(monkeypatch
         def fetchone(self):
             return (inserted_id,)
 
+        def close(self):
+            return None
+
     class Connection:
         def __init__(self):
             self.cursor_instance = Cursor()
@@ -266,7 +269,7 @@ def test_worker_task_run_write_is_committed_and_verified_by_readback(monkeypatch
     assert connection.committed is True
     assert connection.closed is True
     assert calls[1][0].lstrip().startswith("INSERT INTO glorifier.task_runs")
-    assert calls[2][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
+    assert calls[3][0].lstrip().startswith("SELECT request_id FROM glorifier.task_runs")
     assert "execution:none" in calls[1][1][4]
 
 
@@ -279,6 +282,9 @@ def test_worker_task_run_write_fails_closed_on_missing_readback(monkeypatch):
             return None
 
         def fetchone(self):
+            return None
+
+        def close(self):
             return None
 
     class Connection:
