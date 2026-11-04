@@ -512,7 +512,7 @@ def test_provider_failure_is_recorded_as_inference_failed(monkeypatch):
     ("catalogue_data", "expected_status", "expected_provider_status", "expected_readiness_status"),
     [
         (
-            [{"id": "meta/llama-3.1-8b-instruct"}],
+            [{"id": "nvidia/nemotron-3.5-super-vl-120b-a12b"}],
             200,
             "VERIFIED",
             "READY",
@@ -540,7 +540,7 @@ def test_readiness_checks_configured_nvidia_model_without_inference(
     monkeypatch.setenv("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "true")
     monkeypatch.setenv("GLORIFIER_PROVIDER", "nvidia_nim")
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "readiness-test-secret")
-    monkeypatch.setenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
+    monkeypatch.setenv("NVIDIA_NIM_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b")
     monkeypatch.setattr("app.api.orchestrator", build_orchestrator_from_environment())
     monkeypatch.setattr("app.api.NeonConnectivityProbe.from_environment", lambda: None)
 
