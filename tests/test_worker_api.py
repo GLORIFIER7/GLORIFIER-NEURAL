@@ -124,7 +124,6 @@ def test_worker_task_endpoint_rejects_rate_limited_credentials():
 
 
 def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatch):
-    from app.orchestrator import Orchestrator
     from fastapi.testclient import TestClient
     from starlette.types import ASGIApp, Receive, Scope, Send
 
