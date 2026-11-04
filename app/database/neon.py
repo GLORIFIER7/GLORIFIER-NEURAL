@@ -36,6 +36,51 @@ def _environment_value(environment, name: str, default: str = "") -> str:
     return default if value is None else str(value)
 
 
+async def _connect_worker_database(asyncpg, database_url, hyperdrive, timeout):
+    """Open a bounded asyncpg connection through Hyperdrive or a verified TLS DSN."""
+    if hyperdrive is not None:
+        return await asyncpg.connect(
+            user=str(hyperdrive.user),
+            password=str(hyperdrive.password),
+            host=str(hyperdrive.host),
+            port=int(hyperdrive.port),
+            database=str(hyperdrive.database),
+            ssl=False,
+            timeout=timeout,
+            command_timeout=timeout,
+        )
+
+    if not database_url:
+        raise RuntimeError("Neon database URL is required for a direct Worker connection")
+    parsed = urlparse(database_url)
+    import ssl
+
+    return await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        database=parsed.path.lstrip("/"),
+        ssl=ssl.create_default_context(),
+        timeout=timeout,
+        command_timeout=timeout,
+    )
+
+
+async def _close_worker_database(connection, timeout) -> bool:
+    """Close the async database connection and report sanitized cleanup failures."""
+    if connection is None:
+        return False
+    try:
+        await connection.close(timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - never expose database or credential details
+        _LOGGER.warning(
+            "Neon Worker connectivity probe cleanup failed (%s)", type(exc).__name__
+        )
+        return True
+    return False
+
+
 class NeonConnectivityProbe:
     """Run a bounded SELECT 1 probe using psycopg locally or asyncpg on Workers."""
 
@@ -128,41 +173,19 @@ class NeonConnectivityProbe:
             _LOGGER.error("Neon Worker connectivity driver is not installed")
             raise RuntimeError("Neon connectivity driver is not installed") from None
 
-        connection = None
-        row = None
-        query_completed = operation_failed = cleanup_failed = False
         timeout = (
             WORKER_CONNECT_TIMEOUT_SECONDS
             if self._hyperdrive is not None
             else self._timeout
         )
+        connection = None
+        row = None
+        query_completed = operation_failed = False
         stage = "connect"
         try:
-            if self._hyperdrive is not None:
-                connection = await asyncpg.connect(
-                    user=str(self._hyperdrive.user),
-                    password=str(self._hyperdrive.password),
-                    host=str(self._hyperdrive.host),
-                    port=int(self._hyperdrive.port),
-                    database=str(self._hyperdrive.database),
-                    ssl=False,
-                    timeout=timeout,
-                    command_timeout=timeout,
-                )
-            else:
-                parsed = urlparse(self._database_url)
-                import ssl
-
-                connection = await asyncpg.connect(
-                    user=parsed.username,
-                    password=parsed.password,
-                    host=parsed.hostname,
-                    port=parsed.port or 5432,
-                    database=parsed.path.lstrip("/"),
-                    ssl=ssl.create_default_context(),
-                    timeout=timeout,
-                    command_timeout=timeout,
-                )
+            connection = await _connect_worker_database(
+                asyncpg, self._database_url, self._hyperdrive, timeout
+            )
             stage = "query"
             row = await connection.fetchval("SELECT 1")
             query_completed = True
@@ -174,15 +197,7 @@ class NeonConnectivityProbe:
                 type(exc).__name__,
             )
         finally:
-            if connection is not None:
-                try:
-                    await connection.close(timeout=timeout)
-                except Exception as exc:  # noqa: BLE001 - preserve the primary probe result
-                    cleanup_failed = True
-                    _LOGGER.warning(
-                        "Neon Worker connectivity probe cleanup failed (%s)",
-                        type(exc).__name__,
-                    )
+            cleanup_failed = await _close_worker_database(connection, timeout)
 
         if query_completed and row != 1:
             raise RuntimeError("Neon connectivity probe returned an unexpected result")
