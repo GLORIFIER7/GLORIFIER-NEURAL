@@ -314,128 +314,325 @@ def health() -> HealthResponse:
     )
 
 
+def _readiness_body(
+    providers: str,
+    database: str,
+    authentication: str,
+    rate_limit: str,
+    audit: str,
+    task_runs: str,
+    ready: bool,
+    message: str,
+) -> dict:
+    """Build one sanitized readiness document for every runtime path."""
+    return {
+        "status": "READY" if ready else "NOT READY",
+        "checks": {
+            "providers": providers,
+            "database": database,
+            "authentication": authentication,
+            "rate_limit": rate_limit,
+            "audit": audit,
+            "task_runs": task_runs,
+        },
+        "requirements": {
+            "authentication": "required for Worker task execution",
+            "rate_limit": "required for Worker task execution and readiness probes",
+            "database": "optional unless connectivity or task-run persistence is enabled",
+            "audit": "optional unless explicitly enabled",
+            "task_runs": "optional unless explicitly enabled",
+        },
+        "execution": {"inference_performed": False},
+        "message": message,
+    }
+
+
+def _readiness_response(
+    *,
+    providers: str,
+    database: str,
+    authentication: str,
+    rate_limit: str,
+    audit: str,
+    task_runs: str,
+    message: str,
+    status_code: int | None = None,
+) -> JSONResponse:
+    """Return a readiness status without upgrading optional configuration to proof."""
+    ready = (
+        providers == "VERIFIED"
+        and database != "DEGRADED"
+        and authentication != "DEGRADED"
+        and rate_limit != "DEGRADED"
+        and audit != "DEGRADED"
+        and task_runs != "DEGRADED"
+    )
+    response_status = status_code or (200 if ready else 503)
+    return JSONResponse(
+        status_code=response_status,
+        content=_readiness_body(
+            providers, database, authentication, rate_limit,
+            audit, task_runs, ready and status_code is None, message,
+        ),
+    )
+
+
+async def _worker_readiness_gate(request: Request):
+    """Require API authentication configuration and both Cloudflare limiters."""
+    authentication = (
+        "VERIFIED"
+        if _request_environment_value(request, "GLORIFIER_API_TOKEN")
+        else "DEGRADED"
+    )
+    task_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
+    readiness_binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
+    task_limiter = task_binding is not None and callable(getattr(task_binding, "limit", None))
+    readiness_limiter = (
+        readiness_binding is not None
+        and callable(getattr(readiness_binding, "limit", None))
+    )
+    try:
+        await _enforce_readiness_rate_limit(request)
+    except HTTPException as exc:
+        rate_limit = (
+            "VERIFIED"
+            if exc.status_code == 429 and task_limiter
+            else "DEGRADED"
+        )
+        response = _readiness_response(
+            providers="NOT CHECKED",
+            database="NOT CHECKED",
+            authentication=authentication,
+            rate_limit=rate_limit,
+            audit="NOT CHECKED",
+            task_runs="NOT CHECKED",
+            message=exc.detail,
+            status_code=exc.status_code,
+        )
+        return authentication, rate_limit, response
+    rate_limit = (
+        "VERIFIED" if task_limiter and readiness_limiter else "DEGRADED"
+    )
+    return authentication, rate_limit, None
+
+
+def _optional_readiness_persistence(worker_env, worker_request: bool) -> tuple[str, str]:
+    """Report optional persistence configuration without claiming its writes work."""
+    audit = "NOT CONFIGURED (OPTIONAL)"
+    task_runs = "NOT CONFIGURED (OPTIONAL)"
+    try:
+        sink = (
+            SupabaseRestAuditSink.from_environment(worker_env)
+            if worker_request
+            else SupabaseRestAuditSink.from_environment()
+        )
+        if sink is not None:
+            audit = "CONFIGURED (WRITE NOT VERIFIED)"
+    except Exception:  # noqa: BLE001 - never expose persistence configuration
+        audit = "DEGRADED"
+    try:
+        repository = (
+            TaskRunRepository.from_environment(worker_env)
+            if worker_request
+            else TaskRunRepository.from_environment()
+        )
+        if repository is not None:
+            task_runs = "CONFIGURED (WRITE NOT VERIFIED)"
+    except Exception:  # noqa: BLE001 - never expose persistence configuration
+        task_runs = "DEGRADED"
+    return audit, task_runs
+
+
+async def _local_readiness_checks() -> tuple[str, str, str]:
+    """Run local provider readiness and optional local Neon connectivity."""
+    providers, message = await asyncio.to_thread(orchestrator.check_readiness)
+    database = "NOT CONFIGURED (OPTIONAL)"
+    try:
+        probe = NeonConnectivityProbe.from_environment()
+        if probe is not None:
+            await asyncio.to_thread(probe.check)
+            database = "VERIFIED"
+    except Exception:  # noqa: BLE001 - readiness must not leak connection details
+        database = "DEGRADED"
+    return providers, message, database
+
+
 @app.get("/ready", tags=["operations"])
 async def readiness(request: Request) -> JSONResponse:
     """Report cached, rate-limited provider and optional database readiness."""
-    worker_request = request.scope.get("env") is not None
-    worker_env = request.scope.get("env") if worker_request else None
-    auth_status = "NOT REQUIRED (LOCAL)"
-    task_rate_limit_status = "NOT REQUIRED (LOCAL)"
-    readiness_rate_limit_status = "NOT REQUIRED (LOCAL)"
-    rate_limit_status = "NOT REQUIRED (LOCAL)"
+    worker_env = request.scope.get("env")
+    worker_request = worker_env is not None
+    authentication = "NOT REQUIRED (LOCAL)"
+    rate_limit = "NOT REQUIRED (LOCAL)"
     if worker_request:
-        auth_status = "VERIFIED" if _request_environment_value(request, "GLORIFIER_API_TOKEN") else "DEGRADED"
-        task_rate_binding = _request_worker_binding(request, "GLORIFIER_RATE_LIMITER")
-        task_rate_limit_status = (
-            "VERIFIED" if task_rate_binding is not None and callable(getattr(task_rate_binding, "limit", None)) else "DEGRADED"
+        authentication, rate_limit, blocked = await _worker_readiness_gate(request)
+        if blocked is not None:
+            return blocked
+        providers, message, database = await _cached_worker_readiness(
+            request, worker_env
         )
-        readiness_binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
-        readiness_rate_limit_status = (
-            "VERIFIED" if readiness_binding is not None and callable(getattr(readiness_binding, "limit", None)) else "DEGRADED"
-        )
-        try:
-            await _enforce_readiness_rate_limit(request)
-        except HTTPException as exc:
-            rate_limit_status = (
-                "DEGRADED" if exc.status_code == 503 or task_rate_limit_status == "DEGRADED" else "VERIFIED"
-            )
-            return JSONResponse(
-                status_code=exc.status_code,
-                headers=exc.headers,
-                content={
-                    "status": "NOT READY",
-                    "checks": {
-                        "providers": "NOT CHECKED",
-                        "database": "NOT CHECKED",
-                        "authentication": auth_status,
-                        "rate_limit": rate_limit_status,
-                        "audit": "NOT CHECKED",
-                        "task_runs": "NOT CHECKED",
-                    },
-                    "requirements": {
-                        "authentication": "required for Worker task execution",
-                        "rate_limit": "required for Worker task execution and readiness probes",
-                        "database": "optional unless connectivity or task-run persistence is enabled",
-                        "audit": "optional unless explicitly enabled",
-                        "task_runs": "optional unless explicitly enabled",
-                    },
-                    "execution": {"inference_performed": False},
-                    "message": exc.detail,
-                },
-            )
-        rate_limit_status = (
-            "VERIFIED" if task_rate_limit_status == "VERIFIED" and readiness_rate_limit_status == "VERIFIED" else "DEGRADED"
-        )
-        provider_status, provider_message, database_status = await _cached_worker_readiness(request, worker_env)
     else:
-        provider_status, provider_message = await asyncio.to_thread(orchestrator.check_readiness)
-        database_status = "NOT CONFIGURED (OPTIONAL)"
-        try:
-            probe = NeonConnectivityProbe.from_environment()
-            if probe is not None:
-                await asyncio.to_thread(probe.check)
-                database_status = "VERIFIED"
-        except Exception:  # noqa: BLE001 - readiness must not leak connection details
-            database_status = "DEGRADED"
-
-    audit_status = "NOT CONFIGURED (OPTIONAL)"
-    try:
-        audit_sink = SupabaseRestAuditSink.from_environment(worker_env) if worker_request else SupabaseRestAuditSink.from_environment()
-        if audit_sink is not None:
-            audit_status = "CONFIGURED (WRITE NOT VERIFIED)"
-    except Exception:  # noqa: BLE001 - never expose persistence configuration
-        audit_status = "DEGRADED"
-    task_runs_status = "NOT CONFIGURED (OPTIONAL)"
-    try:
-        task_runs = TaskRunRepository.from_environment(worker_env) if worker_request else TaskRunRepository.from_environment()
-        if task_runs is not None:
-            task_runs_status = "CONFIGURED (WRITE NOT VERIFIED)"
-    except Exception:  # noqa: BLE001 - never expose persistence configuration
-        task_runs_status = "DEGRADED"
-
-    ready = (
-        provider_status == "VERIFIED"
-        and database_status != "DEGRADED"
-        and auth_status != "DEGRADED"
-        and rate_limit_status != "DEGRADED"
-        and audit_status != "DEGRADED"
-        and task_runs_status != "DEGRADED"
+        providers, message, database = await _local_readiness_checks()
+    audit, task_runs = _optional_readiness_persistence(worker_env, worker_request)
+    if providers == "VERIFIED" and database == "DEGRADED":
+        message = "The explicitly enabled database connectivity probe failed; provider availability is verified."
+    elif authentication == "DEGRADED" or rate_limit == "DEGRADED":
+        message = "Worker authentication or rate limiting is not configured."
+    elif providers == "VERIFIED":
+        message = (
+            "Provider and required Worker controls passed read-only/configuration checks; "
+            "no inference was performed and optional persistence writes were not tested."
+        )
+    return _readiness_response(
+        providers=providers,
+        database=database,
+        authentication=authentication,
+        rate_limit=rate_limit,
+        audit=audit,
+        task_runs=task_runs,
+        message=message,
     )
-    return JSONResponse(
-        status_code=200 if ready else 503,
-        content={
-            "status": "READY" if ready else "NOT READY",
-            "checks": {
-                "providers": provider_status,
-                "database": database_status,
-                "authentication": auth_status,
-                "rate_limit": rate_limit_status,
-                "audit": audit_status,
-                "task_runs": task_runs_status,
-            },
-            "requirements": {
-                "authentication": "required for Worker task execution",
-                "rate_limit": "required for Worker task execution and readiness probes",
-                "database": "optional unless connectivity or task-run persistence is enabled",
-                "audit": "optional unless explicitly enabled",
-                "task_runs": "optional unless explicitly enabled",
-            },
-            "execution": {"inference_performed": False},
-            "message": (
-                "Provider and required Worker controls passed read-only/configuration checks; no inference was performed and optional persistence writes were not tested."
-                if ready
-                else (
-                    "The explicitly enabled database connectivity probe failed; provider availability is verified."
-                    if provider_status == "VERIFIED" and database_status == "DEGRADED"
-                    else (
-                        "Worker authentication or rate limiting is not configured."
-                        if auth_status == "DEGRADED" or rate_limit_status == "DEGRADED"
-                        else provider_message
-                    )
-                )
+
+
+def _load_task_persistence(worker_env, worker_request: bool):
+    """Resolve opt-in audit and metadata repositories for this execution."""
+    try:
+        audit_sink = (
+            SupabaseRestAuditSink.from_environment(worker_env)
+            if worker_request
+            else SupabaseRestAuditSink.from_environment()
+        )
+        repository = (
+            TaskRunRepository.from_environment(worker_env)
+            if worker_request
+            else TaskRunRepository.from_environment()
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=503, detail="Configured persistence is unavailable"
+        ) from None
+    return audit_sink, repository
+
+
+async def _write_initial_task_audit(
+    audit_sink,
+    request_id: str,
+    correlation_id: str,
+    task_request: TaskRequest,
+    worker_request: bool,
+) -> None:
+    """Fail closed before processing when the required initial audit write fails."""
+    if audit_sink is None:
+        return
+    try:
+        await _write_audit_event(
+            audit_sink,
+            AuditEvent(
+                request_id=request_id,
+                correlation_id=correlation_id,
+                event_type="task_received",
+                status=NOT_VERIFIED,
+                action_class=task_request.action_class,
+                evidence=("execution:not-started",),
             ),
-        },
+            worker_request=worker_request,
+        )
+    except Exception:  # noqa: BLE001 - do not start tasks without their required initial audit
+        raise HTTPException(
+            status_code=503, detail="Audit persistence unavailable; task not executed"
+        ) from None
+
+
+async def _execute_governed_task(
+    request: Request, task_request: TaskRequest, worker_request: bool
+) -> TaskResponse:
+    """Execute through the request-scoped Worker runtime or the local process runtime."""
+    if worker_request:
+        return await _request_orchestrator(request).arun(task_request)
+    return await asyncio.to_thread(orchestrator.run, task_request)
+
+
+def _mark_persistence_degraded(
+    result: TaskResponse, evidence_code: str, description: str
+) -> None:
+    """Preserve completed output while making post-execution persistence failure visible."""
+    if result.status == "VERIFIED":
+        result.status = "PARTIALLY VERIFIED"
+    result.evidence = [*result.evidence[:19], evidence_code]
+    result.message = (
+        f"{result.message} {description} degraded after processing; "
+        "the task outcome is returned to avoid an unsafe automatic retry."
     )
+
+
+async def _persist_task_run(
+    repository,
+    result: TaskResponse,
+    request_id: str,
+    task_request: TaskRequest,
+    request: Request,
+    worker_request: bool,
+) -> TaskResponse:
+    """Persist optional task lifecycle metadata without converting completed work to 503."""
+    if repository is None:
+        return result
+    try:
+        if worker_request:
+            async with WORKER_DATABASE_LOCK:
+                repository.record_worker(
+                    request_id=request_id,
+                    action_class=task_request.action_class,
+                    status=result.status,
+                    provider=result.provider,
+                    evidence=result.evidence[:20],
+                    hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
+                )
+        else:
+            await asyncio.to_thread(
+                repository.record,
+                request_id=request_id,
+                action_class=task_request.action_class,
+                status=result.status,
+                provider=result.provider,
+                evidence=result.evidence[:20],
+            )
+    except Exception:  # noqa: BLE001 - task has already completed; do not invite retries
+        _mark_persistence_degraded(
+            result, "persistence:task_runs:degraded", "Task-run persistence"
+        )
+    return result
+
+
+async def _persist_final_audit(
+    audit_sink: SupabaseRestAuditSink | None,
+    result: TaskResponse,
+    request_id: str,
+    correlation_id: str,
+    task_request: TaskRequest,
+    worker_request: bool,
+) -> TaskResponse:
+    """Persist the final bounded audit event and retain completed results on failure."""
+    if audit_sink is None:
+        return result
+    try:
+        await _write_audit_event(
+            audit_sink,
+            AuditEvent(
+                request_id=request_id,
+                correlation_id=correlation_id,
+                event_type=_audit_event_type(result),
+                status=result.status,
+                action_class=task_request.action_class,
+                provider=result.provider,
+                evidence=tuple(result.evidence[:20]),
+            ),
+            worker_request=worker_request,
+        )
+    except Exception:  # noqa: BLE001 - task has already completed; do not invite retries
+        _mark_persistence_degraded(
+            result, "persistence:audit:degraded", "Final audit persistence"
+        )
+    return result
 
 
 @app.post("/v1/tasks", response_model=TaskResponse, tags=["orchestration"])
@@ -444,15 +641,7 @@ async def run_task(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
-    """Process a governed task request.
-
-    Raises:
-        HTTPException: 503 when the API token is missing or configured audit
-            persistence is unavailable; 401 when the bearer token is invalid;
-            429 when the authenticated caller exceeds the task rate limit.
-        HTTPException: 503 when required audit persistence fails before or after
-            orchestration. Pre-execution audit failures prevent task processing.
-    """
+    """Process a governed task only after authentication, rate and audit checks."""
     api_token = _request_environment_value(request, "GLORIFIER_API_TOKEN")
     if not api_token:
         raise HTTPException(
@@ -461,109 +650,22 @@ async def run_task(
         )
     if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
-
     worker_env = request.scope.get("env")
     worker_request = worker_env is not None
     await _enforce_task_rate_limit(request, api_token)
-
-    try:
-        audit_sink = (
-            SupabaseRestAuditSink.from_environment(worker_env)
-            if worker_request
-            else SupabaseRestAuditSink.from_environment()
-        )
-        task_run_repository = (
-            TaskRunRepository.from_environment(worker_env)
-            if worker_request
-            else TaskRunRepository.from_environment()
-        )
-    except ValueError:
-        # Never include environment values or credential details in client-facing errors.
-        raise HTTPException(status_code=503, detail="Configured persistence is unavailable") from None
-
+    audit_sink, repository = _load_task_persistence(worker_env, worker_request)
     request_id = request.state.request_id
     correlation_id = request.state.correlation_id
-    if audit_sink is not None:
-        try:
-            # Pre-execution audit write: if it fails, do not start task processing.
-            await _write_audit_event(
-                audit_sink,
-                AuditEvent(
-                    request_id=request_id,
-                    correlation_id=correlation_id,
-                    event_type="task_received",
-                    status=NOT_VERIFIED,
-                    action_class=task_request.action_class,
-                    evidence=("execution:not-started",),
-                ),
-                worker_request=worker_request,
-            )
-        except Exception:  # noqa: BLE001 - persistence must fail closed for all error types
-            # Fail closed for any persistence failure without exposing implementation details.
-            raise HTTPException(status_code=503, detail="Audit persistence unavailable; task not executed") from None
-
-    result = (
-        await _request_orchestrator(request).arun(task_request)
-        if worker_request
-        else await asyncio.to_thread(orchestrator.run, task_request)
+    await _write_initial_task_audit(
+        audit_sink, request_id, correlation_id, task_request, worker_request
     )
-    if task_run_repository is not None:
-        try:
-            if worker_request:
-                # Hyperdrive/pg8000 uses the Worker TCP socket implementation.
-                # Serialize synchronous database operations as recommended for Python Workers.
-                async with WORKER_DATABASE_LOCK:
-                    task_run_repository.record_worker(
-                        request_id=request_id,
-                        action_class=task_request.action_class,
-                        status=result.status,
-                        provider=result.provider,
-                        evidence=result.evidence[:20],
-                        hyperdrive=_request_worker_binding(request, "NEON_WRITE"),
-                    )
-            else:
-                await asyncio.to_thread(
-                    task_run_repository.record,
-                    request_id=request_id,
-                    action_class=task_request.action_class,
-                    status=result.status,
-                    provider=result.provider,
-                    evidence=result.evidence[:20],
-                )
-        except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
-            if result.status == "VERIFIED":
-                result.status = "PARTIALLY VERIFIED"
-            result.evidence = [*result.evidence[:19], "persistence:task_runs:degraded"]
-            result.message = (
-                f"{result.message} Task-run persistence degraded after processing; "
-                "the task outcome is returned to avoid an unsafe automatic retry."
-            )
-
-    if audit_sink is not None:
-        event_type = _audit_event_type(result)
-        try:
-            await _write_audit_event(
-                audit_sink,
-                AuditEvent(
-                    request_id=request_id,
-                    correlation_id=correlation_id,
-                    event_type=event_type,
-                    status=result.status,
-                    action_class=task_request.action_class,
-                    provider=result.provider,
-                    evidence=tuple(result.evidence[:20]),
-                ),
-                worker_request=worker_request,
-            )
-        except Exception:  # noqa: BLE001 - do not invite retries of already processed tasks
-            if result.status == "VERIFIED":
-                result.status = "PARTIALLY VERIFIED"
-            result.evidence = [*result.evidence[:19], "persistence:audit:degraded"]
-            result.message = (
-                f"{result.message} Final audit persistence degraded after processing; "
-                "the task outcome is returned to avoid an unsafe automatic retry."
-            )
-    return result
+    result = await _execute_governed_task(request, task_request, worker_request)
+    result = await _persist_task_run(
+        repository, result, request_id, task_request, request, worker_request
+    )
+    return await _persist_final_audit(
+        audit_sink, result, request_id, correlation_id, task_request, worker_request
+    )
 
 
 def _audit_event_type(result: TaskResponse) -> str:
