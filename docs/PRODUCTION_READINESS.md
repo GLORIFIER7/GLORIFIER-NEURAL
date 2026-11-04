@@ -57,7 +57,7 @@ The readiness probe performs a read-only `GET /v1/models` request. It does not s
 
 ### Neon task-run writes (optional)
 
-The PR branch Wrangler configuration binds the existing `glorifier-neon-readonly` Hyperdrive resource as `NEON_READONLY`. It is intended only for a read-only `SELECT 1` readiness probe and must not be used for writes. This binding is not active on the deployed `main` Worker until PR #31 and PR #32 are merged and the gated deployment is run.
+The PR branch Wrangler configuration binds the existing `glorifier-neon-readonly` Hyperdrive resource as `NEON_READONLY`. It is intended only for a read-only `SELECT 1` readiness probe and must not be used for writes. This binding is not active on the deployed `main` Worker until the integration PR #33 is merged and its gated deployment is run.
 
 To enable task-run persistence:
 
@@ -97,11 +97,10 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 ## Release procedure
 
-1. Review and merge the preview-URL hardening PR first.
-2. Review and merge the stacked runtime-readiness PR second.
-3. Confirm the required Cloudflare variables/secrets and any optional database/audit setup above are configured.
-4. Run the Cloudflare Neural Worker workflow manually on `main` with `deploy=true`.
-5. Require the post-deploy smoke job to pass.
-6. Separately perform a controlled authenticated inference request only after approving external data egress and any applicable NVIDIA API usage. The automated readiness/smoke steps intentionally do not perform inference.
+1. Review and merge integration PR #33 only after all required code, security, and workflow checks have final passing outcomes and a human has reviewed the diff.
+2. Configure the required Cloudflare/GitHub Environment values and review the read-only Hyperdrive/rate-limit bindings.
+3. Run the Cloudflare Neural Worker workflow manually on `main` with `deploy=true`.
+4. Require the post-deploy health and readiness smoke checks to pass.
+5. Separately perform a controlled authenticated inference request only after approving external data egress and any applicable NVIDIA API usage. The automated readiness/smoke steps intentionally do not perform inference.
 
 Do not declare production verified until the live smoke checks pass and a controlled inference, authentication, audit-write (when enabled), and task-run write/read-back (when enabled) have been observed in the deployed environment.
