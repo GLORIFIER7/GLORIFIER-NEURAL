@@ -628,3 +628,11 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "NOT VERIFIED"
     assert response.json()["evidence"] == ["inference:disabled", "execution:none"]
+
+    # The request-scoped Cloudflare secret must win over any process-level value.
+    rejected = TestClient(CloudflareEnvironment(app)).post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer different-host-process-secret"},
+        json={"task": "safe read-only task", "require_approval": False},
+    )
+    assert rejected.status_code == 401
