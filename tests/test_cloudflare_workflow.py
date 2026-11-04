@@ -38,6 +38,14 @@ def test_cloudflare_validation_smoke_tests_pyodide_without_optional_drivers():
         / "cloudflare-neural-worker.yml"
     )
     workflow = workflow_path.read_text(encoding="utf-8")
+    repository_root = workflow_path.parents[2]
+    cloudflare_project = (repository_root / "cloudflare" / "pyproject.toml").read_text(encoding="utf-8")
+    package_project = (repository_root / "cloudflare" / "neural_app" / "pyproject.toml").read_text(encoding="utf-8")
+    preparation_script = (repository_root / "cloudflare" / "prepare_worker.py").read_text(encoding="utf-8")
+
+    assert 'glorifier-neural-app = { path = "neural_app", editable = false }' in cloudflare_project
+    assert 'include = ["app*"]' in package_project
+    assert 'WORKER_APP = WORKER_ROOT / "neural_app" / "app"' in preparation_script
 
     required_runtime_checks = (
         "uv sync --locked --group dev --no-install-project",
