@@ -51,6 +51,9 @@ jobs:
         run: uv sync --locked --group dev --no-install-project
       - name: Verify Cloudflare Python Worker runtime startup without optional drivers
         working-directory: cloudflare
+        env:
+          # Local-only Hyperdrive stand-in; the health smoke test does not open a DB connection.
+          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY: postgresql://local:local@127.0.0.1:5432/local
         run: |
           set -euo pipefail
           uv run --locked python - <<'PY'
