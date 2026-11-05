@@ -232,3 +232,55 @@ def test_fetch_review_threads_rejects_missing_resolution_boolean(monkeypatch):
 
     with pytest.raises(TypeError, match="resolution state"):
         _fetch_review_threads("example/repo", 7, "token")
+
+
+def test_malformed_review_timestamp_cannot_supersede_valid_blocker():
+    reviews = [
+        review(
+            "amazon-q-developer[bot]",
+            state="CHANGES_REQUESTED",
+            submitted_at="2026-11-05T10:00:00Z",
+        ),
+        review(
+            "amazon-q-developer[bot]",
+            state="COMMENTED",
+            submitted_at="9999",
+        ),
+        review("codeant-ai[bot]"),
+    ]
+
+    with pytest.raises(TypeError, match="submission timestamp"):
+        evaluate_reviews(reviews, [], HEAD_SHA)
+
+
+def test_latest_review_is_selected_by_absolute_time_not_lexicographic_string():
+    reviews = [
+        review(
+            "amazon-q-developer[bot]",
+            state="CHANGES_REQUESTED",
+            submitted_at="2026-11-05T12:00:00+02:00",
+        ),
+        review(
+            "amazon-q-developer[bot]",
+            state="APPROVED",
+            submitted_at="2026-11-05T10:01:00Z",
+        ),
+        review("codeant-ai[bot]"),
+    ]
+
+    assert evaluate_reviews(reviews, [], HEAD_SHA) == []
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "not-a-date",
+        "2026-11-05T10:00:00",
+        "9999",
+    ],
+)
+def test_malformed_or_timezone_free_review_timestamp_fails_closed(timestamp):
+    malformed = review("amazon-q-developer[bot]", submitted_at=timestamp)
+
+    with pytest.raises(TypeError, match="timestamp"):
+        evaluate_reviews([malformed, review("codeant-ai[bot]")], [], HEAD_SHA)
