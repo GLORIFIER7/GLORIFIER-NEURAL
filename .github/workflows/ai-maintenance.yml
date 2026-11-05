@@ -17,12 +17,12 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: neural-ai-maintenance-\${{ github.ref }}
+  group: neural-ai-maintenance-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   maintenance:
-    if: \${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     permissions:
       actions: write
       contents: write
@@ -40,9 +40,9 @@ jobs:
         id: authorization
         shell: bash
         env:
-          EVENT_NAME: \${{ github.event_name }}
-          DISPATCH_AUTHORIZATION: \${{ inputs.authorize_pull_request }}
-          SCHEDULE_AUTHORIZATION: \${{ vars.AI_MAINTENANCE_AUTORUN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_AUTHORIZATION: ${{ inputs.authorize_pull_request }}
+          SCHEDULE_AUTHORIZATION: ${{ vars.AI_MAINTENANCE_AUTORUN }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DISPATCH_AUTHORIZATION" == "true" ]]; then
@@ -55,40 +55,40 @@ jobs:
 
       - name: Check OpenAI credential availability
         id: provider
-        if: \${{ steps.authorization.outputs.enabled == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' }}
         env:
-          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         shell: bash
         run: |
-          if [ -n "\${OPENAI_API_KEY:-}" ]; then
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Python
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # pinned action revision
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
           version: "0.13.6"
 
       - name: Verify trusted dependency lock before agent execution
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
         run: uv lock --check
 
       - name: Run Codex maintenance agent
         id: codex
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
         with:
-          openai-api-key: \${{ secrets.OPENAI_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           permission-profile: ":workspace"
           safety-strategy: "drop-sudo"
           effort: high
@@ -104,7 +104,7 @@ jobs:
 
       - name: Check changed paths and prepare review patch
         id: stage
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -132,7 +132,7 @@ jobs:
 
       - name: Validate generated patch with locked project checks
         id: validation
-        if: \${{ steps.stage.outputs.changed == 'true' }}
+        if: ${{ steps.stage.outputs.changed == 'true' }}
         run: |
           set -euo pipefail
           uv lock --check
@@ -144,44 +144,44 @@ jobs:
 
       - name: Create isolated maintenance branch
         id: branch
-        if: \${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
+        if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          BRANCH="ai/maintenance/\${{ github.run_id }}"
+          BRANCH="ai/maintenance/${{ github.run_id }}"
           git config user.name "GLORIFIER NEURAL AI Maintenance"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -c core.hooksPath=/dev/null checkout -b "$BRANCH"
           git -c core.hooksPath=/dev/null commit -m "ai: governed NEURAL maintenance"
-          git -c core.hooksPath=/dev/null push --set-upstream "https://x-access-token:$GH_TOKEN@github.com/\${{ github.repository }}.git" "$BRANCH"
+          git -c core.hooksPath=/dev/null push --set-upstream "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Open draft pull request
-        if: \${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' }}
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create --draft --base main --head "\${{ steps.branch.outputs.branch }}" \
+          gh pr create --draft --base main --head "${{ steps.branch.outputs.branch }}" \
             --title "AI Maintenance: NEURAL reliability proposal" \
             --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. This PR remains a draft and is not auto-merged."
 
       - name: Run CI against the generated PR branch
-        if: \${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' }}
         env:
-          GH_TOKEN: \${{ github.token }}
-        run: gh workflow run ci.yml --ref "\${{ steps.branch.outputs.branch }}"
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "${{ steps.branch.outputs.branch }}"
 
       - name: Report that AI maintenance is not enabled
-        if: \${{ steps.authorization.outputs.enabled != 'true' }}
+        if: ${{ steps.authorization.outputs.enabled != 'true' }}
         run: |
           echo "::notice::No AI model was invoked. Enable the weekly schedule by setting the repository Actions variable AI_MAINTENANCE_AUTORUN=true, or manually dispatch with authorize_pull_request=true."
 
       - name: Report missing API key
-        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured != 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured != 'true' }}
         run: |
           echo "::warning::OPENAI_API_KEY is not configured. AI maintenance did not run."
 
       - name: Report Codex capacity limitation
-        if: \${{ failure() && steps.codex.outcome == 'failure' }}
+        if: ${{ failure() && steps.codex.outcome == 'failure' }}
         run: echo "::warning::Codex execution failed; inspect provider quota/capacity and do not retry aggressively."
