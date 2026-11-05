@@ -170,6 +170,8 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
             return json.dumps({"id": "gpt-6-luna", "object": "model"})
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
+        assert method == "GET", "inference-disabled readiness must not submit task prompts"
+        assert body is None, "readiness must not send a request body"
         calls.append({
             "url": url,
             "method": method,
