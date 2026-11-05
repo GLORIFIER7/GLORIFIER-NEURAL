@@ -1,7 +1,7 @@
 """Explicit runtime configuration with request-scoped Cloudflare binding support.
 
-No provider is enabled unless inference, external egress, and provider selection
-are explicitly configured. Cloudflare secrets are read from the request environment,
+No provider is enabled unless inference and external egress are explicitly enabled.
+OpenAI is the default provider selection. Cloudflare secrets are read from the request environment,
 never copied into process-global environment state.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def build_orchestrator_from_environment(
 
     Pass the Cloudflare request environment from ASGI scope in Workers. The Fetch
     function can be injected in tests; production uses workers.fetch inside
-    the request handler when the NVIDIA adapter executes.
+    the request handler when the selected provider adapter executes.
     """
     enabled = _environment_value(
         environment, "GLORIFIER_ENABLE_INFERENCE"
