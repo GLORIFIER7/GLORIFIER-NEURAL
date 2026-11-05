@@ -209,15 +209,25 @@ jobs:
           ruff check .
           pytest
 
+      - name: Export validated Git patch for publish job
+        if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="$RUNNER_TEMP/ai-maintenance.patch"
+          git diff --cached --binary --no-ext-diff > "$patch_file"
+          if [ ! -s "$patch_file" ]; then
+            echo "::error::The validated change set produced an empty patch."
+            exit 1
+          fi
+
       - name: Upload validated patch for publish job
         id: upload_patch
         if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
-          path: |
-            app/
-            tests/
+          path: ${{ runner.temp }}/ai-maintenance.patch
           retention-days: 1
 
       - name: Report that AI maintenance is not enabled
@@ -273,7 +283,18 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
-          path: .
+          path: ${{ runner.temp }}/ai-maintenance-artifact
+
+      - name: Apply validated Git patch
+        if: ${{ steps.time_window.outputs.allowed == 'true' }}
+        shell: bash
+        env:
+          PATCH_FILE: ${{ runner.temp }}/ai-maintenance-artifact/ai-maintenance.patch
+        run: |
+          set -euo pipefail
+          test -s "$PATCH_FILE"
+          git apply --index --binary "$PATCH_FILE"
+          git diff --cached --check
 
       - name: Create isolated maintenance branch and push
         id: branch
