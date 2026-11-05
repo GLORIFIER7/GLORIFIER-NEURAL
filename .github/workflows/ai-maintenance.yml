@@ -85,7 +85,7 @@ jobs:
           python-version: "3.12"
 
       - name: Set up uv
-        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.time_window.outputs.allowed == 'true' }}
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
@@ -95,12 +95,47 @@ jobs:
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
         run: uv lock --check
 
+      - name: Prepare isolated agent workspace
+        id: agent_workspace
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.time_window.outputs.allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find app tests -type l -print -quit | grep -q .; then
+            echo "::error::Existing symlink found in app/ or tests/; refusing to expose it to Codex."
+            exit 1
+          fi
+          agent_dir="$RUNNER_TEMP/neural-agent-workspace"
+          rm -rf "$agent_dir"
+          mkdir -p "$agent_dir/scripts" "$agent_dir/.github/workflows"
+          cp -a app tests "$agent_dir/"
+          cp pyproject.toml uv.lock "$agent_dir/"
+          cp scripts/validate_ai_maintenance_scope.py "$agent_dir/scripts/"
+          cp .github/workflows/ai-maintenance.yml "$agent_dir/.github/workflows/"
+          if find "$agent_dir/app" "$agent_dir/tests" -type l -print -quit | grep -q .; then
+            echo "::error::Symlink found in the isolated agent workspace."
+            exit 1
+          fi
+          git -C "$agent_dir" init -q
+          git -C "$agent_dir" config user.name "NEURAL isolated maintenance workspace"
+          git -C "$agent_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$agent_dir" add -- app tests pyproject.toml uv.lock scripts .github
+          git -C "$agent_dir" commit -m "sandbox: trusted maintenance baseline"
+          echo "path=$agent_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Install locked dependencies in isolated agent workspace
+        if: ${{ steps.agent_workspace.outputs.path != '' }}
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ steps.agent_workspace.outputs.path }}/.venv
+        run: uv sync --locked --extra dev --no-install-project
+
       - name: Run Codex maintenance agent
         id: codex
-        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.agent_workspace.outputs.path != '' && steps.time_window.outputs.allowed == 'true' }}
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          working-directory: ${{ steps.agent_workspace.outputs.path }}
           permission-profile: ":workspace"
           safety-strategy: "drop-sudo"
           effort: high
@@ -114,9 +149,42 @@ jobs:
             Run the repository's locked validation commands. If no safe, evidence-backed improvement
             is available, leave the working tree unchanged. Do not commit or push.
 
+      - name: Copy validated app and tests changes back
+        id: restore
+        if: ${{ steps.codex.outcome == 'success' && steps.agent_workspace.outputs.path != '' }}
+        env:
+          AGENT_WORKSPACE: ${{ steps.agent_workspace.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for allowed_dir in app tests; do
+            if [ ! -d "$AGENT_WORKSPACE/$allowed_dir" ]; then
+              echo "::error::Codex removed the required $allowed_dir directory."
+              exit 1
+            fi
+            if find "$AGENT_WORKSPACE/$allowed_dir" -type l -print -quit | grep -q .; then
+              echo "::error::Codex created a symlink in $allowed_dir; refusing to copy it back."
+              exit 1
+            fi
+          done
+          for protected in \
+            app/ai_review_policy.py \
+            tests/test_ai_maintenance_scope.py \
+            tests/test_ai_review_policy.py \
+            tests/test_ci_workflow_security.py; do
+            if [ -f "$GITHUB_WORKSPACE/$protected" ]; then
+              if [ ! -f "$AGENT_WORKSPACE/$protected" ] || ! cmp -s "$GITHUB_WORKSPACE/$protected" "$AGENT_WORKSPACE/$protected"; then
+                echo "::error::Codex changed a protected governance file: $protected"
+                exit 1
+              fi
+            fi
+          done
+          rsync -a --delete "$AGENT_WORKSPACE/app/" "$GITHUB_WORKSPACE/app/"
+          rsync -a --delete "$AGENT_WORKSPACE/tests/" "$GITHUB_WORKSPACE/tests/"
+
       - name: Check changed paths and prepare review patch
         id: stage
-        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' && steps.time_window.outputs.allowed == 'true' }}
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' && steps.restore.outcome == 'success' && steps.time_window.outputs.allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -125,21 +193,9 @@ jobs:
             exit 0
           fi
           git diff --check
-          python - <<'PY'
-          import subprocess
-          import sys
-
-          status = subprocess.check_output(
-              ["git", "status", "--porcelain", "--untracked-files=all"],
-              text=True,
-          )
-          for entry in status.splitlines():
-              path = entry[3:]
-              if not (path.startswith("app/") or path.startswith("tests/")):
-                  print(f"Rejected AI change outside app/ and tests/: {path}", file=sys.stderr)
-                  raise SystemExit(1)
-          PY
+          python scripts/validate_ai_maintenance_scope.py --repo "$GITHUB_WORKSPACE"
           git add -- app tests
+          git diff --cached --check
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Validate generated patch with locked project checks
@@ -166,11 +222,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -c core.hooksPath=/dev/null checkout -b "$BRANCH"
           git -c core.hooksPath=/dev/null commit -m "ai: governed NEURAL maintenance"
-          git -c core.hooksPath=/dev/null push --set-upstream "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" "$BRANCH"
+          gh auth setup-git
+          git -c core.hooksPath=/dev/null push --set-upstream origin "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Open draft pull request
-        if: ${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' && steps.validation.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
