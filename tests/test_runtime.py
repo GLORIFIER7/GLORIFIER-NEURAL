@@ -5,7 +5,15 @@ from typing import ClassVar
 
 
 def clear_runtime_environment(monkeypatch):
-    for name in ("GLORIFIER_ENABLE_INFERENCE", "GLORIFIER_PROVIDER", "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "NVIDIA_NIM_API_KEY", "NVIDIA_NIM_MODEL"):
+    for name in (
+        "GLORIFIER_ENABLE_INFERENCE",
+        "GLORIFIER_PROVIDER",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
+        "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NIM_MODEL",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -98,6 +106,8 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
             return json.dumps(self.payload)
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
+        assert method == "GET", "inference-disabled readiness must not submit task prompts"
+        assert body is None, "readiness must not send a request body"
         calls.append({
             "url": url,
             "method": method,
@@ -148,14 +158,7 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
     import asyncio
     import json
 
-    for name in (
-        "GLORIFIER_ENABLE_INFERENCE",
-        "GLORIFIER_PROVIDER",
-        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
-        "OPENAI_API_KEY",
-        "OPENAI_MODEL",
-    ):
-        monkeypatch.delenv(name, raising=False)
+    clear_runtime_environment(monkeypatch)
 
     calls = []
 
@@ -215,6 +218,7 @@ def test_provider_readiness_requires_external_egress_consent_when_inference_is_d
 
     from app.runtime import build_orchestrator_from_environment
 
+    clear_runtime_environment(monkeypatch)
     worker_env = {
         "GLORIFIER_ENABLE_INFERENCE": "false",
         "GLORIFIER_PROVIDER": "openai",
