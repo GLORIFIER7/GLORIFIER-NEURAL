@@ -31,3 +31,8 @@ def test_trusted_policy_does_not_checkout_or_execute_pull_request_code():
     assert "github.event.pull_request.head.sha" not in WORKFLOW
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in WORKFLOW
     assert "python -m app.ai_review_status" in WORKFLOW
+
+
+def test_trusted_policy_sweeps_do_not_overlap():
+    assert "group: trusted-ai-review-status-" in WORKFLOW
+    assert "cancel-in-progress: false" in WORKFLOW
