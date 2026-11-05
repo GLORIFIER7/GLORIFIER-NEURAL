@@ -12,6 +12,7 @@ from typing import Any
 
 from app.orchestrator import Orchestrator
 from app.providers import NvidiaNimAdapter
+from app.providers.openai import OpenAIResponsesAdapter
 from app.providers.registry import ProviderRegistry
 
 
@@ -44,7 +45,7 @@ def build_orchestrator_from_environment(
     ).strip().casefold() == "true"
     provider_name = (
         _environment_value(environment, "GLORIFIER_PROVIDER").strip().casefold()
-        or None
+        or OpenAIResponsesAdapter.name
     )
     registry = ProviderRegistry()
 
@@ -65,6 +66,18 @@ def build_orchestrator_from_environment(
             NvidiaNimAdapter(
                 api_key=api_key,
                 model=model,
+                fetch_fn=fetch_fn,
+            )
+        )
+    elif enabled and external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
+        registry.register(
+            OpenAIResponsesAdapter(
+                api_key=_environment_value(environment, "OPENAI_API_KEY"),
+                model=_environment_value(
+                    environment,
+                    "OPENAI_MODEL",
+                    OpenAIResponsesAdapter.default_model,
+                ),
                 fetch_fn=fetch_fn,
             )
         )
