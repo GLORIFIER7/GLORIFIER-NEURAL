@@ -31,16 +31,11 @@ The older `AI Review Policy` job in `.github/workflows/ci.yml` remains a defense
 
 ## Required ruleset configuration — NOT YET ENFORCED
 
-As audited on 2026-11-05, repository ruleset **GLORIFIER-NEURAL** (ID `26492703`) is active and targets `~DEFAULT_BRANCH`, but its `required_status_checks` list is empty. Its pull-request rule requires zero human approvals, and code-owner review is disabled. The ruleset's `bypass_actors` list is not empty: it contains a DeployKey and repository-role actors 2, 4, and 5, each with `bypass_mode: always`. The API reports `current_user_can_bypass: always`.
+Fresh GitHub API read-back on 2026-11-05 confirms repository ruleset **GLORIFIER-NEURAL** (ID `26492703`) is active and targets `~DEFAULT_BRANCH`. Its `bypass_actors` list is now empty and `current_user_can_bypass` is `never`. The pull-request rule currently has zero required approving reviews, requires code-owner review, and resolves review threads. Strict required-status-check freshness is enabled, but the `required_status_checks` list is still empty.
 
-Therefore, the trusted status publisher is **not a mandatory merge gate until the ruleset is updated**. Keep the existing deletion, non-fast-forward, signed-commit, and code-scanning protections. Apply these exact settings to ruleset 26492703:
+Therefore, the trusted status publisher is **implemented in code but not a mandatory merge gate**. The bypass-removal requirement is satisfied; do not re-add any bypass actor. Keep the existing deletion, non-fast-forward, signed-commit, and code-scanning protections. The remaining ruleset change is to add the exact required status context `AI Review Policy (trusted)`, with GitHub Actions selected as the expected source (observed app ID `15368`). Keep required human approvals at `0`. Review the enabled code-owner requirement separately against the repository's stated AI-only review policy before changing it.
 
-1. Clear every bypass actor: `bypass_actors: []`. Do not retain deploy-key, maintain, write, or admin bypass entries.
-2. Add the exact required status context `AI Review Policy (trusted)`, with GitHub Actions selected as the expected source. The observed GitHub Actions app ID is `15368`.
-3. Enable strict required-status-check enforcement so the status must be present for the current head and the branch must be up to date.
-4. Keep required human approvals at `0`; do not add human/team reviewer requirements.
-
-After saving, read the ruleset again and verify: enforcement is `active`; target is `~DEFAULT_BRANCH`; `bypass_actors` is empty; `current_user_can_bypass` is not `always`; `AI Review Policy (trusted)` is the required status from GitHub Actions; and human approvals remain zero. Until all of those conditions are confirmed, report the policy as **implemented in code but not enforced by the ruleset**.
+After saving the required-check context, read the ruleset again and verify: enforcement is `active`; target is `~DEFAULT_BRANCH`; `bypass_actors` is empty; `current_user_can_bypass` is `never`; strict status-check enforcement is enabled; `AI Review Policy (trusted)` is required from GitHub Actions; and human approvals remain zero. Do not claim enforcement until the exact context is visible in the saved ruleset.
 
 ## Existing CI review event behavior
 
