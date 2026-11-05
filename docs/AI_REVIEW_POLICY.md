@@ -14,7 +14,7 @@ Human reviews never substitute for either bot, and no human approval count is re
 - An explicit `:stop_sign:` annotation from either AI reviewer blocks while its review thread is unresolved and current to the head commit. GitHub's formal-review and inline-thread login forms are normalized to the same configured bot identity.
 - Resolved and outdated threads do not block. Ambiguous prose such as "critical" or "high severity" does not independently block.
 - GitHub API errors and malformed review-thread responses fail closed. The policy uses a fixed GitHub.com API endpoint.
-- The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 20-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events.
+- The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 30-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events.
 - CI concurrency groups include the event name so a review-event recheck cannot cancel the in-progress pull-request test run.
 
 ## Required ruleset configuration
