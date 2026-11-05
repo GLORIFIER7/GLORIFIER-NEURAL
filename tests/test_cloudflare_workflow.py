@@ -213,6 +213,9 @@ def test_cloudflare_smoke_verifies_automatic_main_deployment_and_manual_deployme
         "Automatic production smoke must be able to inspect the Cloudflare deployment check"
     )
     assert "needs: [validate, deploy]" in smoke_job.group(1)
+    assert "timeout-minutes: 20" in smoke_job.group(1), (
+        "Smoke must allow the 15-minute Cloudflare wait plus live health/readiness probes"
+    )
     assert "always()" in smoke_job.group(1), (
         "Smoke must still run on main pushes when the manual-only deploy job is skipped"
     )
