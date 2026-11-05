@@ -312,3 +312,36 @@ def test_missing_base_ref_for_known_sha_publishes_error(monkeypatch):
 
     assert counts["error"] == 1
     assert published[0][0:2] == ("c" * 40, "error")
+
+
+def test_malformed_pull_list_item_does_not_abort_valid_pull_requests(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+    valid_pull = {
+        "number": 9,
+        "base": {"ref": "main"},
+        "head": {"sha": "d" * 40},
+        "html_url": "https://github.com/example/repo/pull/9",
+    }
+
+    def request_json(url, token, payload=None):
+        if url == "https://api.github.com/repos/example/repo":
+            return {"default_branch": "main"}
+        if "/pulls?" in url:
+            return [None, valid_pull]
+        raise AssertionError(f"Unexpected API request: {url}")
+
+    published = []
+    monkeypatch.setattr(publisher, "_request_json", request_json)
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(
+            (sha, state)
+        ),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["error"] == 1
+    assert counts["success"] == 1
+    assert published == [("d" * 40, "success")]
