@@ -45,7 +45,10 @@
     }
   },
   "vars": {
-    "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true"
+    "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
+    "GLORIFIER_PROVIDER": "openai",
+    "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
+    "GLORIFIER_ENABLE_INFERENCE": "false"
   },
   "hyperdrive": [
     {
