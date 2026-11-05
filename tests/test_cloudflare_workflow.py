@@ -230,7 +230,7 @@ def test_cloudflare_smoke_verifies_automatic_main_deployment_and_manual_deployme
     assert "commits/${GITHUB_SHA}/check-runs?per_page=100" in smoke_job.group(1)
 
 
-def test_cloudflare_worker_selects_openai_readiness_without_enabling_inference():
+def test_cloudflare_worker_enables_owner_authorized_openai_inference():
     config_path = (
         Path(__file__).resolve().parents[1]
         / "cloudflare"
@@ -241,4 +241,4 @@ def test_cloudflare_worker_selects_openai_readiness_without_enabling_inference()
 
     assert variables.get("GLORIFIER_PROVIDER") == "openai"
     assert variables.get("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS") == "true"
-    assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "false"
+    assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "true"

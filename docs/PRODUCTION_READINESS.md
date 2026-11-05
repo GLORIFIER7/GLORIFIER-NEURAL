@@ -66,12 +66,7 @@ For read-only provider readiness, configure:
 - `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`
 - Store `OPENAI_API_KEY` as a Worker secret.
 
-The current production Worker reports `GLORIFIER_ENABLE_INFERENCE=false`.
-Keep inference disabled unless the owner separately approves sending task
-prompts to OpenAI and accepts applicable API usage charges. A successful
-model-catalogue check establishes model access only; it does not prove inference
-quality, latency, capacity, or end-to-end task execution. The secret inventory
-exposes the `OPENAI_API_KEY` binding name only; never infer or record its value.
+The last direct production configuration read-back reported `GLORIFIER_ENABLE_INFERENCE=false`. The owner has since requested enablement. The source-controlled production configuration is being changed to `GLORIFIER_ENABLE_INFERENCE=true` in a protected pull request; this does not change the live Worker until the required independent review, merge, and Cloudflare deployment complete. Once deployed, authenticated task requests may send prompt content to OpenAI and incur separate API usage charges. A successful model-catalogue check establishes model access only; it does not prove inference quality, latency, capacity, or end-to-end task execution. The secret inventory exposes the `OPENAI_API_KEY` binding name only; never infer or record its value.
 
 ### NVIDIA NIM (optional alternative provider)
 
@@ -122,7 +117,7 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The current production observation on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The current production observation on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. The subsequent owner-requested inference flag change is pending the protected pull-request workflow; until deployment, the observed production setting remains false. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
 
 ## Rate limiting
 
@@ -148,7 +143,7 @@ Direct Cloudflare API and live Worker observations:
 - Current non-secret Worker variables:
   `GLORIFIER_PROVIDER=openai`,
   `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
-  `GLORIFIER_ENABLE_INFERENCE=false`, and
+  `GLORIFIER_ENABLE_INFERENCE=false` at the time of this observation (before the pending protected change), and
   `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`.
 - The secret-binding inventory includes `OPENAI_API_KEY`,
   `GLORIFIER_API_TOKEN`, and `NVIDIA_NIM_API_KEY`. Cloudflare exposes
