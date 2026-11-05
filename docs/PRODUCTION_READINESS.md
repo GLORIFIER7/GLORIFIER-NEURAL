@@ -66,7 +66,7 @@ For read-only provider readiness, configure:
 - `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`
 - Store `OPENAI_API_KEY` as a Worker secret.
 
-The last direct production configuration read-back reported `GLORIFIER_ENABLE_INFERENCE=false`. The owner has since requested enablement. The source-controlled production configuration is being changed to `GLORIFIER_ENABLE_INFERENCE=true` in a protected pull request; this does not change the live Worker until the required independent review, merge, and Cloudflare deployment complete. Once deployed, authenticated task requests may send prompt content to OpenAI and incur separate API usage charges. A successful model-catalogue check establishes model access only; it does not prove inference quality, latency, capacity, or end-to-end task execution. The secret inventory exposes the `OPENAI_API_KEY` binding name only; never infer or record its value.
+A direct Cloudflare settings read-back on 2026-11-05 at approximately 16:28 (UTC+07:00) confirmed `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`. The `OPENAI_API_KEY` binding name is present; its value was not read. This is configuration evidence only. The latest production smoke performed read-only readiness checks and explicitly reported `inference_performed=false`; it did not submit a prompt or verify a live completion. Authenticated task requests can send prompt content to OpenAI and incur separate API usage charges. A successful model-catalogue check establishes model access only; it does not prove inference quality, latency, capacity, or end-to-end task execution.
 
 ### NVIDIA NIM (optional alternative provider)
 
@@ -117,7 +117,7 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The current production observation on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. The subsequent owner-requested inference flag change is pending the protected pull-request workflow; until deployment, the observed production setting remains false. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest production smoke on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. A later direct Cloudflare settings read-back confirmed that the production inference flag is now `true`; the smoke still performed no inference. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
 
 ## Rate limiting
 
@@ -125,46 +125,23 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 ## Current production observation — 2026-11-05 (UTC+07:00)
 
-Direct Cloudflare API and live Worker observations:
+Direct Cloudflare configuration inventory was read at approximately 16:28 local time. The latest deployment inventory returned:
 
-- Worker: `glorifier-neural`; route:
-  `https://glorifier-neural.glorifier.workers.dev`.
-- Latest deployment inventory: deployment
-  `c236adbf-c5aa-4ecb-993e-73bcec871719`, created
-  `2026-11-05T03:58:11.161764Z`; 100% of production traffic is assigned to
-  version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8`.
-- Live `GET /health` at approximately `2026-11-05T04:44:56Z`: HTTP 200,
-  `status: PARTIALLY VERIFIED`, `process: VERIFIED`. The provider, database,
-  and PyTorch fields in this liveness response are not dependency probes and
-  are not evidence of those integrations' readiness.
-- Live `GET /ready` at approximately `2026-11-05T04:45:01Z`: HTTP 200,
-  `status: READY`; selected provider, read-only database connectivity,
-  authentication, and rate limiting were all reported as `VERIFIED`.
-- Current non-secret Worker variables:
-  `GLORIFIER_PROVIDER=openai`,
-  `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
-  `GLORIFIER_ENABLE_INFERENCE=false` at the time of this observation (before the pending protected change), and
-  `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`.
-- The secret-binding inventory includes `OPENAI_API_KEY`,
-  `GLORIFIER_API_TOKEN`, and `NVIDIA_NIM_API_KEY`. Cloudflare exposes
-  binding names, not secret values. The current selected provider is OpenAI;
-  NVIDIA NIM is an optional alternative.
-- The readiness response reported audit and task-run persistence as
-  `NOT CONFIGURED (OPTIONAL)` and `inference_performed=false`. No prompt was
-  submitted, no inference was run, and no optional persistence write was tested.
+- Worker: `glorifier-neural`; route: `https://glorifier-neural.glorifier.workers.dev`.
+- Latest deployment: `77cace04-8c1b-4a26-82b6-b4504f920625`, created `2026-11-05T07:30:11.656407Z`; 100% traffic assigned to version `ecf822d5-745e-4c33-8fc2-5c10ca83baf7`.
+- Current non-secret Worker variables: `GLORIFIER_PROVIDER=openai`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, `GLORIFIER_ENABLE_INFERENCE=true`, and `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`.
+- Secret-binding inventory includes `OPENAI_API_KEY`, `GLORIFIER_API_TOKEN`, and `NVIDIA_NIM_API_KEY`. Only binding names were inspected; secret values were not read.
+- The latest successful production smoke was GitHub Actions run [#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798), around `2026-11-05T07:30Z`. It confirmed `/health` HTTP 200 and `/ready` HTTP 200 with `status: READY`; provider, database connectivity, authentication, and rate limiting were `VERIFIED`.
+- That smoke response reported `inference_performed=false`. No prompt was submitted and no model inference was executed.
+- Audit and task-run persistence remain `NOT CONFIGURED (OPTIONAL)`; no optional persistence write was tested.
 
-Conclusion: the configured read-only operational readiness checks are
-**VERIFIED**. Model inference, inference quality, end-to-end task execution,
-optional audit/task-run writes, and externally verified economic outcomes remain
-**NOT VERIFIED**. Do not enable inference or optional writes without their
-separate authorization and controlled verification.
-
+Conclusion: Cloudflare deployment and the configured read-only production readiness checks are **VERIFIED**. The production inference flag and external-egress consent are configured `true`, but live inference, inference quality, end-to-end task execution, optional audit/task-run writes, and externally verified economic outcomes remain **NOT VERIFIED**. Do not infer successful model execution from a successful readiness probe.
 ## Release procedure
 
-1. Make code changes on a branch and open a pull request. The active repository ruleset requires one approving review, CodeQL/code-scanning and code-quality constraints, and prohibits deletion and non-fast-forward updates.
+1. Make code changes on a branch and open a pull request. The active repository ruleset targets `~DEFAULT_BRANCH`, requires the exact `AI Review Policy` status check with strict latest-commit enforcement, retains CodeQL/code-quality constraints, prohibits deletion and non-fast-forward updates, has zero required human approvals, and has no bypass actors. The AI policy workflow itself still has a PR-controlled workflow-definition trust limitation; see `docs/AI_REVIEW_POLICY.md`.
 2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
 3. After an approved merge to `main`, verify the automatic Cloudflare Workers Builds production build and active deployment. The separate GitHub Actions path can be manually dispatched with `deploy=true` using the configured GitHub Environment credentials. Verify the deployment job and intended Worker version/traffic before announcing release.
 4. Require live `/health` and `/ready` checks. Expect `/ready` HTTP 200 when the selected provider, database, authentication, and rate-limit checks are verified. Accept HTTP 503 only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
-5. Separately perform a controlled authenticated inference request only after the owner provisions a valid credential for the selected provider, approves sending task content to that provider, and approves any applicable usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
+5. The production inference flag is currently configured `true`, but do not treat that as proof of live execution. Perform a controlled authenticated inference request only after confirming the selected provider credential is valid, approving transmission of task content, and accepting any applicable API usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
 
 Do not declare full AI production readiness until provider model-catalog readiness and a separately controlled inference check succeed. Enable audit writes or task-run persistence only after their own schema, least-privilege credentials, backup, and read/write verification steps have been approved and completed.
