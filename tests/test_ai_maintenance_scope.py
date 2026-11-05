@@ -119,7 +119,7 @@ def test_workflow_validates_scope_and_uses_credential_helper():
 
 @pytest.mark.parametrize(
     "step_name",
-    ["Open draft pull request", "Run CI against the generated PR branch"],
+    ["Open ready-for-review pull request", "Run CI against the generated PR branch"],
 )
 def test_publication_steps_require_successful_validation(step_name: str):
     workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -151,11 +151,31 @@ def test_scope_validator_validates_both_rename_source_and_destination(
     assert "README.md" in result.stderr
 
 
-def test_workflow_uses_four_hour_schedule():
+def test_workflow_uses_weekly_schedule_and_never_auto_merges():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "0 */4 * * *" in workflow
-    assert "41 2 * * 1" not in workflow
+    assert 'cron: "41 2 * * 1"' in workflow
+    assert "0 */4 * * *" not in workflow
+    assert "gh pr merge" not in workflow
+    assert "--auto" not in workflow
+
+
+def test_workflow_publication_is_after_0830_in_laos_timezone():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "TZ=Asia/Vientiane" in workflow
+    assert "0831" in workflow
+    publish_job = workflow[workflow.index("  publish:"):]
+    assert "needs.codex.outputs.patch_ready == 'true'" in publish_job
+
+
+def test_publish_job_receives_only_a_validated_patch_artifact():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "steps.validation.outcome == 'success'" in workflow
+    assert "id: upload_patch" in workflow
+    assert "artifact-id" in workflow
+    assert "outputs.patch_ready" in workflow
 
 
 def test_workflow_cost_control_uses_single_variable():
