@@ -1,6 +1,6 @@
 # AI-only pull request review policy
 
-The **AI Review Policy** job in `.github/workflows/ci.yml` evaluates two independently configured AI reviewer identities against the exact current pull request head SHA. It runs on `pull_request` events and re-evaluates on `pull_request_review` submissions, edits, and dismissals.
+The **AI Review Policy** job in `.github/workflows/ci.yml` evaluates two independently configured AI reviewer identities against the exact current pull request head SHA. It runs on `pull_request` events and re-evaluates on `pull_request_review` submissions, edits, and dismissals. The evaluator is checked out from the event's target-branch base SHA into an isolated path and executed from that trusted checkout, never from PR-controlled code.
 
 - Amazon Q Developer: `amazon-q-developer[bot]`
 - CodeAnt AI: `codeant-ai[bot]`
@@ -14,7 +14,7 @@ Human reviews never substitute for either bot, and no human approval count is re
 - An explicit `:stop_sign:` annotation from either AI reviewer blocks while its review thread is unresolved and current to the head commit. GitHub's formal-review and inline-thread login forms are normalized to the same configured bot identity.
 - Resolved and outdated threads do not block. Ambiguous prose such as "critical" or "high severity" does not independently block.
 - GitHub API errors and malformed review-thread responses fail closed. The policy uses a fixed GitHub.com API endpoint.
-- The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 30-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events.
+- The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 30-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events. The policy checkout uses `persist-credentials: false`; the evaluator receives only the job-scoped read-only `GITHUB_TOKEN` needed to inspect reviews and review threads.
 - CI concurrency groups include the event name so a review-event recheck cannot cancel the in-progress pull-request test run.
 
 ## Required ruleset configuration
