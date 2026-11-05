@@ -248,6 +248,7 @@ jobs:
     needs: codex
     if: ${{ needs.codex.outputs.patch_ready == 'true' }}
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     runs-on: ubuntu-latest
@@ -286,6 +287,7 @@ jobs:
           path: ${{ runner.temp }}/ai-maintenance-artifact
 
       - name: Apply validated Git patch
+        id: apply_patch
         if: ${{ steps.time_window.outputs.allowed == 'true' }}
         shell: bash
         env:
@@ -294,11 +296,12 @@ jobs:
           set -euo pipefail
           test -s "$PATCH_FILE"
           git apply --index --binary "$PATCH_FILE"
+          python scripts/validate_ai_maintenance_scope.py --repo "$GITHUB_WORKSPACE"
           git diff --cached --check
 
       - name: Create isolated maintenance branch and push
         id: branch
-        if: ${{ steps.time_window.outputs.allowed == 'true' }}
+        if: ${{ steps.time_window.outputs.allowed == 'true' && steps.apply_patch.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
@@ -316,11 +319,30 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Open draft pull request
-        if: ${{ steps.branch.outputs.branch != '' && needs.codex.outputs.patch_ready == 'true' }}
+        if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_BRANCH: ${{ steps.branch.outputs.branch }}
         run: |
-          gh pr create --draft --base main --head "${{ steps.branch.outputs.branch }}" \
+          gh pr create --draft --base main --head "$PR_BRANCH" \
             --title "AI Maintenance: NEURAL reliability proposal" \
-            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. The pull_request CI and AI review policy run after publication. This workflow never enables auto-merge."
+            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. Trusted CI tests the exact PR head and runs the current-head AI review policy. This workflow never enables auto-merge."
+
+      - name: Dispatch trusted CI and AI review for the exact PR head
+        if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_BRANCH: ${{ steps.branch.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_number="$(gh pr view "$PR_BRANCH" --json number --jq '.number')"
+          pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq '.headRefOid')"
+          [[ "$pr_number" =~ ^[0-9]+$ ]]
+          [[ "$pr_head_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run ci.yml --ref main \
+            --field pull_request_number="$pr_number" \
+            --field pull_request_head_sha="$pr_head_sha"
 
