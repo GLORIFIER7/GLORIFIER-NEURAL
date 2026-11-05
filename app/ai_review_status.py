@@ -204,7 +204,7 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
                 state, description = derive_status(failures, age_seconds)
                 if state not in VALID_STATES:
                     raise ValueError("The review evaluator returned an unsupported status.")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate malformed per-PR evidence
                 state = "error"
                 description = (
                     f"Review evidence could not be verified ({type(exc).__name__})."
@@ -231,7 +231,7 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
                 group_description,
                 target_url,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate per-head publication failures
             counts["error"] += 1
             summary.append(
                 f"Head {head_sha[:12]}: status publication failed ({type(exc).__name__})."
@@ -258,7 +258,7 @@ def main() -> int:
     token = os.environ.get("GH_TOKEN", "")
     try:
         counts = sweep_open_pull_requests(repo, token)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - make the CLI fail closed on all unexpected errors
         message = (
             f"Trusted AI review status sweep failed closed ({type(exc).__name__})."
         )
