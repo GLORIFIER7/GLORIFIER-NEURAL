@@ -17,6 +17,10 @@ Human reviews never substitute for either bot, and no human approval count is re
 - The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 30-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events. The policy checkout uses `persist-credentials: false`; the evaluator receives only the job-scoped read-only `GITHUB_TOKEN` needed to inspect reviews and review threads.
 - CI concurrency groups include the event name so a review-event recheck cannot cancel the in-progress pull-request test run.
 
+## Review-event check association
+
+GitHub documents `pull_request_review` runs with `GITHUB_REF=refs/pull/PULL_REQUEST_NUMBER/merge` and `GITHUB_SHA` equal to the last merge commit on that PR merge branch. The observed review-event run `41995802337` for PR #61 produced an `AI Review Policy` check visible on its PR head SHA `e3a95d9950a9194528beb2eea6c571218ebd1053`; the check did not land on the default-branch commit. This evidence disproves a default-branch-only association claim for that run. It does not make the workflow trusted: GitHub also documents that `pull_request_review` workflow files are taken from the pull request merge commit.
+
 ## Workflow-definition trust boundary
 
 The current repository ruleset requires the `AI Review Policy` status context, but a normal `pull_request` workflow check is not cryptographically pinned to a protected workflow definition. Do not treat this check as tamper-proof against a PR that changes `.github/workflows/ci.yml` or adds another workflow that emits the same context. The repository owner must enable an independently pinned required workflow where the account supports it, or protect workflow-file changes using an appropriate repository-level control. The connected GitHub integration used for this remediation can inspect rulesets but cannot modify their administrative configuration.
