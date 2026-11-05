@@ -264,4 +264,4 @@ def test_malformed_pull_metadata_is_counted_and_other_prs_are_still_checked(monk
 
     assert counts["error"] == 1
     assert counts["success"] == 1
-    assert published == [("b" * 40, "success")]
+    assert published == [("a" * 40, "error"), ("b" * 40, "success")]
