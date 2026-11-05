@@ -117,17 +117,81 @@ def test_workflow_validates_scope_and_uses_credential_helper():
     assert "push --set-upstream origin" in workflow
 
 
-@pytest.mark.parametrize(
-    "step_name",
-    ["Open ready-for-review pull request", "Run CI against the generated PR branch"],
-)
-def test_publication_steps_require_successful_validation(step_name: str):
+def test_publish_job_only_runs_when_a_validated_patch_artifact_exists():
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    start = workflow.index(f"- name: {step_name}")
-    end = workflow.find("\n      - name:", start + 1)
-    section = workflow[start:] if end < 0 else workflow[start:end]
+    codex_section = workflow[workflow.index("  codex:"):workflow.index("  publish:")]
+    publish_section = workflow[workflow.index("  publish:"):]
 
-    assert "steps.validation.outcome == 'success'" in section
+    assert "patch_ready:" in codex_section
+    assert "steps.upload_patch.outputs.artifact-id" in codex_section
+    assert "needs: codex" in publish_section
+    assert "needs.codex.outputs.patch_ready == 'true'" in publish_section
+    upload_start = codex_section.index("- name: Upload validated patch for publish job")
+    upload_end = codex_section.find("\n      - name:", upload_start + 1)
+    upload_step = codex_section[upload_start:] if upload_end < 0 else codex_section[upload_start:upload_end]
+    assert "steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success'" in upload_step
+
+
+def test_publish_job_holds_all_publication_until_after_0831_laos_time():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+    gate = publish_section.index("- name: Enforce PR publication window (Laos)")
+    branch = publish_section.index("- name: Create isolated maintenance branch and push")
+    pull_request = publish_section.index("- name: Open ready-for-review pull request")
+    ci = publish_section.index("- name: Run CI against the generated PR branch")
+    auto_merge = publish_section.index("- name: Request auto-merge")
+
+    assert gate < branch < pull_request < ci < auto_merge
+    branch_step = publish_section[branch:pull_request]
+    assert "steps.time_window.outputs.allowed == 'true'" in branch_step
+
+
+def test_codex_engineering_cycle_is_not_gated_by_the_publication_window():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    codex_section = workflow[workflow.index("  codex:"):workflow.index("  publish:")]
+    for step_name in [
+        "Verify trusted dependency lock before agent execution",
+        "Prepare isolated agent workspace",
+        "Run Codex maintenance agent",
+        "Copy validated app and tests changes back",
+        "Validate generated patch with locked project checks",
+    ]:
+        start = codex_section.index(f"- name: {step_name}")
+        end = codex_section.find("\n      - name:", start + 1)
+        step = codex_section[start:] if end < 0 else codex_section[start:end]
+        assert "steps.time_window.outputs.allowed" not in step
+
+
+def test_workflow_uses_shallow_checkout_and_env_safe_run_id():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "fetch-depth: 1" in workflow
+    assert "RUN_ID: ${{ github.run_id }}" in workflow
+    assert 'BRANCH="ai/maintenance/$RUN_ID"' in workflow
+    assert 'BRANCH="ai/maintenance/${{ github.run_id }}"' not in workflow
+
+
+def test_copy_back_does_not_preserve_hard_links():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'rsync -rlptD --delete "$AGENT_WORKSPACE/app/"' in workflow
+    assert 'rsync -rlptD --delete "$AGENT_WORKSPACE/tests/"' in workflow
+    assert 'rsync -a --delete' not in workflow
+
+
+def test_generated_pr_is_ready_for_review_and_auto_merge_follows_ci():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+    create = publish_section.index("- name: Open ready-for-review pull request")
+    ci = publish_section.index("- name: Run CI against the generated PR branch")
+    merge = publish_section.index("- name: Request auto-merge")
+
+    assert create < ci < merge
+    assert "gh pr create --base main" in publish_section
+    assert "gh pr create --draft" not in publish_section
+    assert "gh pr merge --auto --squash" in publish_section
+    merge_step = publish_section[merge:]
+    assert "steps.dispatch.outcome == 'success'" in merge_step
 
 
 def test_scope_validator_validates_both_rename_source_and_destination(
