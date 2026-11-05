@@ -1,6 +1,7 @@
 from app.providers import NvidiaNimAdapter
 from app.runtime import build_orchestrator_from_environment
 from app.schemas import TaskRequest
+from typing import ClassVar
 
 
 def clear_runtime_environment(monkeypatch):
@@ -160,7 +161,7 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
 
     class FakeResponse:
         status = 200
-        headers = {}
+        headers: ClassVar[dict[str, str]] = {}
 
         async def text(self):
             return json.dumps({"id": "gpt-6-luna", "object": "model"})
