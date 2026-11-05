@@ -1,0 +1,32 @@
+name: AI Review Policy
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+concurrency:
+  group: ai-review-policy-\${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ai-review-policy:
+    name: AI Review Policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pull request revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # immutable action pin used by repository CI
+      - name: Require both configured AI reviewers on the exact head commit
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_API_URL: \${{ github.api_url }}
+          GITHUB_REPOSITORY: \${{ github.repository }}
+          PR_NUMBER: \${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+        run: python scripts/ai_review_policy.py
