@@ -68,14 +68,15 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         return f"{self.models_endpoint}/{urllib.parse.quote(self._model, safe='')}"
 
     @staticmethod
-    def _decode_json(raw: str) -> dict:
+    def _decode_json(raw: str | bytes) -> dict:
         """Decode a bounded JSON object without returning provider payload details."""
         try:
-            payload = json.loads(raw)
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            payload = json.loads(text)
         except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
             raise RuntimeError("OpenAI returned an invalid JSON response") from None
         if not isinstance(payload, dict):
-            raise RuntimeError("OpenAI returned an invalid JSON response")
+            raise TypeError("OpenAI returned an invalid JSON response")
         return payload
 
     @staticmethod
@@ -83,7 +84,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         """Extract only output_text items from a Responses API result."""
         output = payload.get("output")
         if not isinstance(output, list):
-            raise RuntimeError("OpenAI returned an invalid Responses API result")
+            raise TypeError("OpenAI returned an invalid Responses API result")
         parts: list[str] = []
         for item in output:
             if not isinstance(item, dict) or item.get("type") != "message":
@@ -168,7 +169,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             raise RuntimeError("OpenAI readiness endpoint is unavailable") from None
         if len(raw) > self.max_model_response_bytes:
             raise RuntimeError("OpenAI model response exceeded the response size limit")
-        payload = self._decode_json(raw.decode("utf-8"))
+        payload = self._decode_json(raw)
         if payload.get("id") != self._model:
             raise RuntimeError("Configured OpenAI model is not available to this API key")
 
