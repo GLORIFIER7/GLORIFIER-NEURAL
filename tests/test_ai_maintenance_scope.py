@@ -139,11 +139,20 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     branch = publish_section.index("- name: Create isolated maintenance branch and push")
     pull_request = publish_section.index("- name: Open ready-for-review pull request")
     ci = publish_section.index("- name: Run CI against the generated PR branch")
-    auto_merge = publish_section.index("- name: Request auto-merge")
 
-    assert gate < branch < pull_request < ci < auto_merge
+    assert gate < branch < pull_request < ci
     branch_step = publish_section[branch:pull_request]
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
+    assert "gh pr merge" not in publish_section
+    assert "--auto" not in publish_section
+
+
+def test_time_window_uses_decimal_hhmm_and_blocks_before_0831():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count('current_hhmm_decimal=$((10#$current_hhmm))') == 2
+    assert workflow.count("current_hhmm_decimal < 831") == 2
+    assert workflow.count('[[ ! "$current_hhmm" =~ ^[0-9]{4}$ ]]') == 2
 
 
 def test_codex_engineering_cycle_is_not_gated_by_the_publication_window():
