@@ -11,6 +11,12 @@ from app.schemas import TaskRequest, TaskResponse
 
 
 _READINESS_CACHE_TTL_SECONDS = 30.0
+_STATUS_NOT_VERIFIED = "NOT VERIFIED"
+_STATUS_DEGRADED = "DEGRADED"
+_STATUS_VERIFIED = "VERIFIED"
+_READINESS_DISABLED_MESSAGE = "Provider readiness checks are disabled by configuration."
+_NO_PROVIDER_MESSAGE = "No provider was explicitly selected."
+_PROVIDER_UNCONFIGURED_MESSAGE = "The selected provider is not configured."
 
 
 def _sync_readiness_probe(provider: ProviderAdapter) -> Callable[[], None] | None:
@@ -82,39 +88,39 @@ class Orchestrator:
     def _probe_readiness(self) -> tuple[str, str]:
         """Probe the selected provider without sending task content or running inference."""
         if not self._allow_provider_readiness:
-            return "NOT VERIFIED", "Provider readiness checks are disabled by configuration."
+            return _STATUS_NOT_VERIFIED, _READINESS_DISABLED_MESSAGE
         if not self._provider_name:
-            return "NOT VERIFIED", "No provider was explicitly selected."
+            return _STATUS_NOT_VERIFIED, _NO_PROVIDER_MESSAGE
         provider = self._providers.get(self._provider_name)
         if provider is None:
-            return "NOT VERIFIED", "The selected provider is not configured."
+            return _STATUS_NOT_VERIFIED, _PROVIDER_UNCONFIGURED_MESSAGE
         readiness_probe = _sync_readiness_probe(provider)
         if readiness_probe is None:
-            return "NOT VERIFIED", "The selected provider has no read-only readiness probe."
+            return _STATUS_NOT_VERIFIED, "The selected provider has no read-only readiness probe."
         try:
             readiness_probe()
         except Exception as exc:  # noqa: BLE001 - readiness must not leak credentials or endpoints
-            return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
-        return "VERIFIED", "Configured provider passed its read-only model availability probe."
+            return _STATUS_DEGRADED, f"Provider readiness probe failed ({type(exc).__name__})."
+        return _STATUS_VERIFIED, "Configured provider passed its read-only model availability probe."
 
 
     async def acheck_readiness(self) -> tuple[str, str]:
         """Probe a provider through its async transport without performing inference."""
         if not self._allow_provider_readiness:
-            return "NOT VERIFIED", "Provider readiness checks are disabled by configuration."
+            return _STATUS_NOT_VERIFIED, _READINESS_DISABLED_MESSAGE
         if not self._provider_name:
-            return "NOT VERIFIED", "No provider was explicitly selected."
+            return _STATUS_NOT_VERIFIED, _NO_PROVIDER_MESSAGE
         provider = self._providers.get(self._provider_name)
         if provider is None:
-            return "NOT VERIFIED", "The selected provider is not configured."
+            return _STATUS_NOT_VERIFIED, _PROVIDER_UNCONFIGURED_MESSAGE
 
         readiness_probe = _async_readiness_probe(provider)
         if readiness_probe is not None:
             try:
                 await readiness_probe()
             except Exception as exc:  # noqa: BLE001 - never leak upstream details
-                return "DEGRADED", f"Provider readiness probe failed ({type(exc).__name__})."
-            return "VERIFIED", "Configured provider passed its read-only model availability probe."
+                return _STATUS_DEGRADED, f"Provider readiness probe failed ({type(exc).__name__})."
+            return _STATUS_VERIFIED, "Configured provider passed its read-only model availability probe."
 
         return await asyncio.to_thread(self.check_readiness)
 
@@ -127,29 +133,29 @@ class Orchestrator:
             action_class=request.action_class,
         )
         if not decision.allowed:
-            return None, TaskResponse(status="DEGRADED", message=decision.reason, evidence=["policy:deny"])
+            return None, TaskResponse(status=_STATUS_DEGRADED, message=decision.reason, evidence=["policy:deny"])
         if decision.requires_human_approval:
             return None, TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message=decision.reason,
                 evidence=["policy:approval-required"],
             )
         if not self._allow_inference:
             return None, TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="Provider inference is disabled by configuration; no inference was performed.",
                 evidence=["inference:disabled", "execution:none"],
             )
         if not self._provider_name:
             return None, TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="No provider was explicitly selected; no inference was performed.",
                 evidence=["provider:none", "execution:none"],
             )
         provider = self._providers.get(self._provider_name)
         if provider is None:
             return None, TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="The explicitly selected provider is unavailable or unconfigured.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
             )
@@ -162,7 +168,7 @@ class Orchestrator:
         provider_name = self._provider_name or provider.name
         if not isinstance(result, InferenceResult):
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=provider_name,
                 message="Provider returned an invalid result object.",
                 evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
@@ -175,13 +181,13 @@ class Orchestrator:
             or len(result.text) > 20_000
         ):
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=provider_name,
                 message="Provider returned an empty, oversized, or mismatched result.",
                 evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
             )
         return TaskResponse(
-            status="VERIFIED",
+            status=_STATUS_VERIFIED,
             provider=provider.name,
             result=result.text,
             message="Provider returned a result; this verifies response receipt, not factual correctness.",
@@ -195,7 +201,7 @@ class Orchestrator:
             return preflight_response
         if provider is None:
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 message="Provider configuration is unavailable.",
                 evidence=["provider:unavailable", "execution:none"],
             )
@@ -203,7 +209,7 @@ class Orchestrator:
         async_provider = _async_inference_provider(provider)
         if async_provider is None:
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=self._provider_name,
                 message="The selected provider has no async transport supported by this runtime.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
@@ -212,7 +218,7 @@ class Orchestrator:
             result = await async_provider.ainfer(request.task)
         except Exception as exc:  # noqa: BLE001 - sanitize any provider failure
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=self._provider_name,
                 message=f"Provider inference failed ({type(exc).__name__}); no result was accepted.",
                 evidence=[f"provider:{self._provider_name}:error", "execution:failed"],
@@ -226,26 +232,26 @@ class Orchestrator:
         )
         if not decision.allowed:
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 message=decision.reason,
                 evidence=["policy:deny"],
             )
         if decision.requires_human_approval:
             return TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message=decision.reason,
                 evidence=["policy:approval-required"],
             )
 
         if not self._allow_inference:
             return TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="Provider inference is disabled by configuration; no inference was performed.",
                 evidence=["inference:disabled", "execution:none"],
             )
         if not self._provider_name:
             return TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="No provider was explicitly selected; no inference was performed.",
                 evidence=["provider:none", "execution:none"],
             )
@@ -253,7 +259,7 @@ class Orchestrator:
         provider = self._providers.get(self._provider_name)
         if provider is None:
             return TaskResponse(
-                status="NOT VERIFIED",
+                status=_STATUS_NOT_VERIFIED,
                 message="The explicitly selected provider is unavailable or unconfigured.",
                 evidence=[f"provider:{self._provider_name}:unavailable", "execution:none"],
             )
@@ -263,7 +269,7 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001
             # Avoid returning exception details that may contain prompts, URLs, or secrets.
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=self._provider_name,
                 message=f"Provider inference failed ({type(exc).__name__}); no result was accepted.",
                 evidence=[f"provider:{self._provider_name}:error", "execution:failed"],
@@ -271,7 +277,7 @@ class Orchestrator:
 
         if not isinstance(result, InferenceResult):
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=self._provider_name,
                 message="Provider returned an invalid result object.",
                 evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
@@ -284,13 +290,13 @@ class Orchestrator:
             or len(result.text) > 20_000
         ):
             return TaskResponse(
-                status="DEGRADED",
+                status=_STATUS_DEGRADED,
                 provider=self._provider_name,
                 message="Provider returned an empty, oversized, or mismatched result.",
                 evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
             )
         return TaskResponse(
-            status="VERIFIED",
+            status=_STATUS_VERIFIED,
             provider=provider.name,
             result=result.text,
             message="Provider returned a result; this verifies response receipt, not factual correctness.",
