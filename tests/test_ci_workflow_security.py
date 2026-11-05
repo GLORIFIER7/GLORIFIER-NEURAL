@@ -46,7 +46,7 @@ def test_review_event_uses_documented_payload_and_trusted_dispatch_context():
     policy_job = _job_section("ai-review-policy")
     assert "github.event.review.pull_request" not in policy_job
     assert "github.event.pull_request.base.sha" in policy_job
-    assert "github.event_name == 'workflow_dispatch' && github.sha" in policy_job
+    assert "github.event_name == 'workflow_dispatch' && 'main'" in policy_job
     assert "inputs.pull_request_number" in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
 
