@@ -152,6 +152,7 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
     default_branch = str(repository["default_branch"])
 
     pulls: list[dict] = []
+    malformed_pull_items = 0
     page = 1
     while True:
         pulls_url = (
@@ -161,15 +162,26 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
         payload = _request_json(pulls_url, token)
         if not isinstance(payload, list):
             raise TypeError("GitHub returned an invalid open pull-request response.")
-        if any(not isinstance(item, dict) for item in payload):
-            raise TypeError("GitHub returned a malformed pull-request list item.")
-        pulls.extend(payload)
+        malformed_count = sum(not isinstance(item, dict) for item in payload)
+        malformed_pull_items += malformed_count
+        pulls.extend(item for item in payload if isinstance(item, dict))
         if len(payload) < 100:
             break
         page += 1
 
-    counts = {"success": 0, "pending": 0, "failure": 0, "error": 0, "skipped": 0}
+    counts = {
+        "success": 0,
+        "pending": 0,
+        "failure": 0,
+        "error": malformed_pull_items,
+        "skipped": 0,
+    }
     summary: list[str] = []
+    if malformed_pull_items:
+        summary.append(
+            f"GitHub returned {malformed_pull_items} malformed pull-request list item(s); "
+            "valid pull requests were still processed."
+        )
     grouped_pulls: dict[str, list[dict]] = {}
 
     for pull in pulls:
