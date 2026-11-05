@@ -73,7 +73,7 @@ async def _close_worker_database(connection, timeout) -> bool:
         return False
     try:
         await connection.close(timeout=timeout)
-    except Exception as exc:  # noqa: BLE001 - never expose database or credential details
+    except Exception as exc:  # noqa: BLE001  # never expose database or credential details
         _LOGGER.warning(
             "Neon Worker connectivity probe cleanup failed (%s)", type(exc).__name__
         )
@@ -158,7 +158,7 @@ class NeonConnectivityProbe:
                     raise RuntimeError("Neon connectivity probe returned an unexpected result")
         except RuntimeError:
             raise
-        except Exception:  # noqa: BLE001 - do not leak DSN, server errors, or query context
+        except Exception:  # noqa: BLE001  # do not leak DSN, server errors, or query context
             raise RuntimeError("Neon connectivity probe failed") from None
 
     async def check_worker(self) -> None:
@@ -189,7 +189,7 @@ class NeonConnectivityProbe:
             stage = "query"
             row = await connection.fetchval("SELECT 1")
             query_completed = True
-        except Exception as exc:  # noqa: BLE001 - never expose DSN or database details
+        except Exception as exc:  # noqa: BLE001  # never expose DSN or database details
             operation_failed = True
             _LOGGER.warning(
                 "Neon Worker connectivity probe failed at stage=%s (%s)",
