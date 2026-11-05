@@ -45,3 +45,20 @@ def test_untrusted_test_job_does_not_persist_github_token():
         "The test job executes pull-request-controlled code; "
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
+
+
+def test_review_event_uses_the_documented_top_level_pull_request_payload():
+    policy_job = _job_section("ai-review-policy")
+    assert "github.event.review.pull_request" not in policy_job
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
+    assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in policy_job
+    assert "PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in policy_job
+
+
+def test_trusted_policy_module_has_a_preflight_before_execution():
+    policy_job = _job_section("ai-review-policy")
+    preflight = policy_job.find("- name: Verify the trusted policy runner is importable")
+    runner = policy_job.find("- name: Wait for both AI reviewers and enforce their findings")
+    assert preflight >= 0, "The trusted module import preflight must be present"
+    assert runner > preflight, "The import preflight must run before the policy module"
+    assert 'run: python -c "import app.ai_review_policy;' in policy_job
