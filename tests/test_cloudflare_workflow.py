@@ -228,3 +228,17 @@ def test_cloudflare_smoke_verifies_automatic_main_deployment_and_manual_deployme
     assert "Wait for Cloudflare Workers Builds production deployment" in smoke_job.group(1)
     assert "Workers Builds: glorifier-neural" in smoke_job.group(1)
     assert "commits/${GITHUB_SHA}/check-runs?per_page=100" in smoke_job.group(1)
+
+
+def test_cloudflare_worker_selects_openai_readiness_without_enabling_inference():
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "cloudflare"
+        / "wrangler.jsonc"
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    variables = config.get("vars", {})
+
+    assert variables.get("GLORIFIER_PROVIDER") == "openai"
+    assert variables.get("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS") == "true"
+    assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "false"
