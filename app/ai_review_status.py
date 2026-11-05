@@ -161,7 +161,9 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
         payload = _request_json(pulls_url, token)
         if not isinstance(payload, list):
             raise TypeError("GitHub returned an invalid open pull-request response.")
-        pulls.extend(item for item in payload if isinstance(item, dict))
+        if any(not isinstance(item, dict) for item in payload):
+            raise TypeError("GitHub returned a malformed pull-request list item.")
+        pulls.extend(payload)
         if len(payload) < 100:
             break
         page += 1
