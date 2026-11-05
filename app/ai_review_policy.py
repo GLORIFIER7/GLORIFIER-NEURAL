@@ -176,11 +176,26 @@ def evaluate_reviews(
             )
             continue
 
-        latest = max(
-            current_reviews,
-            key=lambda item: _parse_review_timestamp(item["submitted_at"]),
+        latest_timestamp = max(
+            _parse_review_timestamp(item["submitted_at"])
+            for item in current_reviews
         )
-        state = str(latest.get("state", "")).upper()
+        latest_reviews = [
+            item
+            for item in current_reviews
+            if _parse_review_timestamp(item["submitted_at"]) == latest_timestamp
+        ]
+        latest_states = {
+            str(item.get("state", "")).upper() for item in latest_reviews
+        }
+        if len(latest_states) != 1:
+            failures.append(
+                f"{reviewer} has conflicting review states at the latest "
+                "current-head timestamp."
+            )
+            continue
+
+        state = next(iter(latest_states))
         if state == "CHANGES_REQUESTED":
             failures.append(
                 f"{reviewer} submitted CHANGES_REQUESTED on the current head."
@@ -190,7 +205,7 @@ def evaluate_reviews(
                 f"{reviewer}'s latest current-head review is not active "
                 f"(state: {state or 'unknown'})."
             )
-        elif _has_blocker(latest.get("body")):
+        elif any(_has_blocker(item.get("body")) for item in latest_reviews):
             failures.append(
                 f"{reviewer} reported an explicit blocker in its current-head review."
             )
