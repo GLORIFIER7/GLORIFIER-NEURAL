@@ -374,3 +374,36 @@ def test_async_inference_rejects_a_non_callable_provider_method():
     assert response.status == "DEGRADED"
     assert response.evidence == ["provider:fake:unavailable", "execution:none"]
     assert provider.calls == 0
+
+
+
+def test_read_only_provider_readiness_can_run_without_enabling_inference():
+    class ReadinessOnlyProvider(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.readiness_calls = 0
+
+        def check_readiness(self):
+            self.readiness_calls += 1
+
+        def infer(self, prompt: str, *, timeout_seconds: float = 30.0) -> InferenceResult:
+            raise AssertionError("readiness must never invoke inference")
+
+    provider = ReadinessOnlyProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+    orchestrator = Orchestrator(
+        registry,
+        allow_inference=False,
+        allow_provider_readiness=True,
+        provider_name="fake",
+    )
+
+    status, message = orchestrator.check_readiness()
+    task = orchestrator.run(TaskRequest(task="no paid request", require_approval=False))
+
+    assert status == "VERIFIED"
+    assert "read-only" in message
+    assert provider.readiness_calls == 1
+    assert task.status == "NOT VERIFIED"
+    assert task.evidence == ["inference:disabled", "execution:none"]
