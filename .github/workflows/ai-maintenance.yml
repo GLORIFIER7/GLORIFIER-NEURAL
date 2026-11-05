@@ -2,8 +2,8 @@ name: NEURAL Governed AI Maintenance
 
 on:
   schedule:
-    # Every four hours; cost-gated with AI_MAINTENANCE_AUTORUN=true.
-    - cron: "0 */4 * * *"
+    # Weekly on Monday at 09:41 Laos time; cost-gated with AI_MAINTENANCE_AUTORUN=true.
+    - cron: "41 2 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -247,7 +247,7 @@ jobs:
           current_hhmm="$(TZ=Asia/Vientiane date +%H%M)"
           if [[ "$current_hhmm" -lt 0831 ]]; then
             echo "allowed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::AI maintenance publication is held until after 08:30 Asia/Vientiane. Patch artifact is preserved and will be published in a later run."
+            echo "::notice::AI maintenance publication is held until after 08:30 Asia/Vientiane. No PR will be created by this run; the patch artifact remains available for inspection."
           else
             echo "allowed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -286,24 +286,17 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Open ready-for-review pull request
-        if: ${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr create --base main --head "${{ steps.branch.outputs.branch }}" \
             --title "AI Maintenance: NEURAL reliability proposal" \
-            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. Auto-merge is requested below and will only complete after all required checks and signature verification pass."
+            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. AI review and CI checks are required before a human owner merges. This workflow never enables auto-merge."
 
       - name: Run CI against the generated PR branch
-        if: ${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run ci.yml --ref "${{ steps.branch.outputs.branch }}"
 
-      - name: Request auto-merge
-        if: ${{ steps.branch.outputs.branch != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh pr merge --auto --squash "${{ steps.branch.outputs.branch }}"
-          echo "::notice::Auto-merge requested. The PR will merge only after all required checks pass, including signature verification (ruleset 26492703). No bypass, no forced merge."
