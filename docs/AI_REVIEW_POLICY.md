@@ -15,7 +15,7 @@ Human reviews do not substitute for either bot. The policy itself requires no hu
 - Resolved and outdated threads do not block. Ambiguous prose such as "critical" or "high severity" does not independently block.
 - GitHub API errors, invalid head SHAs, malformed review-thread responses, and unverified timestamps fail closed.
 
-## Trusted status publisher
+## Default-branch status diagnostics
 
 `.github/workflows/ai-review-policy-trusted.yml` is the default-branch status publisher.
 
@@ -29,13 +29,16 @@ Human reviews do not substitute for either bot. The policy itself requires no hu
 
 The older `AI Review Policy` job in `.github/workflows/ci.yml` remains a defense-in-depth check. Its `pull_request` and `pull_request_review` workflow definitions are evaluated from the PR merge ref, so it must not be treated as an independently trusted merge gate. GitHub documents that `pull_request_target` runs from the base branch, but this repository intentionally does not rely on that event because GitHub has announced a future restriction for it on public repositories.
 
-## Required ruleset configuration — NOT YET ENFORCED
+## Ruleset configuration — current read-back
 
-Fresh GitHub API read-back on 2026-11-05 confirms repository ruleset **GLORIFIER-NEURAL** (ID `26492703`) is active and targets `~DEFAULT_BRANCH`. Its `bypass_actors` list is now empty and `current_user_can_bypass` is `never`. The pull-request rule currently has zero required approving reviews, requires code-owner review, and resolves review threads. Strict required-status-check freshness is enabled, but the `required_status_checks` list is still empty.
+GitHub API read-back on 2026-11-05 shows:
 
-Therefore, the default-branch status publisher is **implemented in code but not a mandatory merge gate**. The bypass-removal requirement is satisfied; do not re-add any bypass actor. Keep the existing deletion, non-fast-forward, signed-commit, and code-scanning protections. The remaining ruleset change is to add the exact required status context `AI Review Policy (diagnostic)`, with GitHub Actions selected as the expected source (observed app ID `15368`). Keep required human approvals at `0`. Review the enabled code-owner requirement separately against the repository's stated AI-only review policy before changing it.
+- **NEURAL ruleset 26492703:** active on the default branch; `bypass_actors: []`; `current_user_can_bypass: never`; strict status checks enabled; required contexts are `CI` (integration ID `57789`) and `GitHub` (integration ID `15368`). Required approving reviews remain `0`; code-owner review and review-thread resolution are enabled.
+- **GLORIFIER ruleset 24038955:** active on the default branch; `bypass_actors: []`; `current_user_can_bypass: never`; required context is only `github-advanced-security` (integration ID `15368`). Strict required-status-check enforcement is disabled and `do_not_enforce_on_create` is true. Required approving reviews remain `0`; code-owner review and review-thread resolution are enabled.
 
-After saving the required-check context, read the ruleset again and verify: enforcement is `active`; target is `~DEFAULT_BRANCH`; `bypass_actors` is empty; `current_user_can_bypass` is `never`; strict status-check enforcement is enabled; `AI Review Policy (diagnostic)` is required from GitHub Actions; and human approvals remain zero. Do not claim enforcement until the exact context is visible in the saved ruleset.
+The zero-bypass condition is currently satisfied in both observed rulesets. This PR did not change those settings. GLORIFIER still needs an administrator to make required CI status checks strict and configure the intended CI context. NEURAL already has strict required status checks, but its existing contexts do not authenticate this diagnostic publisher as a separate trust principal.
+
+Do not add `AI Review Policy (diagnostic)` to either ruleset as a required context. The current GitHub Actions identity can be reused by PR-controlled workflows, and the status is attached to a commit SHA rather than a specific PR. The diagnostic is not a tamper-resistant gate.
 
 ## Existing CI review event behavior
 
@@ -52,4 +55,4 @@ The commit-status publisher is deliberately a diagnostic signal and must **not**
 
 For these reasons, do **not** add `AI Review Policy (diagnostic)` to the branch ruleset's required status checks and do not describe it as tamper-resistant. A mandatory gate needs an independently authenticated verifier identity (for example, a dedicated GitHub App not usable by PR workflows), a PR-specific merge-time decision that cannot inherit another PR's evidence, and event-driven invalidation for review-thread changes. These capabilities are not available through the currently connected GitHub write integration.
 
-The existing ruleset gaps are separate and remain unresolved: both rulesets were observed with always-bypass actors and no required status checks. Removing bypass actors and configuring required checks requires repository Administration write access. Do not claim those controls are fixed until the rulesets have been updated and read back successfully.
+The active branch rulesets were read back again on 2026-11-05 and both now show no bypass actors and `current_user_can_bypass: never`. This is an observed remote state, not a change made by this PR. The remaining GLORIFIER strict-CI configuration and a genuinely isolated, PR-specific NEURAL review gate still require administrator-level changes and a separate verifier identity.
