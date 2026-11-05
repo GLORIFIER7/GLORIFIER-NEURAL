@@ -56,3 +56,12 @@ def test_trusted_policy_rechecks_after_ci_completion():
     assert 'workflows: ["CI"]' in WORKFLOW
     assert "workflow_run:" in WORKFLOW
     assert "types: [completed]" in WORKFLOW
+
+
+def test_trusted_policy_workflow_run_is_limited_to_default_branch_ci():
+    workflow_run = re.search(
+        r"(?ms)^  workflow_run:\\n(.*?)(?=^\\S|\\Z)",
+        WORKFLOW,
+    )
+    assert workflow_run
+    assert "branches: [main]" in workflow_run.group(1)
