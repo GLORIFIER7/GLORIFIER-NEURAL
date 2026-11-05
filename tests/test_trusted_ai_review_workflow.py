@@ -59,9 +59,7 @@ def test_trusted_policy_rechecks_after_ci_completion():
 
 
 def test_trusted_policy_workflow_run_is_limited_to_default_branch_ci():
-    workflow_run = re.search(
-        r"(?ms)^  workflow_run:\\n(.*?)(?=^\\S|\\Z)",
-        WORKFLOW,
-    )
-    assert workflow_run
-    assert "branches: [main]" in workflow_run.group(1)
+    workflow_run = WORKFLOW.split("  workflow_run:\\n", 1)[1].split(
+        "\\npermissions:", 1
+    )[0]
+    assert "branches: [main]" in workflow_run
