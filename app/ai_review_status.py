@@ -1,8 +1,9 @@
 """Publish trusted AI-review policy statuses for open pull requests.
 
-This module is intended to run only from the repository's default branch on a
-schedule or a push to that branch. It never checks out or executes pull-request
-code. The status is written to the exact head SHA returned by the GitHub API.
+This module runs only from the repository's default branch. It reads pull
+request metadata and review evidence through GitHub's API; it never checks out
+or executes pull-request-controlled code. Commit statuses are SHA-scoped, so
+all open PRs sharing a head SHA are evaluated conservatively as one group.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HEAD_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 STATUS_CONTEXT = "AI Review Policy (trusted)"
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 900
+VALID_STATES = {"pending", "success", "failure", "error"}
 
 
 def derive_status(
@@ -77,11 +79,19 @@ def _commit_age_seconds(repo: str, token: str, head_sha: str) -> float:
     )
     if not isinstance(payload, dict):
         raise TypeError("GitHub returned an invalid commit response.")
-    commit = payload.get("commit") or {}
-    committer = commit.get("committer") or {}
-    timestamp = committer.get("date") or (commit.get("author") or {}).get("date")
+    commit = payload.get("commit")
+    if not isinstance(commit, dict):
+        raise TypeError("GitHub returned an invalid commit object.")
+    committer = commit.get("committer")
+    author = commit.get("author")
+    if not isinstance(committer, dict) or not isinstance(author, dict):
+        raise TypeError("GitHub returned malformed commit identity data.")
+    timestamp = committer.get("date") or author.get("date")
     committed_at = parse_commit_timestamp(timestamp)
-    return max(0.0, (datetime.now(UTC) - committed_at).total_seconds())
+    age_seconds = (datetime.now(UTC) - committed_at).total_seconds()
+    if age_seconds < 0:
+        raise ValueError("GitHub commit timestamp is in the future.")
+    return age_seconds
 
 
 def _publish_status(
@@ -92,7 +102,7 @@ def _publish_status(
     description: str,
     target_url: str,
 ) -> None:
-    if state not in {"pending", "success", "failure", "error"}:
+    if state not in VALID_STATES:
         raise ValueError(f"Unsupported GitHub commit status: {state}")
     payload = {
         "state": state,
@@ -114,8 +124,23 @@ def _append_summary(lines: list[str]) -> None:
             summary.write("\n")
 
 
+def _aggregate_group_state(states: list[str]) -> tuple[str, str]:
+    """A SHA passes only when every PR sharing it independently passes."""
+    if not states:
+        return "error", "No PR review evidence was available for this commit."
+    if any(state == "failure" for state in states):
+        return "failure", "At least one PR sharing this commit has a review blocker."
+    if any(state == "error" for state in states):
+        return "error", "At least one PR sharing this commit has unverifiable review evidence."
+    if any(state == "pending" for state in states):
+        return "pending", "At least one PR sharing this commit is awaiting AI reviews."
+    if all(state == "success" for state in states):
+        return "success", "Every PR sharing this commit passed current-head AI review policy."
+    return "error", "The grouped PR review states were not recognized."
+
+
 def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
-    """Evaluate every open PR targeting the default branch and publish statuses."""
+    """Evaluate open PRs and publish one conservative status per unique head SHA."""
     if not REPO_PATTERN.fullmatch(repo or ""):
         raise ValueError("A valid GITHUB_REPOSITORY slug is required.")
     if not token:
@@ -143,68 +168,78 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
 
     counts = {"success": 0, "pending": 0, "failure": 0, "error": 0, "skipped": 0}
     summary: list[str] = []
+    grouped_pulls: dict[str, list[dict]] = {}
+
     for pull in pulls:
         number = pull.get("number")
-        base = pull.get("base") or {}
-        head = pull.get("head") or {}
-        head_sha = str(head.get("sha") or "")
-        target_url = str(
-            pull.get("html_url") or f"https://github.com/{repo}/pull/{number}"
-        )
-        if not isinstance(number, int) or base.get("ref") != default_branch:
+        base = pull.get("base")
+        head = pull.get("head")
+        if not isinstance(number, int) or isinstance(number, bool):
+            counts["error"] += 1
+            summary.append("An open PR response had an invalid PR number.")
+            continue
+        if not isinstance(base, dict) or not isinstance(head, dict):
+            counts["error"] += 1
+            summary.append(f"PR #{number}: malformed base/head metadata.")
+            continue
+        if base.get("ref") != default_branch:
             counts["skipped"] += 1
             continue
+        head_sha = str(head.get("sha") or "")
         if not HEAD_SHA_PATTERN.fullmatch(head_sha):
             counts["error"] += 1
-            summary.append(
-                f"PR #{number}: invalid head SHA; no success status was published."
-            )
+            summary.append(f"PR #{number}: invalid head SHA; no success status was published.")
             continue
+        grouped_pulls.setdefault(head_sha, []).append(pull)
 
-        # Replace any earlier success with pending before refreshing evidence.
-        # A failed write for one PR must not stop evaluation of other PRs.
+    for head_sha, shared_pulls in grouped_pulls.items():
+        group_states: list[str] = []
+        for pull in shared_pulls:
+            number = pull["number"]
+            try:
+                failures = _fetch_policy_evidence(repo, number, token, head_sha)
+                age_seconds = _commit_age_seconds(repo, token, head_sha)
+                state, description = derive_status(failures, age_seconds)
+                if state not in VALID_STATES:
+                    raise ValueError("The review evaluator returned an unsupported status.")
+            except Exception as exc:
+                state = "error"
+                description = (
+                    f"Review evidence could not be verified ({type(exc).__name__})."
+                )
+            group_states.append(state)
+            summary.append(f"PR #{number}: {state} — {description}")
+
+        status, group_description = _aggregate_group_state(group_states)
+        target_url = str(
+            shared_pulls[0].get("html_url")
+            or f"https://github.com/{repo}/pull/{shared_pulls[0]['number']}"
+        )
+        if len(shared_pulls) > 1:
+            group_description = (
+                f"{len(shared_pulls)} PRs share this head SHA; {group_description}"
+            )
+
         try:
             _publish_status(
                 repo,
                 token,
                 head_sha,
-                "pending",
-                "Trusted AI review policy is refreshing current-head evidence.",
+                status,
+                group_description,
                 target_url,
             )
-        except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+        except Exception as exc:
             counts["error"] += 1
             summary.append(
-                f"PR #{number}: pending status publish failed ({type(exc).__name__})."
-            )
-            continue
-        try:
-            failures = _fetch_policy_evidence(repo, number, token, head_sha)
-            age_seconds = _commit_age_seconds(repo, token, head_sha)
-            state, description = derive_status(failures, age_seconds)
-        except (RuntimeError, TypeError, ValueError, KeyError) as exc:
-            state = "error"
-            description = (
-                "Trusted AI review policy could not verify current-head evidence."
-            )
-            summary.append(
-                f"PR #{number}: evidence lookup failed ({type(exc).__name__})."
-            )
-        if state not in {"pending", "success", "failure", "error"}:
-            state = "error"
-            description = "Trusted AI review policy produced an unsupported status."
-
-        try:
-            _publish_status(repo, token, head_sha, state, description, target_url)
-        except (RuntimeError, TypeError, ValueError, KeyError) as exc:
-            counts["error"] += 1
-            summary.append(
-                f"PR #{number}: final status publish failed ({type(exc).__name__})."
+                f"Head {head_sha[:12]}: status publication failed ({type(exc).__name__})."
             )
             continue
 
-        counts[state] = counts.get(state, 0) + 1
-        summary.append(f"PR #{number}: {state} — {description}")
+        counts[status] = counts.get(status, 0) + 1
+        summary.append(
+            f"Head {head_sha[:12]} shared by {len(shared_pulls)} PR(s): {status}."
+        )
 
     _append_summary(summary or ["No open pull requests target the default branch."])
     for line in summary:
@@ -220,15 +255,15 @@ def main() -> int:
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     token = os.environ.get("GH_TOKEN", "")
     try:
-        sweep_open_pull_requests(repo, token)
-    except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+        counts = sweep_open_pull_requests(repo, token)
+    except Exception as exc:
         message = (
             f"Trusted AI review status sweep failed closed ({type(exc).__name__})."
         )
         print(f"::error::{message}")
         _append_summary([message])
         return 1
-    return 0
+    return 1 if counts.get("error", 0) else 0
 
 
 if __name__ == "__main__":
