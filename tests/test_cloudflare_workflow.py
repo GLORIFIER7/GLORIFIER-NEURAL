@@ -168,7 +168,7 @@ def test_cloudflare_workflow_preflights_api_secret_and_smokes_safe_mode_truthful
     assert "Required Neural API token secret is present; its value was not read." in workflow
 
     assert "  smoke:" in workflow
-    assert "needs: deploy" in workflow
+    assert "needs: [validate, deploy]" in workflow
     assert "/health" in workflow
     assert "/ready" in workflow
     assert "Verify live readiness or explicitly configured provider-disabled safe mode" in workflow
