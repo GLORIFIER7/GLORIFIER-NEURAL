@@ -144,10 +144,13 @@ jobs:
             Inspect the application and its tests. Identify at most one concrete, reproducible,
             low-risk bug or reliability weakness and implement a focused fix with a regression test.
             Keep the patch small. Work only in app/ and tests/. Do not modify workflows, dependency
-            manifests or lockfiles, security policy, or the AI review policy. Do not access secrets,
-            credentials, environment values, production systems, databases, or deployment APIs.
-            Run the repository's locked validation commands. If no safe, evidence-backed improvement
-            is available, leave the working tree unchanged. Do not commit or push.
+            manifests or lockfiles, scripts/validate_ai_maintenance_scope.py, security policy,
+            app/ai_review_policy.py, or protected governance tests. Do not access secrets, credentials,
+            environment values, production systems, databases, or deployment APIs. This is an isolated
+            copy; only app/ and tests/ changes are eligible for copy-back. Run
+            "uv run --locked ruff check app tests" and the closest relevant focused test file(s).
+            The full repository Ruff and pytest suites run after copy-back. If no safe, evidence-backed
+            improvement is available, leave the working tree unchanged. Do not commit or push.
 
       - name: Copy validated app and tests changes back
         id: restore
