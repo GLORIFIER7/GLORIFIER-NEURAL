@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.review.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
           path: trusted-policy
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable action pin
@@ -79,8 +79,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.review.pull_request.number }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.review.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           AI_REVIEW_WAIT_SECONDS: "900"
           AI_REVIEW_POLL_INTERVAL_SECONDS: "30"
         working-directory: trusted-policy
