@@ -1,7 +1,10 @@
 name: CI
+
 on:
   push:
   pull_request:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
   workflow_dispatch:
   schedule:
     - cron: "23 2 * * *"
@@ -12,9 +15,11 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   test:
+    if: github.event_name != 'pull_request_review'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     strategy:
@@ -47,3 +52,24 @@ jobs:
         run: docker build --tag glorifier-neural:ci .
       - name: Verify runtime image includes the Neon PostgreSQL driver
         run: docker run --rm --entrypoint python glorifier-neural:ci -c "import psycopg; assert psycopg.__version__"
+
+  ai-review-policy:
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    name: AI Review Policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Wait for both AI reviewers and enforce their findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AI_REVIEW_WAIT_SECONDS: "900"
+          AI_REVIEW_POLL_INTERVAL_SECONDS: "30"
+        run: python scripts/ai_review_policy.py
