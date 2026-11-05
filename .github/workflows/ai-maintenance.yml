@@ -236,7 +236,7 @@ jobs:
             --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. This PR remains a draft and is not auto-merged."
 
       - name: Run CI against the generated PR branch
-        if: ${{ steps.branch.outputs.branch != '' }}
+        if: ${{ steps.branch.outputs.branch != '' && steps.validation.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run ci.yml --ref "${{ steps.branch.outputs.branch }}"
