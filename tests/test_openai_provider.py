@@ -192,7 +192,7 @@ def test_openai_async_provider_sanitizes_upstream_errors():
 def test_openai_async_provider_sanitizes_response_body_failures():
     class BrokenResponse:
         status = 200
-        headers = {}
+        headers: ClassVar[dict[str, str]] = {}
 
         async def text(self):
             raise RuntimeError("sensitive body parser and credential detail")
