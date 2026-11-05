@@ -1,8 +1,8 @@
 import asyncio
 import json
-import urllib.error
 
 import pytest
+from typing import ClassVar
 
 from app.providers.openai import OpenAIResponsesAdapter
 
@@ -25,7 +25,7 @@ def test_openai_sync_inference_uses_responses_api_and_preserves_request_id(monke
 
     class FakeResponse:
         status = 200
-        headers = {"x-request-id": "req_test_123"}
+        headers: ClassVar[dict[str, str]] = {"x-request-id": "req_test_123"}
 
         def __enter__(self):
             return self
@@ -121,7 +121,7 @@ def test_openai_async_readiness_and_inference_use_request_scoped_fetch():
 
     class FakeResponse:
         status = 200
-        headers = {"x-request-id": "req_worker_456"}
+        headers: ClassVar[dict[str, str]] = {"x-request-id": "req_worker_456"}
 
         def __init__(self, payload):
             self.payload = payload
@@ -192,7 +192,7 @@ def test_openai_async_provider_sanitizes_upstream_errors():
 def test_openai_async_provider_rejects_empty_or_malformed_model_response():
     class FakeResponse:
         status = 200
-        headers = {}
+        headers: ClassVar[dict[str, str]] = {}
 
         async def text(self):
             return "not-json"
