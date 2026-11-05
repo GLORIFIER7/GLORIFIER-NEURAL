@@ -234,6 +234,30 @@ def test_fetch_review_threads_rejects_missing_resolution_boolean(monkeypatch):
         _fetch_review_threads("example/repo", 7, "token")
 
 
+def test_conflicting_reviews_with_identical_latest_timestamps_fail_closed():
+    timestamp = "2026-11-05T10:00:00Z"
+    reviews = [
+        review(
+            "amazon-q-developer[bot]",
+            state="APPROVED",
+            submitted_at=timestamp,
+        ),
+        review(
+            "amazon-q-developer[bot]",
+            state="CHANGES_REQUESTED",
+            submitted_at=timestamp,
+        ),
+        review("codeant-ai[bot]"),
+    ]
+
+    failures = evaluate_reviews(reviews, [], HEAD_SHA)
+
+    assert any(
+        "conflicting review states at the latest current-head timestamp" in failure
+        for failure in failures
+    )
+
+
 def test_malformed_review_timestamp_cannot_supersede_valid_blocker():
     reviews = [
         review(
