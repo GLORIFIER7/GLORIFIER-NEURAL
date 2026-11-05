@@ -128,10 +128,10 @@ def _aggregate_group_state(states: list[str]) -> tuple[str, str]:
     """A SHA passes only when every PR sharing it independently passes."""
     if not states:
         return "error", "No PR review evidence was available for this commit."
-    if any(state == "failure" for state in states):
-        return "failure", "At least one PR sharing this commit has a review blocker."
     if any(state == "error" for state in states):
         return "error", "At least one PR sharing this commit has unverifiable review evidence."
+    if any(state == "failure" for state in states):
+        return "failure", "At least one PR sharing this commit has a review blocker."
     if any(state == "pending" for state in states):
         return "pending", "At least one PR sharing this commit is awaiting AI reviews."
     if all(state == "success" for state in states):
@@ -176,7 +176,8 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
         number = pull.get("number")
         base = pull.get("base")
         head = pull.get("head")
-        if isinstance(base, dict) and base.get("ref") != default_branch:
+        base_ref = base.get("ref") if isinstance(base, dict) else None
+        if isinstance(base_ref, str) and base_ref and base_ref != default_branch:
             counts["skipped"] += 1
             continue
         if not isinstance(head, dict):
@@ -191,8 +192,8 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
         metadata_error = None
         if not isinstance(number, int) or isinstance(number, bool):
             metadata_error = "The PR number was malformed; its review evidence cannot be resolved."
-        elif not isinstance(base, dict):
-            metadata_error = "The PR base metadata was malformed; its target branch cannot be verified."
+        elif not isinstance(base, dict) or not isinstance(base_ref, str) or not base_ref:
+            metadata_error = "The PR base ref was missing or malformed; its target branch cannot be verified."
         grouped_entry = {
             "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
             "html_url": pull.get("html_url"),
