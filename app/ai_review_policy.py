@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from datetime import UTC, datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -64,6 +65,22 @@ def _has_blocker(text: object) -> bool:
     return bool(BLOCKER_PATTERN.search(str(text or "")))
 
 
+def _parse_review_timestamp(value: object) -> datetime:
+    """Parse a GitHub review timestamp as an absolute timezone-aware instant."""
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError("GitHub returned a review without a valid submission timestamp.")
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise TypeError("GitHub returned a malformed review submission timestamp.") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise TypeError("GitHub review submission timestamp must include a timezone.")
+    return parsed.astimezone(UTC)
+
+
 def _validate_review_record(item: object) -> None:
     """Reject incomplete REST review records instead of silently ignoring them."""
     if not isinstance(item, dict):
@@ -81,8 +98,8 @@ def _validate_review_record(item: object) -> None:
     ):
         raise TypeError("GitHub returned a review with an invalid commit SHA.")
     submitted_at = item.get("submitted_at")
-    if submitted_at is not None and (not isinstance(submitted_at, str) or not submitted_at):
-        raise TypeError("GitHub returned a review with an invalid submission timestamp.")
+    if submitted_at is not None:
+        _parse_review_timestamp(submitted_at)
     if state.upper() != "PENDING" and (
         commit_id is None or submitted_at is None
     ):
@@ -161,7 +178,7 @@ def evaluate_reviews(
 
         latest = max(
             current_reviews,
-            key=lambda item: str(item.get("submitted_at", "")),
+            key=lambda item: _parse_review_timestamp(item["submitted_at"]),
         )
         state = str(latest.get("state", "")).upper()
         if state == "CHANGES_REQUESTED":
