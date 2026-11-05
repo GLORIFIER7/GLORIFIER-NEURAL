@@ -265,3 +265,50 @@ def test_malformed_pull_metadata_is_counted_and_other_prs_are_still_checked(monk
     assert counts["error"] == 1
     assert counts["success"] == 1
     assert published == [("a" * 40, "error"), ("b" * 40, "success")]
+
+
+def test_grouped_evidence_error_takes_precedence_over_known_blocker():
+    state, description = publisher._aggregate_group_state(["failure", "error"])
+
+    assert state == "error"
+    assert "unverifiable" in description
+
+
+def test_grouped_blocker_still_fails_when_no_evidence_errors_exist():
+    state, _ = publisher._aggregate_group_state(["success", "failure"])
+
+    assert state == "failure"
+
+
+def test_missing_base_ref_for_known_sha_publishes_error(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+    pulls = [
+        {
+            "number": 7,
+            "base": {},
+            "head": {"sha": "c" * 40},
+            "html_url": "https://github.com/example/repo/pull/7",
+        }
+    ]
+
+    def request_json(url, token, payload=None):
+        if url == "https://api.github.com/repos/example/repo":
+            return {"default_branch": "main"}
+        if "/pulls?" in url:
+            return pulls
+        raise AssertionError(f"Unexpected API request: {url}")
+
+    published = []
+    monkeypatch.setattr(publisher, "_request_json", request_json)
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(
+            (sha, state, description)
+        ),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["error"] == 1
+    assert published[0][0:2] == ("c" * 40, "error")
