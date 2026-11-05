@@ -10,7 +10,7 @@ from typing import Any
 
 _REQUIRED_READY_CHECKS = ("providers", "database", "authentication", "rate_limit")
 _REQUIRED_SAFE_MODE_CHECKS = ("database", "authentication", "rate_limit")
-_SAFE_MODE_PROVIDER_MESSAGE = "Provider inference is disabled by configuration."
+_SAFE_MODE_PROVIDER_MESSAGE = "Provider readiness checks are disabled by configuration."
 
 
 def require_worker_api_token_secret(secret_names: list[str]) -> None:
@@ -32,11 +32,11 @@ def validate_health(health: dict[str, Any]) -> None:
     
 
 def classify_readiness(status_code: int, readiness: dict[str, Any]) -> str:
-    """Classify fully ready versus intentionally provider-disabled safe-mode releases.
+    """Classify ready releases versus provider-readiness-disabled safe mode.
 
-    Safe mode is accepted only when the provider is explicitly disabled by configuration,
-    external inference was not performed, and database/authentication/rate-limit controls
-    are verified. A missing token, missing binding, or degraded integration is a failure.
+    Safe mode is accepted only when read-only provider readiness is disabled by
+    configuration, no inference was performed, and database/authentication/rate-limit
+    controls are verified. A missing token, missing binding, or degraded control is a failure.
     """
     checks = readiness.get("checks")
     execution = readiness.get("execution")
@@ -67,7 +67,7 @@ def classify_readiness(status_code: int, readiness: dict[str, Any]) -> str:
                 "Safe mode requires verified database, authentication, and rate limiting; "
                 f"unverified: {', '.join(missing)}."
             )
-        return "SAFE_MODE_PROVIDER_DISABLED"
+        return "SAFE_MODE_PROVIDER_READINESS_DISABLED"
 
     raise ValueError(f"Unexpected Neural readiness status: HTTP {status_code}, status={status!r}.")
 
@@ -101,8 +101,8 @@ def main() -> int:
     else:
         print(
             "::warning::Neural Worker is deployed and security/database controls passed, "
-            "but provider inference is intentionally disabled. Service is NOT READY for "
-            "provider-backed task execution."
+            "but read-only provider readiness checks are disabled by configuration. "
+            "No inference was performed; service is NOT READY for provider-backed task execution."
         )
     return 0
 
