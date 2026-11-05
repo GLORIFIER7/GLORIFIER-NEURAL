@@ -78,6 +78,11 @@ jobs:
       - name: Verify the trusted policy runner is importable
         working-directory: trusted-policy
         run: python -c "import app.ai_review_policy; print('Trusted AI review policy runner import verified')"
+      - name: Verify the trusted policy runner is importable
+        working-directory: trusted-policy
+        env:
+          PYTHONPATH: ${{ github.workspace }}/trusted-policy
+        run: python -c "import app.ai_review_policy; print('Trusted AI review policy runner import verified')"
       - name: Resolve canonical PR head SHA from GitHub
         id: current-pr
         env:
@@ -114,6 +119,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}
+          PYTHONPATH: ${{ github.workspace }}/trusted-policy
           AI_REVIEW_WAIT_SECONDS: "900"
           AI_REVIEW_POLL_INTERVAL_SECONDS: "30"
         working-directory: trusted-policy
