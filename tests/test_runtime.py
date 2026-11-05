@@ -210,6 +210,8 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
 def test_provider_readiness_requires_external_egress_consent_when_inference_is_disabled(
     monkeypatch,
 ):
+    import asyncio
+
     from app.runtime import build_orchestrator_from_environment
 
     worker_env = {
@@ -221,10 +223,9 @@ def test_provider_readiness_requires_external_egress_consent_when_inference_is_d
     }
     orchestrator = build_orchestrator_from_environment(worker_env)
 
-    status, message = orchestrator.acheck_readiness().__await__().__next__() if False else (
-        "NOT VERIFIED",
-        "provider readiness must remain blocked without egress consent",
-    )
+    status, message = asyncio.run(orchestrator.acheck_readiness())
 
+    assert status == "NOT VERIFIED"
+    assert "disabled" in message
     assert orchestrator._providers.get("openai") is None
     assert orchestrator._allow_inference is False
