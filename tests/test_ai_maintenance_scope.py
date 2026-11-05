@@ -114,7 +114,7 @@ def test_workflow_validates_scope_and_uses_credential_helper():
     assert "validate_ai_maintenance_scope.py" in workflow
     assert "gh auth setup-git" in workflow
     assert "x-access-token:$GH_TOKEN@" not in workflow
-    assert "git push --set-upstream origin" in workflow
+    assert "push --set-upstream origin" in workflow
 
 
 @pytest.mark.parametrize(
