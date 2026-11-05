@@ -67,7 +67,7 @@ jobs:
           fi
       - name: Check OpenAI credential availability
         id: provider
-        if: ${{ steps.authorization.outputs.enabled == 'true' }} && steps.time_window.outputs.allowed == 'true'
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.time_window.outputs.allowed == 'true' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         shell: bash
@@ -79,7 +79,7 @@ jobs:
           fi
 
       - name: Set up Python
-        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }} && steps.time_window.outputs.allowed == 'true'
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.time_window.outputs.allowed == 'true' }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # pinned action revision
         with:
           python-version: "3.12"
@@ -116,7 +116,7 @@ jobs:
 
       - name: Check changed paths and prepare review patch
         id: stage
-        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' }} && steps.time_window.outputs.allowed == 'true'
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' && steps.time_window.outputs.allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
