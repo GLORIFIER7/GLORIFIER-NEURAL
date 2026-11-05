@@ -9,9 +9,9 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI,
 - Task request/response schemas with input limits, including a bounded action-class field.
 - Enforces a 64 KiB request-body limit against both the declared `Content-Length` and streamed ASGI body chunks; keep a matching limit at the reverse proxy as defense in depth.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
-- Explicit provider adapter interface; OpenAI is the default provider selection, but no provider is registered unless inference and external egress are explicitly enabled.
-- OpenAI Responses API adapter (`OPENAI_API_KEY`, optional `OPENAI_MODEL`, default `gpt-6-luna`), registered only when `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai` (or unset), and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are set.
-- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), registered only when inference, NVIDIA provider selection, and external-egress consent are explicitly set.
+- Explicit provider adapter interface; OpenAI is the default provider selection. A provider may be registered for read-only readiness when external egress is explicitly enabled; task inference remains independently disabled unless explicitly enabled.
+- OpenAI Responses API adapter (`OPENAI_API_KEY`, optional `OPENAI_MODEL`, default `gpt-6-luna`), registered for read-only readiness when `GLORIFIER_PROVIDER=openai` (or unset), the API key is configured, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`. Task inference additionally requires `GLORIFIER_ENABLE_INFERENCE=true`.
+- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), registered for read-only readiness when NVIDIA is explicitly selected, its API key is configured, and external-egress consent is enabled. Task inference separately requires `GLORIFIER_ENABLE_INFERENCE=true`.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
 - Validated UUID-shaped `X-Correlation-ID` propagation: a valid caller-supplied value is echoed unchanged in `X-Correlation-ID` and stored as `details.correlation_id` on audit events. Invalid values are replaced with a server-generated UUID. Every response also carries a unique server-generated `X-Request-ID`, which is used as the audit-event `request_id`.
 - Optional PyTorch availability check.
