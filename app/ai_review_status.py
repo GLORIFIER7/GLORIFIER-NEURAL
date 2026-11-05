@@ -125,10 +125,11 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
     pulls: list[dict] = []
     page = 1
     while True:
-        payload = _request_json(
-            f"{GITHUB_API_ROOT}/repos/{repo}/pulls?state=open&base={quote(default_branch)}&per_page=100&page={page}",
-            token,
+        pulls_url = (
+            f"{GITHUB_API_ROOT}/repos/{repo}/pulls?state=open"
+            f"&base={quote(default_branch)}&per_page=100&page={page}"
         )
+        payload = _request_json(pulls_url, token)
         if not isinstance(payload, list):
             raise TypeError("GitHub returned an invalid open pull-request response.")
         pulls.extend(item for item in payload if isinstance(item, dict))
@@ -184,10 +185,10 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
     _append_summary(summary or ["No open pull requests target the default branch."])
     for line in summary:
         print(line)
-    print(
-        "Trusted AI review status sweep: "
-        + ", ".join(f"{key}={value}" for key, value in counts.items())
+    totals = ", ".join(
+        f"{key}={value}" for key, value in counts.items()
     )
+    print(f"Trusted AI review status sweep: {totals}")
     return counts
 
 
