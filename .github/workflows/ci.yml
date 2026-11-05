@@ -8,6 +8,15 @@ on:
   pull_request_review:
     types: [submitted, edited, dismissed]
   workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Optional PR number to run trusted current-head AI review policy."
+        required: false
+        type: number
+      pull_request_head_sha:
+        description: "Exact immutable PR head SHA to test when dispatching for a generated PR."
+        required: false
+        type: string
   schedule:
     - cron: "23 2 * * *"
 
@@ -32,6 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
         with:
@@ -59,7 +69,7 @@ jobs:
         run: docker run --rm --entrypoint python glorifier-neural:ci -c "import psycopg; assert psycopg.__version__"
 
   ai-review-policy:
-    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
     name: AI Review Policy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -69,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.pull_request.base.sha }}
           path: trusted-policy
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable action pin
@@ -85,7 +95,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
         run: |
           python - <<'PY'
           import json
@@ -107,6 +118,12 @@ jobs:
           head_sha = (payload.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
+          expected_head_sha = os.environ.get("EXPECTED_PR_HEAD_SHA", "")
+          if expected_head_sha and (
+              not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha)
+              or expected_head_sha.casefold() != head_sha.casefold()
+          ):
+              raise SystemExit("The current PR head SHA does not match the dispatched commit.")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("head_sha=" + head_sha + chr(10))
           PY
@@ -114,7 +131,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}
           PYTHONPATH: ${{ github.workspace }}/trusted-policy
           AI_REVIEW_WAIT_SECONDS: "900"
