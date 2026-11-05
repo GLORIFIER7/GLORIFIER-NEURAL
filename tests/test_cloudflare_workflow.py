@@ -168,7 +168,7 @@ def test_cloudflare_workflow_preflights_api_secret_and_smokes_safe_mode_truthful
     assert "Required Neural API token secret is present; its value was not read." in workflow
 
     assert "  smoke:" in workflow
-    assert "needs: deploy" in workflow
+    assert "needs: [validate, deploy]" in workflow
     assert "/health" in workflow
     assert "/ready" in workflow
     assert "Verify live readiness or explicitly configured provider-disabled safe mode" in workflow
@@ -193,3 +193,38 @@ def test_cloudflare_worker_excludes_duplicate_entry_point_metadata():
     assert "**/*.dist-info/METADATA" not in excluded, (
         "Keep package METADATA available for runtime version and package inspection"
     )
+
+
+def test_cloudflare_smoke_verifies_automatic_main_deployment_and_manual_deployments():
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "cloudflare-neural-worker.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+    smoke_job = re.search(
+        r"(?ms)^  smoke:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        workflow,
+    )
+    assert smoke_job is not None, "Cloudflare production smoke job must exist"
+
+    assert "checks: read" in workflow, (
+        "Automatic production smoke must be able to inspect the Cloudflare deployment check"
+    )
+    assert "needs: [validate, deploy]" in smoke_job.group(1)
+    assert "timeout-minutes: 20" in smoke_job.group(1), (
+        "Smoke must allow the 15-minute Cloudflare wait plus live health/readiness probes"
+    )
+    assert "always()" in smoke_job.group(1), (
+        "Smoke must still run on main pushes when the manual-only deploy job is skipped"
+    )
+    assert "needs.validate.result == 'success'" in smoke_job.group(1)
+    assert "github.event_name == 'push'" in smoke_job.group(1)
+    assert "github.ref == 'refs/heads/main'" in smoke_job.group(1)
+    assert "github.event_name == 'workflow_dispatch'" in smoke_job.group(1)
+    assert "needs.deploy.result == 'success'" in smoke_job.group(1)
+
+    assert "Wait for Cloudflare Workers Builds production deployment" in smoke_job.group(1)
+    assert "Workers Builds: glorifier-neural" in smoke_job.group(1)
+    assert "commits/${GITHUB_SHA}/check-runs?per_page=100" in smoke_job.group(1)
