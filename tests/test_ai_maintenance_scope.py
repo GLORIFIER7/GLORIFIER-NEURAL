@@ -242,11 +242,55 @@ def test_workflow_publication_is_after_0830_in_laos_timezone():
 
 def test_publish_job_receives_only_a_validated_patch_artifact():
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    codex_section = workflow[workflow.index("  codex:"):workflow.index("  publish:")]
+    publish_section = workflow[workflow.index("  publish:"):]
 
     assert "steps.validation.outcome == 'success'" in workflow
     assert "id: upload_patch" in workflow
     assert "artifact-id" in workflow
     assert "outputs.patch_ready" in workflow
+    assert 'git diff --cached --binary --no-ext-diff > "$patch_file"' in codex_section
+    assert "path: ${{ runner.temp }}/ai-maintenance.patch" in codex_section
+    assert "path: ${{ runner.temp }}/ai-maintenance-artifact" in publish_section
+    assert 'git apply --index --binary "$PATCH_FILE"' in publish_section
+    assert "            app/\n            tests/" not in codex_section
+
+
+def test_validated_git_patch_artifact_preserves_deleted_tracked_files(tmp_path: Path):
+    source_root = tmp_path / "source"
+    publish_root = tmp_path / "publish"
+    source_root.mkdir()
+    publish_root.mkdir()
+    source = _repository(source_root)
+    publish = _repository(publish_root)
+
+    (source / "app" / "service.py").unlink()
+    _git(source, "add", "-u", "--", "app/service.py")
+    patch = subprocess.run(
+        ["git", "diff", "--cached", "--binary"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert patch
+
+    subprocess.run(
+        ["git", "apply", "--index", "--binary", "-"],
+        cwd=publish,
+        input=patch,
+        check=True,
+        capture_output=True,
+    )
+
+    assert not (publish / "app" / "service.py").exists()
+    status = subprocess.run(
+        ["git", "diff", "--cached", "--name-status"],
+        cwd=publish,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "D\\tapp/service.py" in status
 
 
 def test_workflow_cost_control_uses_single_variable():
