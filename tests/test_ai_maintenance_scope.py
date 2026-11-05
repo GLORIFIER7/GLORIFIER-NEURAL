@@ -28,8 +28,12 @@ def _repository(tmp_path: Path) -> Path:
     (repository / "app").mkdir()
     (repository / "tests").mkdir()
     (repository / ".github" / "workflows").mkdir(parents=True)
-    (repository / "app" / "service.py").write_text("value = 1\n", encoding="utf-8")
-    (repository / "tests" / "test_service.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (repository / "app" / "service.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
+    (repository / "tests" / "test_service.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
     (repository / "README.md").write_text("fixture\n", encoding="utf-8")
     _git(repository, "init", "-q")
     _git(repository, "config", "user.name", "Test")
@@ -50,8 +54,12 @@ def _validate(repository: Path) -> subprocess.CompletedProcess[str]:
 
 def test_scope_validator_accepts_only_app_and_tests_changes(tmp_path: Path):
     repository = _repository(tmp_path)
-    (repository / "app" / "service.py").write_text("value = 2\n", encoding="utf-8")
-    (repository / "tests" / "test_new.py").write_text("def test_new():\n    assert True\n", encoding="utf-8")
+    (repository / "app" / "service.py").write_text(
+        "value = 2\n", encoding="utf-8"
+    )
+    (repository / "tests" / "test_new.py").write_text(
+        "def test_new():\n    assert True\n", encoding="utf-8"
+    )
 
     result = _validate(repository)
 
@@ -60,7 +68,8 @@ def test_scope_validator_accepts_only_app_and_tests_changes(tmp_path: Path):
 
 def test_scope_validator_rejects_untracked_workflow_files(tmp_path: Path):
     repository = _repository(tmp_path)
-    (repository / ".github" / "workflows" / "unexpected.yml").write_text("name: unexpected\n", encoding="utf-8")
+    unexpected = repository / ".github" / "workflows" / "unexpected.yml"
+    unexpected.write_text("name: unexpected\n", encoding="utf-8")
 
     result = _validate(repository)
 
@@ -68,7 +77,9 @@ def test_scope_validator_rejects_untracked_workflow_files(tmp_path: Path):
     assert ".github/workflows/unexpected.yml" in result.stderr
 
 
-def test_scope_validator_rejects_rename_from_app_into_workflow_directory(tmp_path: Path):
+def test_scope_validator_rejects_rename_from_app_into_workflow_directory(
+    tmp_path: Path,
+):
     repository = _repository(tmp_path)
     _git(repository, "mv", "app/service.py", ".github/workflows/evil.yml")
 
@@ -78,7 +89,7 @@ def test_scope_validator_rejects_rename_from_app_into_workflow_directory(tmp_pat
     assert ".github/workflows/evil.yml" in result.stderr
 
 
-def test_scope_validator_rejects_symlinks_even_when_they_are_inside_app(tmp_path: Path):
+def test_scope_validator_rejects_symlinks_even_when_inside_app(tmp_path: Path):
     repository = _repository(tmp_path)
     (repository / "app" / "escape").symlink_to("../../README.md")
 
@@ -97,7 +108,7 @@ def test_codex_runs_in_an_isolated_app_and_tests_workspace():
     assert "find app tests -type l" in workflow
 
 
-def test_workflow_validates_rename_safe_scope_and_uses_credential_helper():
+def test_workflow_validates_scope_and_uses_credential_helper():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "validate_ai_maintenance_scope.py" in workflow
@@ -106,9 +117,14 @@ def test_workflow_validates_rename_safe_scope_and_uses_credential_helper():
     assert "git push --set-upstream origin" in workflow
 
 
-@pytest.mark.parametrize("step_name", ["Open draft pull request", "Run CI against the generated PR branch"])
+@pytest.mark.parametrize(
+    "step_name",
+    ["Open draft pull request", "Run CI against the generated PR branch"],
+)
 def test_publication_steps_require_successful_validation(step_name: str):
     workflow = WORKFLOW.read_text(encoding="utf-8")
     start = workflow.index(f"- name: {step_name}")
-    section = workflow[start : workflow.find("\n      - name:", start + 1)]
+    end = workflow.find("\n      - name:", start + 1)
+    section = workflow[start:] if end < 0 else workflow[start:end]
+
     assert "steps.validation.outcome == 'success'" in section
