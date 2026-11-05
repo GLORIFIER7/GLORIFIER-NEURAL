@@ -1,0 +1,187 @@
+name: NEURAL Governed AI Maintenance
+
+on:
+  schedule:
+    # Weekly, cost-gated autonomous maintenance. Enable with AI_MAINTENANCE_AUTORUN=true.
+    - cron: "41 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      authorize_pull_request:
+        description: "Authorize this run to open a draft PR after validation."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: neural-ai-maintenance-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    if: \${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve AI maintenance authorization
+        id: authorization
+        shell: bash
+        env:
+          EVENT_NAME: \${{ github.event_name }}
+          DISPATCH_AUTHORIZATION: \${{ inputs.authorize_pull_request }}
+          SCHEDULE_AUTHORIZATION: \${{ vars.AI_MAINTENANCE_AUTORUN }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DISPATCH_AUTHORIZATION" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "schedule" && "$SCHEDULE_AUTHORIZATION" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check OpenAI credential availability
+        id: provider
+        if: \${{ steps.authorization.outputs.enabled == 'true' }}
+        env:
+          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "\${OPENAI_API_KEY:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # pinned action revision
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+          version: "0.13.6"
+
+      - name: Verify trusted dependency lock before agent execution
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        run: uv lock --check
+
+      - name: Run Codex maintenance agent
+        id: codex
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
+        with:
+          openai-api-key: \${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          safety-strategy: "drop-sudo"
+          effort: high
+          prompt: |
+            Act as a senior Python reliability and security engineer maintaining GLORIFIER-NEURAL.
+            Inspect the application and its tests. Identify at most one concrete, reproducible,
+            low-risk bug or reliability weakness and implement a focused fix with a regression test.
+            Keep the patch small. Work only in app/ and tests/. Do not modify workflows, dependency
+            manifests or lockfiles, security policy, or the AI review policy. Do not access secrets,
+            credentials, environment values, production systems, databases, or deployment APIs.
+            Run the repository's locked validation commands. If no safe, evidence-backed improvement
+            is available, leave the working tree unchanged. Do not commit or push.
+
+      - name: Check changed paths and prepare review patch
+        id: stage
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --check
+          python - <<'PY'
+          import subprocess
+          import sys
+
+          status = subprocess.check_output(
+              ["git", "status", "--porcelain", "--untracked-files=all"],
+              text=True,
+          )
+          for entry in status.splitlines():
+              path = entry[3:]
+              if not (path.startswith("app/") or path.startswith("tests/")):
+                  print(f"Rejected AI change outside app/ and tests/: {path}", file=sys.stderr)
+                  raise SystemExit(1)
+          PY
+          git add -- app tests
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate generated patch with locked project checks
+        id: validation
+        if: \${{ steps.stage.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          uv lock --check
+          uv export --locked --extra dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.txt
+          python -m pip install --only-binary=:all: --require-hashes -r /tmp/requirements.txt
+          python -m pip install --only-binary=:all: --no-deps -e .
+          ruff check .
+          pytest
+
+      - name: Create isolated maintenance branch
+        id: branch
+        if: \${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="ai/maintenance/\${{ github.run_id }}"
+          git config user.name "GLORIFIER NEURAL AI Maintenance"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -c core.hooksPath=/dev/null checkout -b "$BRANCH"
+          git -c core.hooksPath=/dev/null commit -m "ai: governed NEURAL maintenance"
+          git -c core.hooksPath=/dev/null push --set-upstream "https://x-access-token:$GH_TOKEN@github.com/\${{ github.repository }}.git" "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open draft pull request
+        if: \${{ steps.branch.outputs.branch != '' }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          gh pr create --draft --base main --head "\${{ steps.branch.outputs.branch }}" \
+            --title "AI Maintenance: NEURAL reliability proposal" \
+            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. This PR remains a draft and is not auto-merged."
+
+      - name: Run CI against the generated PR branch
+        if: \${{ steps.branch.outputs.branch != '' }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: gh workflow run ci.yml --ref "\${{ steps.branch.outputs.branch }}"
+
+      - name: Report that AI maintenance is not enabled
+        if: \${{ steps.authorization.outputs.enabled != 'true' }}
+        run: |
+          echo "::notice::No AI model was invoked. Enable the weekly schedule by setting the repository Actions variable AI_MAINTENANCE_AUTORUN=true, or manually dispatch with authorize_pull_request=true."
+
+      - name: Report missing API key
+        if: \${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured != 'true' }}
+        run: |
+          echo "::warning::OPENAI_API_KEY is not configured. AI maintenance did not run."
+
+      - name: Report Codex capacity limitation
+        if: \${{ failure() && steps.codex.outcome == 'failure' }}
+        run: echo "::warning::Codex execution failed; inspect provider quota/capacity and do not retry aggressively."
