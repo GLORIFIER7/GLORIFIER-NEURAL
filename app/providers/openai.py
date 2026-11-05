@@ -248,10 +248,23 @@ class OpenAIResponsesAdapter(ProviderAdapter):
                 fetch_fn(url, **options),
                 timeout=timeout_seconds,
             )
+        except TimeoutError:
+            label = "readiness probe" if readiness else "request"
+            raise RuntimeError(f"OpenAI {label} exceeded its timeout") from None
+        except Exception:  # noqa: BLE001 - transport errors may contain credentials
+            label = "readiness endpoint" if readiness else "request"
+            raise RuntimeError(f"OpenAI {label} is unavailable") from None
+
+        try:
             status = int(response.status)
-            if status != 200:
-                label = "readiness probe" if readiness else "request"
-                raise RuntimeError(f"OpenAI {label} failed with HTTP {status}")
+        except Exception:  # noqa: BLE001 - do not expose malformed transport responses
+            label = "readiness endpoint" if readiness else "request"
+            raise RuntimeError(f"OpenAI {label} is unavailable") from None
+        if status != 200:
+            label = "readiness probe" if readiness else "request"
+            raise RuntimeError(f"OpenAI {label} failed with HTTP {status}")
+
+        try:
             headers = getattr(response, "headers", None)
             length = headers.get("content-length") if headers is not None else None
             if length:
@@ -271,7 +284,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             raise RuntimeError(f"OpenAI {label} exceeded its timeout") from None
         except RuntimeError:
             raise
-        except Exception:  # noqa: BLE001 - upstream details may contain credentials
+        except Exception:  # noqa: BLE001 - upstream body errors may contain credentials
             label = "readiness endpoint" if readiness else "request"
             raise RuntimeError(f"OpenAI {label} is unavailable") from None
         if not isinstance(raw, str) or len(raw.encode("utf-8")) > max_bytes:
