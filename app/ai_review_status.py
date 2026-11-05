@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 GITHUB_API_ROOT = "https://api.github.com"
@@ -48,7 +48,7 @@ def parse_commit_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("GitHub commit timestamp must include a timezone.")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _request_json(url: str, token: str, payload: dict | None = None) -> object:
@@ -79,7 +79,7 @@ def _commit_age_seconds(repo: str, token: str, head_sha: str) -> float:
     committer = commit.get("committer") or {}
     timestamp = committer.get("date") or (commit.get("author") or {}).get("date")
     committed_at = parse_commit_timestamp(timestamp)
-    return max(0.0, (datetime.now(timezone.utc) - committed_at).total_seconds())
+    return max(0.0, (datetime.now(UTC) - committed_at).total_seconds())
 
 
 def _publish_status(
