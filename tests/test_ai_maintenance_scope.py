@@ -235,7 +235,7 @@ def test_workflow_publication_is_after_0830_in_laos_timezone():
     assert "TZ=Asia/Vientiane" in workflow
     assert "current_hhmm_decimal=$((10#$current_hhmm))" in workflow
     assert "current_hhmm_decimal < 831" in workflow
-    assert '[[ "$current_hhmm" =~ ^[0-9]{4}$ ]]' in workflow
+    assert '[[ ! "$current_hhmm" =~ ^[0-9]{4}$ ]]' in workflow
     publish_job = workflow[workflow.index("  publish:"):]
     assert "needs.codex.outputs.patch_ready == 'true'" in publish_job
 
