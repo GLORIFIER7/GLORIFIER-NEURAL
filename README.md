@@ -1,6 +1,6 @@
 # GLORIFIER Neural Orchestration
 
-A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest live `/health` check confirms process liveness. The latest structured production smoke rerun passed the strict provider-disabled safe-mode branch: database, authentication, and rate limits are VERIFIED, while provider readiness is NOT VERIFIED and `/ready` returns HTTP 503. Neural is deployed and security/database controls are verified, but it is not ready for provider-backed task execution. Optional audit/task-run persistence remains unconfigured.
+A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. Live production checks on 2026-11-05 returned HTTP 200 from both `/health` and `/ready`. The readiness response reported `READY`: the selected OpenAI provider, read-only Neon connectivity, authentication, and rate limiting were VERIFIED. Optional audit and task-run persistence remain unconfigured. The Worker has `GLORIFIER_ENABLE_INFERENCE=false`; no model inference or optional persistence writes were performed. This is verified operational readiness, not proof of inference quality or write-path readiness.
 
 ## Current capabilities
 
@@ -40,7 +40,7 @@ pytest
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only model-access check against the explicitly configured provider; OpenAI uses `GET https://api.openai.com/v1/models/{model}`, while NVIDIA NIM queries its model catalogue. These checks do not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. Without inference opt-in and configured provider credentials, `/ready` remains HTTP 503.
+Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only model-access check against the explicitly configured provider; OpenAI uses `GET https://api.openai.com/v1/models/{model}`, while NVIDIA NIM queries its model catalogue. These checks do not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. Provider readiness is independent of inference: `/ready` can return HTTP 200 when the selected provider's read-only model-access probe and other required checks pass even while `GLORIFIER_ENABLE_INFERENCE=false`. Without a configured, accessible provider, provider readiness remains `NOT VERIFIED` and `/ready` returns HTTP 503.
 
 ## Cloudflare deployment
 
@@ -57,9 +57,10 @@ starting the Pyodide runtime.
 
 The account's Workers subdomain is `glorifier`. The live Worker address is
 `https://glorifier-neural.glorifier.workers.dev`. The Cloudflare deployment API
-reported the latest deployment at `2026-11-04T13:59:29.216254Z`, with 100% of
-production traffic assigned to version `08d46536-0ef2-46f9-8eb0-61891bd3c387`
-at the time of the latest deployment inventory check. Deployment success is not a readiness result; see **Current deployed
+reported deployment `c236adbf-c5aa-4ecb-993e-73bcec871719` at
+`2026-11-05T03:58:11.161764Z`, with 100% of production traffic assigned to
+version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8` in the observed inventory.
+Deployment success is not itself a readiness result; see **Current deployed
 state** below.
 
 The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
@@ -67,18 +68,22 @@ The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
 Worker; its value is not read or stored in this repository or Wrangler configuration.
 The endpoint remains protected by Cloudflare Access and bearer-token validation.
 
-This Cloudflare runtime keeps provider inference, external data egress, Supabase audit
-persistence, and Neon task-run writes disabled by default. Production binds the
-read-only `NEON_READONLY` Hyperdrive and enables only the bounded `SELECT 1`
-readiness probe; it performs no schema migration or application-data write.
-NVIDIA inference remains disabled unless the provider, inference, and external-egress
-controls are explicitly enabled. The current Cloudflare secret inventory contains a
-binding named `NVIDIA_NIM_API_KEY`, but its value and validity are not observable from
-the binding inventory. `/ready` currently returns HTTP 503 because provider readiness
-is `NOT VERIFIED`. The latest structured production smoke rerun confirmed database,
-authentication, and rate-limit controls as `VERIFIED` with
-`inference_performed=false`; this is verified provider-disabled safe mode, not full
-provider readiness. `/health` reports process liveness, not dependency readiness.
+The current production Worker settings are `GLORIFIER_PROVIDER=openai`,
+`GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
+`GLORIFIER_ENABLE_INFERENCE=false`, and
+`GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`. The OpenAI secret binding
+`OPENAI_API_KEY` and task-authentication secret binding `GLORIFIER_API_TOKEN`
+are present by name; secret values are never read from the binding inventory.
+The `NVIDIA_NIM_API_KEY` binding is also present for the optional NVIDIA adapter,
+but NVIDIA is not the selected production provider. External egress is enabled
+for the read-only provider readiness request; inference remains independently
+disabled. The live `/ready` check on 2026-11-05T04:45:01Z returned HTTP 200
+and `READY`: provider, read-only database connectivity, authentication, and
+rate limiting were `VERIFIED`. Audit and task-run persistence remain
+`NOT CONFIGURED (OPTIONAL)`. The response explicitly reported
+`inference_performed=false`; no task prompt was submitted, no inference was run,
+and no optional persistence writes were tested. `/health` reports process
+liveness, not dependency readiness.
 
 Pull requests build and validate the Worker bundle in GitHub Actions dry-run mode.
 Cloudflare Workers Builds also has an automatic `main`-branch production deployment
@@ -107,35 +112,41 @@ Inference remains disabled by default. OpenAI is the default provider selection.
 
 ## Current deployed state — observed 2026-11-05 (UTC+07:00)
 
-The latest Cloudflare deployment inventory reports the `glorifier-neural` deployment
-at `2026-11-04T13:59:29.216254Z`, with 100% of production traffic assigned to
-version `08d46536-0ef2-46f9-8eb0-61891bd3c387`. A direct live HTTP check at
-`2026-11-04T23:41Z` returned `/health` HTTP 200 and `/ready` HTTP 503. The Worker settings
-inventory showed the `GLORIFIER_API_TOKEN` secret binding, the read-only
-`NEON_READONLY` Hyperdrive binding, and both native rate-limit bindings. It also
-showed a secret binding named `NVIDIA_NIM_API_KEY`; Cloudflare did not expose any
-secret values, so credential validity is not verified.
+Cloudflare's deployment inventory reported deployment
+`c236adbf-c5aa-4ecb-993e-73bcec871719` at `2026-11-05T03:58:11.161764Z`,
+with 100% of production traffic assigned to Worker version
+`733211d1-6931-4fdb-a4b9-5c7482bcf9b8`.
 
-Observed live checks at `2026-11-04T23:41Z`:
+Direct live HTTP checks at approximately `2026-11-05T04:45Z`:
 
-- `GET /health`: HTTP 200 with `status: PARTIALLY VERIFIED`; only the process check
-  is evaluated by this liveness endpoint. Its provider/database/PyTorch fields remain
-  `NOT VERIFIED` because `/health` does not run dependency probes.
-- `GET /ready`: HTTP 503 with `status: NOT READY`; `providers: NOT VERIFIED`,
-  `database: VERIFIED`, `authentication: VERIFIED`, and `rate_limit: VERIFIED`.
-  Audit and task-run persistence are `NOT CONFIGURED (OPTIONAL)`, and
-  `inference_performed: false`. Provider-disabled safe mode is functioning as
-  designed; provider-backed task execution is not ready.
-- Optional audit and task-run persistence remain unconfigured. No live inference
-  request or model-quality verification has been performed.
+- `GET /health`: HTTP 200, `status: PARTIALLY VERIFIED`, and
+  `process: VERIFIED`. This is a liveness endpoint; the provider, database,
+  and PyTorch fields are not evaluated by this route and remain
+  `NOT VERIFIED` in its response.
+- `GET /ready`: HTTP 200, `status: READY`. The selected OpenAI provider,
+  read-only Neon connectivity probe, authentication, and rate-limit controls
+  were reported as `VERIFIED`.
+- Optional audit and task-run persistence were reported as
+  `NOT CONFIGURED (OPTIONAL)`. They are not included in the readiness
+  success claim and no write test was performed.
+- `inference_performed: false`. The readiness request used read-only/configuration
+  checks; no prompt was submitted and no model inference or task execution was
+  tested.
+- Cloudflare settings report `GLORIFIER_PROVIDER=openai`,
+  `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
+  `GLORIFIER_ENABLE_INFERENCE=false`, and
+  `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`. Secret bindings are visible by
+  name only; secret values are not read or stored.
 
-This is **deployed and verified provider-disabled safe mode**, not full AI/provider
-readiness. Do not report the service as ready for provider-backed task execution
-until provider readiness and a separately controlled inference check succeed.
+This is verified operational readiness for the configured read-only checks.
+It is not evidence of inference quality, end-to-end task execution, optional
+audit/task-run writes, or business outcomes. Keep inference disabled until
+separately authorized and verify it through a controlled test before claiming
+provider-backed task execution readiness.
 
 ## Database foundation
 
-A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Production has the read-only `NEON_READONLY` Hyperdrive binding and a configured connectivity probe. The latest live `/ready` response reported `database: VERIFIED`; its HTTP 503 status was caused by provider readiness remaining `NOT VERIFIED` while inference was disabled. The asynchronous `asyncpg` Hyperdrive path uses a bounded 15-second connection timeout and executes only read-only `SELECT 1`. This verifies connectivity only; it does not verify application-data reads/writes, schema availability, or audit/task-run persistence.
+A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_audit_events.sql`. It is **not applied automatically**. The API can write sanitized audit events only when `GLORIFIER_AUDIT_ENABLED=true` and `SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY` are configured. The `glorifier` schema must be exposed in Supabase API settings. If the initial audit write fails, task processing is blocked; if the final write fails, the API returns HTTP 503 and flags that audit status needs inspection. Do not enable this against production until the migration, schema exposure, access controls, backup, and staging test are reviewed. Review `db/README.md`. Production has the read-only `NEON_READONLY` Hyperdrive binding and a configured connectivity probe. The live `/ready` response on 2026-11-05 returned HTTP 200 with `database: VERIFIED` and overall `READY`. This reflects the bounded read-only Hyperdrive connectivity check only; it does not verify application-data reads/writes or audit/task-run persistence. The asynchronous `asyncpg` Hyperdrive path uses a bounded 15-second connection timeout and executes only read-only `SELECT 1`. This verifies connectivity only; it does not verify application-data reads/writes, schema availability, or audit/task-run persistence.
 
 ## Explicit limitations
 

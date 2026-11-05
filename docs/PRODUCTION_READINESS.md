@@ -9,7 +9,7 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 - Runtime: Cloudflare Python Workers / FastAPI
 - Database read probe: existing `NEON_READONLY` Hyperdrive binding
 - Task-run writes: a separately provisioned `NEON_WRITE` binding or a writer `NEON_DATABASE_URL` secret
-- Model: `nvidia/nemotron-3.5-super-vl-120b-a12b`
+- Currently selected production provider: OpenAI Responses API. The adapter defaults to model `gpt-6-luna` unless `OPENAI_MODEL` overrides it. NVIDIA NIM remains an optional alternative provider, not the current production selection.
 
 The Cloudflare deployment has two production paths. Cloudflare Workers Builds
 automatically builds and deploys commits on `main`, using the `/cloudflare` root
@@ -44,7 +44,7 @@ The account-wide `All Workers` Access application remains enabled and still prot
 
 These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Public `GET /ready` is protected by a separate Cloudflare-native per-client rate limiter and a 30-second cache for provider/database probes. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
 
-Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. The latest rerun of the production smoke job (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) returned HTTP 503 from `/ready` with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. The smoke job passed the strict provider-disabled safe-mode branch. This is deployed safe mode, not provider readiness.
+Historical safe-mode observation (2026-11-04; superseded by the current production observation below): `GET /health` returned HTTP 200 and process status `VERIFIED`. The production smoke job (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) returned HTTP 503 from `/ready` with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. That run passed the strict provider-disabled safe-mode branch. This records the earlier non-provider-ready state only; it is not the current production readiness result.
 
 ## Cloudflare variables and secrets
 
@@ -54,7 +54,26 @@ Configure the following in Workers & Pages → `glorifier-neural` → Settings �
 
 - `GLORIFIER_API_TOKEN`: a high-entropy bearer token used by authenticated `POST /v1/tasks` callers.
 
-### NVIDIA inference
+### OpenAI (currently selected production provider)
+
+The observed production Worker is configured with `GLORIFIER_PROVIDER=openai`.
+Its read-only model-access probe uses `GET /v1/models/{model}`; the adapter
+defaults to `gpt-6-luna` unless `OPENAI_MODEL` is explicitly set.
+
+For read-only provider readiness, configure:
+
+- `GLORIFIER_PROVIDER=openai`
+- `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`
+- Store `OPENAI_API_KEY` as a Worker secret.
+
+The current production Worker reports `GLORIFIER_ENABLE_INFERENCE=false`.
+Keep inference disabled unless the owner separately approves sending task
+prompts to OpenAI and accepts applicable API usage charges. A successful
+model-catalogue check establishes model access only; it does not prove inference
+quality, latency, capacity, or end-to-end task execution. The secret inventory
+exposes the `OPENAI_API_KEY` binding name only; never infer or record its value.
+
+### NVIDIA NIM (optional alternative provider)
 
 Set these plain-text variables only when the owner explicitly authorizes sending task prompts to NVIDIA:
 
@@ -71,7 +90,7 @@ The readiness probe performs a read-only `GET /v1/models` request. It does not s
 
 ### Neon task-run writes (optional)
 
-The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The latest structured production smoke rerun reported `database: VERIFIED`; the HTTP 503 readiness status was due to `providers: NOT VERIFIED` while inference was disabled. The probe remains read-only and does not verify application-data reads/writes. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
+The production Worker currently has the `glorifier-neon-readonly` Hyperdrive resource bound as `NEON_READONLY`. It is used only for the read-only `SELECT 1` readiness probe and must not be used for writes. The direct live `/ready` check on 2026-11-05 returned HTTP 200 with `status: READY` and `database: VERIFIED`; the Hyperdrive probe is read-only and does not test application-data writes. The probe remains read-only and does not verify application-data reads/writes. No writer-role `NEON_WRITE` binding is configured, and task-run persistence remains disabled.
 
 To enable task-run persistence:
 
@@ -96,14 +115,14 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 `GET /ready` performs read-only/configuration checks. For Cloudflare Workers it requires:
 
-- Provider readiness verified against the selected NVIDIA model catalogue.
+- Provider readiness verified through the selected provider adapter's bounded, read-only model-access probe. For the current OpenAI selection, this is `GET /v1/models/{model}`; the NVIDIA NIM catalogue probe applies only when NVIDIA NIM is explicitly selected.
 - Neon connectivity verified through `NEON_READONLY`.
 - `GLORIFIER_API_TOKEN` configured.
 - The `GLORIFIER_RATE_LIMITER` and `GLORIFIER_READINESS_LIMITER` bindings present.
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest production smoke rerun met the strict provider-disabled safe-mode branch: database, authentication, and rate-limit checks were VERIFIED, with `inference_performed=false`. Retain HTTP 503 as the correct non-provider-ready status until provider readiness is configured and verified.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The current production observation on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
 
 ## Rate limiting
 
@@ -111,19 +130,46 @@ The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a co
 
 ## Current production observation — 2026-11-05 (UTC+07:00)
 
-- Latest Cloudflare deployment record observed at `2026-11-04T13:59:29.216254Z`; 100% of production traffic is assigned to Worker version `08d46536-0ef2-46f9-8eb0-61891bd3c387`.
-- Live check at `2026-11-04T23:41Z`: `/health` returned HTTP 200 with overall status `PARTIALLY VERIFIED`; only process liveness is checked, so its provider/database/PyTorch fields remain `NOT VERIFIED`.
-- The same live check returned HTTP 503 from `/ready`: providers `NOT VERIFIED`, database `VERIFIED`, authentication `VERIFIED`, rate limit `VERIFIED`, audit/task-run persistence `NOT CONFIGURED (OPTIONAL)`, and `inference_performed=false`.
-- This is the intended provider-disabled safe mode, not a database failure. The database result verifies only a bounded, read-only Hyperdrive `SELECT 1`; it does not verify application-data reads/writes or optional persistence.
-- Cloudflare settings expose a `GLORIFIER_API_TOKEN` secret binding and a secret binding named `NVIDIA_NIM_API_KEY`. Secret values and credential validity are not observable from the binding inventory.
-- Provider inference remains unverified; optional audit and task-run persistence are not configured.
+Direct Cloudflare API and live Worker observations:
+
+- Worker: `glorifier-neural`; route:
+  `https://glorifier-neural.glorifier.workers.dev`.
+- Latest deployment inventory: deployment
+  `c236adbf-c5aa-4ecb-993e-73bcec871719`, created
+  `2026-11-05T03:58:11.161764Z`; 100% of production traffic is assigned to
+  version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8`.
+- Live `GET /health` at approximately `2026-11-05T04:44:56Z`: HTTP 200,
+  `status: PARTIALLY VERIFIED`, `process: VERIFIED`. The provider, database,
+  and PyTorch fields in this liveness response are not dependency probes and
+  are not evidence of those integrations' readiness.
+- Live `GET /ready` at approximately `2026-11-05T04:45:01Z`: HTTP 200,
+  `status: READY`; selected provider, read-only database connectivity,
+  authentication, and rate limiting were all reported as `VERIFIED`.
+- Current non-secret Worker variables:
+  `GLORIFIER_PROVIDER=openai`,
+  `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
+  `GLORIFIER_ENABLE_INFERENCE=false`, and
+  `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`.
+- The secret-binding inventory includes `OPENAI_API_KEY`,
+  `GLORIFIER_API_TOKEN`, and `NVIDIA_NIM_API_KEY`. Cloudflare exposes
+  binding names, not secret values. The current selected provider is OpenAI;
+  NVIDIA NIM is an optional alternative.
+- The readiness response reported audit and task-run persistence as
+  `NOT CONFIGURED (OPTIONAL)` and `inference_performed=false`. No prompt was
+  submitted, no inference was run, and no optional persistence write was tested.
+
+Conclusion: the configured read-only operational readiness checks are
+**VERIFIED**. Model inference, inference quality, end-to-end task execution,
+optional audit/task-run writes, and externally verified economic outcomes remain
+**NOT VERIFIED**. Do not enable inference or optional writes without their
+separate authorization and controlled verification.
 
 ## Release procedure
 
 1. Make code changes on a branch and open a pull request. The active repository ruleset requires one approving review, CodeQL/code-scanning and code-quality constraints, and prohibits deletion and non-fast-forward updates.
 2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
 3. After an approved merge to `main`, verify the automatic Cloudflare Workers Builds production build and active deployment. The separate GitHub Actions path can be manually dispatched with `deploy=true` using the configured GitHub Environment credentials. Verify the deployment job and intended Worker version/traffic before announcing release.
-4. Require live `/health` and `/ready` checks. A 503 is acceptable only for the explicit provider-disabled safe-mode response when database, authentication, and rate-limit controls are verified and `inference_performed=false`; it is not evidence of provider readiness.
-5. Separately perform a controlled authenticated inference request only after the owner provisions a valid NVIDIA key, approves sending task content to NVIDIA, and approves any applicable usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
+4. Require live `/health` and `/ready` checks. Expect `/ready` HTTP 200 when the selected provider, database, authentication, and rate-limit checks are verified. Accept HTTP 503 only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
+5. Separately perform a controlled authenticated inference request only after the owner provisions a valid credential for the selected provider, approves sending task content to that provider, and approves any applicable usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
 
 Do not declare full AI production readiness until provider model-catalog readiness and a separately controlled inference check succeed. Enable audit writes or task-run persistence only after their own schema, least-privilege credentials, backup, and read/write verification steps have been approved and completed.
