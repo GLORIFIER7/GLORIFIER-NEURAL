@@ -204,7 +204,7 @@ def test_cloudflare_smoke_verifies_automatic_main_deployment_and_manual_deployme
     )
     workflow = workflow_path.read_text(encoding="utf-8")
     smoke_job = re.search(
-        r"(?ms)^  smoke:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\\Z)",
+        r"(?ms)^  smoke:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
         workflow,
     )
     assert smoke_job is not None, "Cloudflare production smoke job must exist"
