@@ -176,41 +176,57 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
         number = pull.get("number")
         base = pull.get("base")
         head = pull.get("head")
-        if not isinstance(number, int) or isinstance(number, bool):
-            counts["error"] += 1
-            summary.append("An open PR response had an invalid PR number.")
-            continue
-        if not isinstance(base, dict) or not isinstance(head, dict):
-            counts["error"] += 1
-            summary.append(f"PR #{number}: malformed base/head metadata.")
-            continue
-        if base.get("ref") != default_branch:
+        if isinstance(base, dict) and base.get("ref") != default_branch:
             counts["skipped"] += 1
+            continue
+        if not isinstance(head, dict):
+            counts["error"] += 1
+            summary.append("An open PR response had malformed head metadata with no SHA.")
             continue
         head_sha = str(head.get("sha") or "")
         if not HEAD_SHA_PATTERN.fullmatch(head_sha):
             counts["error"] += 1
-            summary.append(f"PR #{number}: invalid head SHA; no success status was published.")
+            summary.append("An open PR response had an invalid head SHA.")
             continue
-        grouped_pulls.setdefault(head_sha, []).append(pull)
+        metadata_error = None
+        if not isinstance(number, int) or isinstance(number, bool):
+            metadata_error = "The PR number was malformed; its review evidence cannot be resolved."
+        elif not isinstance(base, dict):
+            metadata_error = "The PR base metadata was malformed; its target branch cannot be verified."
+        grouped_entry = {
+            "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
+            "html_url": pull.get("html_url"),
+        }
+        if metadata_error:
+            grouped_entry["_metadata_error"] = metadata_error
+        else:
+            grouped_entry["number"] = number
+        grouped_pulls.setdefault(head_sha, []).append(grouped_entry)
 
     for head_sha, shared_pulls in grouped_pulls.items():
         group_states: list[str] = []
         for pull in shared_pulls:
-            number = pull["number"]
-            try:
-                failures = _fetch_policy_evidence(repo, number, token, head_sha)
-                age_seconds = _commit_age_seconds(repo, token, head_sha)
-                state, description = derive_status(failures, age_seconds)
-                if state not in VALID_STATES:
-                    raise ValueError("The review evaluator returned an unsupported status.")
-            except Exception as exc:  # noqa: BLE001 - isolate malformed per-PR evidence
+            number = pull.get("number")
+            if pull.get("_metadata_error"):
                 state = "error"
-                description = (
-                    f"Review evidence could not be verified ({type(exc).__name__})."
-                )
+                description = str(pull["_metadata_error"])
+            else:
+                try:
+                    failures = _fetch_policy_evidence(repo, number, token, head_sha)
+                    age_seconds = _commit_age_seconds(repo, token, head_sha)
+                    state, description = derive_status(failures, age_seconds)
+                    if state not in VALID_STATES:
+                        raise ValueError("The review evaluator returned an unsupported status.")
+                except Exception as exc:  # noqa: BLE001 - isolate malformed per-PR evidence
+                    state = "error"
+                    description = (
+                        f"Review evidence could not be verified ({type(exc).__name__})."
+                    )
             group_states.append(state)
-            summary.append(f"PR #{number}: {state} — {description}")
+            if number is None:
+                summary.append(f"PR metadata for head {head_sha[:12]}: {state} — {description}")
+            else:
+                summary.append(f"PR #{number}: {state} — {description}")
 
         status, group_description = _aggregate_group_state(group_states)
         target_url = str(
