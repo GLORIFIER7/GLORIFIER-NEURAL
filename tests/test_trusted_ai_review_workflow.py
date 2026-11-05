@@ -18,12 +18,26 @@ def test_trusted_policy_runs_only_from_default_branch_events():
     assert "pull_request_target:" not in WORKFLOW
 
 
-def test_trusted_policy_writes_only_the_required_commit_status_permissions():
-    assert "pull-requests: read" in WORKFLOW
-    assert "statuses: write" in WORKFLOW
-    assert "contents: read" in WORKFLOW
-    assert "contents: write" not in WORKFLOW
-    assert not re.search(r"\$\{\{\s*secrets\s*(?:\.|\[)", WORKFLOW, re.IGNORECASE)
+def test_trusted_policy_has_exact_least_privilege_permissions():
+    top_level = re.search(
+        r"(?ms)^permissions:\\n((?:^  [a-z-]+: [a-z]+\\n)+)",
+        WORKFLOW,
+    )
+    job_level = re.search(
+        r"(?ms)^    permissions:\\n((?:^      [a-z-]+: [a-z]+\\n)+)",
+        WORKFLOW,
+    )
+    assert top_level
+    assert job_level
+    assert re.findall(r"(?m)^  ([a-z-]+): ([a-z]+)$", top_level.group(1)) == [
+        ("contents", "read")
+    ]
+    assert re.findall(r"(?m)^      ([a-z-]+): ([a-z]+)$", job_level.group(1)) == [
+        ("contents", "read"),
+        ("pull-requests", "read"),
+        ("statuses", "write"),
+    ]
+    assert not re.search(r"\\$\\{\\{\\s*secrets\\s*(?:\\.|\\[)", WORKFLOW, re.IGNORECASE)
 
 
 def test_trusted_policy_does_not_checkout_or_execute_pull_request_code():
