@@ -47,10 +47,10 @@ def test_deployment_smoke_accepts_explicit_safe_mode_without_claiming_readiness(
             "task_runs": "NOT CONFIGURED (OPTIONAL)",
         },
         "execution": {"inference_performed": False},
-        "message": "Provider inference is disabled by configuration.",
+        "message": "Provider readiness checks are disabled by configuration.",
     }
 
-    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_DISABLED"
+    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_READINESS_DISABLED"
 
 
 @pytest.mark.parametrize(
