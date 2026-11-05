@@ -52,6 +52,7 @@ def test_review_event_uses_the_documented_top_level_pull_request_payload():
     assert "github.event.review.pull_request" not in policy_job
     assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
     assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in policy_job
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
 
 
 def test_trusted_policy_module_has_a_preflight_before_execution():
