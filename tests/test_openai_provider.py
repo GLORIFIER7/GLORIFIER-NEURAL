@@ -189,6 +189,30 @@ def test_openai_async_provider_sanitizes_upstream_errors():
     assert "private upstream detail" not in str(exc_info.value)
 
 
+def test_openai_async_provider_sanitizes_response_body_failures():
+    class BrokenResponse:
+        status = 200
+        headers = {}
+
+        async def text(self):
+            raise RuntimeError("sensitive body parser and credential detail")
+
+    async def fake_fetch(*_args, **_kwargs):
+        return BrokenResponse()
+
+    adapter = OpenAIResponsesAdapter(
+        api_key="request-scoped-secret",
+        model="gpt-6-luna",
+        fetch_fn=fake_fetch,
+    )
+
+    with pytest.raises(RuntimeError, match="request is unavailable") as exc_info:
+        asyncio.run(adapter.ainfer("hello"))
+
+    assert "request-scoped-secret" not in str(exc_info.value)
+    assert "sensitive body parser" not in str(exc_info.value)
+
+
 def test_openai_async_provider_rejects_empty_or_malformed_model_response():
     class FakeResponse:
         status = 200
