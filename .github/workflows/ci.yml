@@ -64,13 +64,16 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-policy
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable action pin
         with:
           python-version: "3.12"
-      - name: Install the repository package for the policy runner
-        run: python -m pip install --only-binary=:all: --no-deps -e .
-      - name: Verify the policy runner module is importable
-        run: python -c "import app.ai_review_policy; print('AI review policy runner import verified')"
+      - name: Verify the trusted policy runner is importable
+        working-directory: trusted-policy
+        run: python -c "import app.ai_review_policy; print('Trusted AI review policy runner import verified')"
       - name: Wait for both AI reviewers and enforce their findings
         env:
           GH_TOKEN: ${{ github.token }}
@@ -79,4 +82,5 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           AI_REVIEW_WAIT_SECONDS: "900"
           AI_REVIEW_POLL_INTERVAL_SECONDS: "30"
+        working-directory: trusted-policy
         run: python -m app.ai_review_policy
