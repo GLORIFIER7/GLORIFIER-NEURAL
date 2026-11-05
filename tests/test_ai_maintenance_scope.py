@@ -220,11 +220,11 @@ def test_scope_validator_validates_both_rename_source_and_destination(
     assert "README.md" in result.stderr
 
 
-def test_workflow_uses_weekly_schedule_and_never_auto_merges():
+def test_workflow_uses_hourly_schedule_and_never_auto_merges():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'cron: "41 2 * * 1"' in workflow
-    assert "0 */4 * * *" not in workflow
+    assert 'cron: "0 * * * *"' in workflow
+    assert 'cron: "41 2 * * 1"' not in workflow
     assert "gh pr merge" not in workflow
     assert "--auto" not in workflow
 
@@ -233,7 +233,9 @@ def test_workflow_publication_is_after_0830_in_laos_timezone():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "TZ=Asia/Vientiane" in workflow
-    assert "0831" in workflow
+    assert "current_hhmm_decimal=$((10#$current_hhmm))" in workflow
+    assert "current_hhmm_decimal < 831" in workflow
+    assert '[[ "$current_hhmm" =~ ^[0-9]{4}$ ]]' in workflow
     publish_job = workflow[workflow.index("  publish:"):]
     assert "needs.codex.outputs.patch_ready == 'true'" in publish_job
 
