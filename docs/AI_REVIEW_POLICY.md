@@ -1,39 +1,47 @@
 # AI-only pull request review policy
 
-The **AI Review Policy** job in `.github/workflows/ci.yml` evaluates two independently configured AI reviewer identities against the exact current pull request head SHA. It runs on `pull_request` events and re-evaluates on `pull_request_review` submissions, edits, and dismissals. The evaluator module is checked out from the event's target-branch base SHA into an isolated path, so the PR's version of `app.ai_review_policy.py` is not executed. **This is defense in depth, not a fully independent merge gate:** for `pull_request` events, the workflow definition itself is evaluated from the PR merge ref. A PR can therefore alter the job YAML unless workflow files are protected separately or a default-branch-pinned required-workflow rule is available and enabled.
+GLORIFIER-NEURAL uses two independently configured AI reviewers:
 
 - Amazon Q Developer: `amazon-q-developer[bot]`
 - CodeAnt AI: `codeant-ai[bot]`
 
-Human reviews never substitute for either bot, and no human approval count is required.
+Human reviews do not substitute for either bot. The policy itself requires no human approval count.
 
 ## Review outcome
 
 - `APPROVED` and `COMMENTED` are accepted as completed formal reviews because the configured bots have submitted `COMMENTED` reviews in this repository.
-- Missing or stale formal reviews fail. The latest current-head review must be `APPROVED` or `COMMENTED`; `CHANGES_REQUESTED` and dismissed/unknown states fail.
-- An explicit `:stop_sign:` annotation from either AI reviewer blocks while its review thread is unresolved and current to the head commit. GitHub's formal-review and inline-thread login forms are normalized to the same configured bot identity.
+- Both formal reviews must be attached to the exact current pull-request head SHA. Missing, stale, dismissed, unknown, or `CHANGES_REQUESTED` reviews do not pass.
+- An explicit `:stop_sign:` annotation from either AI reviewer blocks while its review thread is unresolved and current to the head commit.
 - Resolved and outdated threads do not block. Ambiguous prose such as "critical" or "high severity" does not independently block.
-- GitHub API errors and malformed review-thread responses fail closed. The policy uses a fixed GitHub.com API endpoint.
-- The policy job is part of CI, waits up to 15 minutes for both reviewers, and has a 30-minute job timeout. Normal CI test jobs do not run for `pull_request_review` events. The policy checkout uses `persist-credentials: false`; the evaluator receives only the job-scoped read-only `GITHUB_TOKEN` needed to inspect reviews and review threads.
-- CI concurrency groups include the event name so a review-event recheck cannot cancel the in-progress pull-request test run.
+- GitHub API errors, invalid head SHAs, malformed review-thread responses, and unverified timestamps fail closed.
 
-## Review-event check association
+## Trusted status publisher
 
-GitHub documents `pull_request_review` runs with `GITHUB_REF=refs/pull/PULL_REQUEST_NUMBER/merge` and `GITHUB_SHA` equal to the last merge commit on that PR merge branch. The observed review-event run `41995802337` for PR #61 produced an `AI Review Policy` check visible on its PR head SHA `e3a95d9950a9194528beb2eea6c571218ebd1053`; the check did not land on the default-branch commit. This evidence disproves a default-branch-only association claim for that run. It does not make the workflow trusted: GitHub also documents that `pull_request_review` workflow files are taken from the pull request merge commit.
+`.github/workflows/ai-review-policy-trusted.yml` is the trusted status publisher.
 
-## Workflow-definition trust boundary
+- It runs only from the default branch: on pushes to `main` and on a five-minute schedule.
+- It reads open pull requests and their canonical head SHAs from the GitHub API, then reads formal reviews and review threads.
+- It never checks out or executes pull-request code. It checks out the trusted `main` revision with persisted credentials disabled.
+- Its only write permission is `statuses: write`; it has `pull-requests: read` and `contents: read`. No repository secret is required.
+- It writes the `AI Review Policy (trusted)` commit status to the exact PR head SHA returned by GitHub, with the PR URL as the status target.
+- Missing reviews remain `pending` for at most 15 minutes from the head commit timestamp, then become `failure`. Explicit blockers or invalid review states fail immediately. Only two acceptable current-head reviews with no current unresolved AI blocker produce `success`. API/evidence errors produce `error`.
+- The five-minute schedule is a polling interval, not a real-time guarantee; GitHub may delay scheduled workflow execution under load. A new head SHA receives a new status and cannot inherit a previous head's success.
 
-The current repository ruleset requires the `AI Review Policy` status context, but a normal `pull_request` workflow check is not cryptographically pinned to a protected workflow definition. Do not treat this check as tamper-proof against a PR that changes `.github/workflows/ci.yml` or adds another workflow that emits the same context. The repository owner must enable an independently pinned required workflow where the account supports it, or protect workflow-file changes using an appropriate repository-level control. The connected GitHub integration used for this remediation can inspect rulesets but cannot modify their administrative configuration.
+The older `AI Review Policy` job in `.github/workflows/ci.yml` remains a defense-in-depth check. Its `pull_request` and `pull_request_review` workflow definitions are evaluated from the PR merge ref, so it must not be treated as an independently trusted merge gate. GitHub documents that `pull_request_target` runs from the base branch, but this repository intentionally does not rely on that event because GitHub has announced a future restriction for it on public repositories.
 
-## Required ruleset configuration
+## Required ruleset configuration — NOT YET ENFORCED
 
-In repository ruleset **GLORIFIER-NEURAL** (ID `26492703`), preserve deletion protection, non-fast-forward protection, CodeQL code scanning, and code-quality rules. Keep required human approvals at **0** and bypass actors empty.
+As audited on 2026-11-05, repository ruleset **GLORIFIER-NEURAL** (ID `26492703`) is active and targets `~DEFAULT_BRANCH`, but its `required_status_checks` list is empty. Its pull-request rule requires zero human approvals, and code-owner review is disabled. The ruleset's `bypass_actors` list is not empty: it contains a DeployKey and repository-role actors 2, 4, and 5, each with `bypass_mode: always`. The API reports `current_user_can_bypass: always`.
 
-Target only `~DEFAULT_BRANCH`. Add **AI Review Policy** as a required status check from GitHub Actions with strict/latest-commit checking enabled. Do not add human or team reviewer requirements.
+Therefore, the trusted status publisher is **not a mandatory merge gate until the ruleset is updated**. Keep the existing deletion, non-fast-forward, signed-commit, and code-scanning protections. Apply these exact settings to ruleset 26492703:
 
-A successful Actions run is not a mandatory merge gate until the ruleset explicitly lists the exact **AI Review Policy** check context. Re-read the ruleset after editing to verify that it is active, targets the default branch, the check is required, human approvals remain 0, and bypass actors remain empty.
-## Rechecking after a review-thread resolution
+1. Clear every bypass actor: `bypass_actors: []`. Do not retain deploy-key, maintain, write, or admin bypass entries.
+2. Add the exact required status context `AI Review Policy (trusted)`, with GitHub Actions selected as the expected source. The observed GitHub Actions app ID is `15368`.
+3. Enable strict required-status-check enforcement so the status must be present for the current head and the branch must be up to date.
+4. Keep required human approvals at `0`; do not add human/team reviewer requirements.
 
-Resolving an inline review thread does not itself create a `pull_request_review` event. GitHub documents the `pull_request_review_thread` webhook event, but it is not a supported GitHub Actions workflow trigger. After resolving a current-head blocker, re-run the failed **AI Review Policy** job from the associated Actions run, or cause a new formal review submission/edit/dismissal event. Before relying on the result, confirm that the run's `PR_HEAD_SHA` equals the pull request's current `head.sha`; a run against an earlier commit is stale and does not satisfy the policy.
+After saving, read the ruleset again and verify: enforcement is `active`; target is `~DEFAULT_BRANCH`; `bypass_actors` is empty; `current_user_can_bypass` is not `always`; `AI Review Policy (trusted)` is the required status from GitHub Actions; and human approvals remain zero. Until all of those conditions are confirmed, report the policy as **implemented in code but not enforced by the ruleset**.
 
-This is an operational recheck path, not an automatic thread-resolution trigger. Do not use `workflow_dispatch` for the required PR check: GitHub documents that checks created by workflow-dispatch jobs do not appear in the pull request checks section or satisfy required PR status checks.
+## Existing CI review event behavior
+
+The CI workflow continues to run its AI policy job on PR events as defense in depth. Review-thread resolution alone does not emit a formal review event, so the trusted scheduled publisher re-reads current state on its next run. Do not rely on a review-event check from the old PR-controlled workflow as a substitute for the trusted status context.
