@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
 
@@ -141,7 +142,9 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     branch_step = publish_section[branch:pull_request]
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
     assert "gh pr create --draft --base main" in publish_section
-    assert "gh workflow run ci.yml" not in publish_section
+    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
 
@@ -194,7 +197,9 @@ def test_generated_pr_is_draft_and_never_auto_merges():
     assert "- name: Open draft pull request" in publish_section
     assert "gh pr create --draft --base main" in publish_section
     assert "gh pr create --base main" not in publish_section
-    assert "gh workflow run ci.yml" not in publish_section
+    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
 
@@ -249,6 +254,9 @@ def test_publish_job_receives_only_a_validated_patch_artifact():
     assert "id: upload_patch" in workflow
     assert "artifact-id" in workflow
     assert "outputs.patch_ready" in workflow
+    assert "tar -czf" in workflow
+    assert "neural-maintenance-snapshot.tar.gz" in workflow
+    assert "rsync -rlptD --delete" in workflow
     assert 'git diff --cached --binary --no-ext-diff > "$patch_file"' in codex_section
     assert "path: ${{ runner.temp }}/ai-maintenance.patch" in codex_section
     assert "path: ${{ runner.temp }}/ai-maintenance-artifact" in publish_section
@@ -319,4 +327,29 @@ def test_workflow_publish_job_has_minimal_write_permissions():
 
     assert "contents: write" in publish_section
     assert "pull-requests: write" in publish_section
-    assert "actions: write" not in publish_section
+    assert "actions: write" in publish_section
+
+
+def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_runs_review_policy():
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "pull_request_number:" in workflow
+    assert "pull_request_head_sha:" in workflow
+    assert "inputs.pull_request_head_sha" in workflow
+    assert "inputs.pull_request_number" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "EXPECTED_PR_HEAD_SHA" in workflow
+    assert "current PR head SHA does not match the dispatched commit" in workflow
+
+
+def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+
+    assert "actions: write" in publish_section
+    assert "gh pr create --draft --base main" in publish_section
+    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "pull_request_head_sha" in publish_section
+    assert "GH_REPO: ${{ github.repository }}" in publish_section
+    assert "gh pr merge" not in publish_section
+    assert "--auto" not in publish_section
