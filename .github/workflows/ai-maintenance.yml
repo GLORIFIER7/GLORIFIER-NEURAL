@@ -226,7 +226,8 @@ jobs:
           git -c core.hooksPath=/dev/null checkout -b "$BRANCH"
           git -c core.hooksPath=/dev/null commit -m "ai: governed NEURAL maintenance"
           gh auth setup-git
-          git -c core.hooksPath=/dev/null push --set-upstream origin "$BRANCH"
+          git config core.hooksPath /dev/null
+          git push --set-upstream origin "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Open draft pull request
