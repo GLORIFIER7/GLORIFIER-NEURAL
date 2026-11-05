@@ -44,7 +44,9 @@ def parse_commit_timestamp(value: str) -> datetime:
     """Parse GitHub's ISO-8601 commit timestamp and require timezone awareness."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("GitHub commit timestamp is missing.")
-    normalized = value.strip().replace("Z", "+00:00")
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("GitHub commit timestamp must include a timezone.")
@@ -114,8 +116,10 @@ def _append_summary(lines: list[str]) -> None:
 
 def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
     """Evaluate every open PR targeting the default branch and publish statuses."""
-    if not REPO_PATTERN.fullmatch(repo or "") or not token:
-        raise ValueError("A valid GITHUB_REPOSITORY and scoped token are required.")
+    if not REPO_PATTERN.fullmatch(repo or ""):
+        raise ValueError("A valid GITHUB_REPOSITORY slug is required.")
+    if not token:
+        raise ValueError("A scoped GH_TOKEN is required.")
 
     repository = _request_json(f"{GITHUB_API_ROOT}/repos/{repo}", token)
     if not isinstance(repository, dict) or not repository.get("default_branch"):
@@ -158,14 +162,22 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
             continue
 
         # Replace any earlier success with pending before refreshing evidence.
-        _publish_status(
-            repo,
-            token,
-            head_sha,
-            "pending",
-            "Trusted AI review policy is refreshing current-head evidence.",
-            target_url,
-        )
+        # A failed write for one PR must not stop evaluation of other PRs.
+        try:
+            _publish_status(
+                repo,
+                token,
+                head_sha,
+                "pending",
+                "Trusted AI review policy is refreshing current-head evidence.",
+                target_url,
+            )
+        except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+            counts["error"] += 1
+            summary.append(
+                f"PR #{number}: pending status publish failed ({type(exc).__name__})."
+            )
+            continue
         try:
             failures = _fetch_policy_evidence(repo, number, token, head_sha)
             age_seconds = _commit_age_seconds(repo, token, head_sha)
@@ -178,8 +190,20 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
             summary.append(
                 f"PR #{number}: evidence lookup failed ({type(exc).__name__})."
             )
-        _publish_status(repo, token, head_sha, state, description, target_url)
-        counts[state] += 1
+        if state not in {"pending", "success", "failure", "error"}:
+            state = "error"
+            description = "Trusted AI review policy produced an unsupported status."
+
+        try:
+            _publish_status(repo, token, head_sha, state, description, target_url)
+        except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+            counts["error"] += 1
+            summary.append(
+                f"PR #{number}: final status publish failed ({type(exc).__name__})."
+            )
+            continue
+
+        counts[state] = counts.get(state, 0) + 1
         summary.append(f"PR #{number}: {state} — {description}")
 
     _append_summary(summary or ["No open pull requests target the default branch."])
