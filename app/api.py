@@ -86,7 +86,12 @@ def _request_orchestrator(request: Request):
 
 
 async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
-    """Apply Cloudflare's native credential-keyed limit in Workers; fail closed on errors."""
+    """Apply Cloudflare's credential-keyed limit; fail closed on errors.
+
+    Raises:
+        HTTPException: 429 when the task limit is exceeded; 503 when the
+            Cloudflare rate-limit binding is missing, invalid, or unavailable.
+    """
     credential_key = hmac.new(
         api_token.encode("utf-8"), b"glorifier-rate-limit-v1", hashlib.sha256
     ).hexdigest()
@@ -142,7 +147,12 @@ async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -
 
 
 async def _enforce_readiness_rate_limit(request: Request) -> None:
-    """Bound public Worker readiness probes before they contact an external provider or Neon."""
+    """Bound public Worker readiness probes before contacting external services.
+
+    Raises:
+        HTTPException: 429 when the readiness limit is exceeded; 503 when
+            the Cloudflare rate-limit binding or client identity is unavailable.
+    """
     if request.scope.get("env") is None:
         return
     binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
@@ -404,7 +414,11 @@ async def readiness(request: Request) -> JSONResponse:
 
 
 def _load_task_persistence(worker_env, worker_request: bool):
-    """Resolve opt-in audit and metadata repositories for this execution."""
+    """Resolve opt-in audit and metadata repositories for this execution.
+
+    Raises:
+        HTTPException: 503 when configured persistence cannot be initialized.
+    """
     try:
         audit_sink = (
             SupabaseRestAuditSink.from_environment(worker_env)
@@ -430,7 +444,11 @@ async def _write_initial_task_audit(
     task_request: TaskRequest,
     worker_request: bool,
 ) -> None:
-    """Fail closed before processing when the required initial audit write fails."""
+    """Fail closed before processing when the required initial audit write fails.
+
+    Raises:
+        HTTPException: 503 when required initial audit persistence fails.
+    """
     if audit_sink is None:
         return
     try:
@@ -550,7 +568,13 @@ async def run_task(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> TaskResponse:
-    """Process a governed task only after authentication, rate and audit checks."""
+    """Process a governed task only after authentication, rate and audit checks.
+
+    Raises:
+        HTTPException: 401 for an invalid bearer token; 429 when the task
+            rate limit is exceeded; 503 when authentication configuration or
+            required persistence/rate-limit infrastructure is unavailable.
+    """
     api_token = _request_environment_value(request, "GLORIFIER_API_TOKEN")
     if not api_token:
         raise HTTPException(
