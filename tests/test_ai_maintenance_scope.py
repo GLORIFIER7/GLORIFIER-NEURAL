@@ -179,19 +179,17 @@ def test_copy_back_does_not_preserve_hard_links():
     assert 'rsync -a --delete' not in workflow
 
 
-def test_generated_pr_is_ready_for_review_and_auto_merge_follows_ci():
+def test_generated_pr_is_ready_for_review_and_never_auto_merges():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     publish_section = workflow[workflow.index("  publish:"):]
     create = publish_section.index("- name: Open ready-for-review pull request")
     ci = publish_section.index("- name: Run CI against the generated PR branch")
-    merge = publish_section.index("- name: Request auto-merge")
 
-    assert create < ci < merge
+    assert create < ci
     assert "gh pr create --base main" in publish_section
     assert "gh pr create --draft" not in publish_section
-    assert "gh pr merge --auto --squash" in publish_section
-    merge_step = publish_section[merge:]
-    assert "steps.dispatch.outcome == 'success'" in merge_step
+    assert "gh pr merge" not in publish_section
+    assert "--auto" not in publish_section
 
 
 def test_scope_validator_validates_both_rename_source_and_destination(
