@@ -254,9 +254,9 @@ def test_publish_job_receives_only_a_validated_patch_artifact():
     assert "id: upload_patch" in workflow
     assert "artifact-id" in workflow
     assert "outputs.patch_ready" in workflow
-    assert "tar -czf" in workflow
-    assert "neural-maintenance-snapshot.tar.gz" in workflow
-    assert "rsync -rlptD --delete" in workflow
+    assert 'git diff --cached --binary --no-ext-diff > "$patch_file"' in workflow
+    assert 'git apply --index --binary "$PATCH_FILE"' in workflow
+    assert "ai-maintenance-patch-${{ github.run_id }}" in workflow
     assert 'git diff --cached --binary --no-ext-diff > "$patch_file"' in codex_section
     assert "path: ${{ runner.temp }}/ai-maintenance.patch" in codex_section
     assert "path: ${{ runner.temp }}/ai-maintenance-artifact" in publish_section
