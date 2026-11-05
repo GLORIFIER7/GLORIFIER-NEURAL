@@ -1,10 +1,19 @@
 from app.providers import NvidiaNimAdapter
 from app.runtime import build_orchestrator_from_environment
 from app.schemas import TaskRequest
+from typing import ClassVar
 
 
 def clear_runtime_environment(monkeypatch):
-    for name in ("GLORIFIER_ENABLE_INFERENCE", "GLORIFIER_PROVIDER", "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS", "NVIDIA_NIM_API_KEY", "NVIDIA_NIM_MODEL"):
+    for name in (
+        "GLORIFIER_ENABLE_INFERENCE",
+        "GLORIFIER_PROVIDER",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
+        "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NIM_MODEL",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -141,3 +150,87 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
     assert calls[1]["headers"]["Authorization"] == "Bearer request-scoped-secret"
     assert calls[1]["body"]["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
     assert calls[1]["redirect"] == "manual"
+
+
+def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkeypatch):
+    import asyncio
+    import json
+
+    clear_runtime_environment(monkeypatch)
+
+    calls = []
+
+    class FakeResponse:
+        status = 200
+        headers: ClassVar[dict[str, str]] = {}
+
+        async def text(self):
+            return json.dumps({"id": "gpt-6-luna", "object": "model"})
+
+    async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
+        assert method == "GET", "inference-disabled readiness must not submit task prompts"
+        assert body is None, "readiness must not send a request body"
+        calls.append({
+            "url": url,
+            "method": method,
+            "authorization": headers.get("Authorization"),
+            "body": body,
+            "redirect": redirect,
+        })
+        return FakeResponse()
+
+    worker_env = {
+        "GLORIFIER_ENABLE_INFERENCE": "false",
+        "GLORIFIER_PROVIDER": "openai",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
+        "OPENAI_API_KEY": "request-scoped-test-key",
+        "OPENAI_MODEL": "gpt-6-luna",
+    }
+    orchestrator = build_orchestrator_from_environment(
+        worker_env,
+        fetch_fn=fake_fetch,
+    )
+
+    async def run():
+        readiness = await orchestrator.acheck_readiness()
+        task = await orchestrator.arun(
+            TaskRequest(task="must not be sent", require_approval=False)
+        )
+        return readiness, task
+
+    readiness, task = asyncio.run(run())
+
+    assert readiness[0] == "VERIFIED"
+    assert task.status == "NOT VERIFIED"
+    assert task.evidence == ["inference:disabled", "execution:none"]
+    assert len(calls) == 1
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"] == "https://api.openai.com/v1/models/gpt-6-luna"
+    assert calls[0]["authorization"] == "Bearer request-scoped-test-key"
+    assert calls[0]["body"] is None
+    assert calls[0]["redirect"] == "manual"
+
+
+def test_provider_readiness_requires_external_egress_consent_when_inference_is_disabled(
+    monkeypatch,
+):
+    import asyncio
+
+    from app.runtime import build_orchestrator_from_environment
+
+    clear_runtime_environment(monkeypatch)
+    worker_env = {
+        "GLORIFIER_ENABLE_INFERENCE": "false",
+        "GLORIFIER_PROVIDER": "openai",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "false",
+        "OPENAI_API_KEY": "request-scoped-test-key",
+        "OPENAI_MODEL": "gpt-6-luna",
+    }
+    orchestrator = build_orchestrator_from_environment(worker_env)
+
+    status, message = asyncio.run(orchestrator.acheck_readiness())
+
+    assert status == "NOT VERIFIED"
+    assert "disabled" in message
+    assert orchestrator._providers.get("openai") is None
+    assert orchestrator._allow_inference is False

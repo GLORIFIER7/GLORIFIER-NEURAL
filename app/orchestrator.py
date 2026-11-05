@@ -50,10 +50,16 @@ class Orchestrator:
         providers: ProviderRegistry | None = None,
         *,
         allow_inference: bool = False,
+        allow_provider_readiness: bool | None = None,
         provider_name: str | None = None,
     ) -> None:
         self._providers = providers or ProviderRegistry()
         self._allow_inference = allow_inference
+        self._allow_provider_readiness = (
+            allow_inference
+            if allow_provider_readiness is None
+            else allow_provider_readiness
+        )
         self._provider_name = provider_name
         self._readiness_lock = threading.Lock()
         self._readiness_cache: tuple[float, tuple[str, str]] | None = None
@@ -75,8 +81,8 @@ class Orchestrator:
 
     def _probe_readiness(self) -> tuple[str, str]:
         """Probe the selected provider without sending task content or running inference."""
-        if not self._allow_inference:
-            return "NOT VERIFIED", "Provider inference is disabled by configuration."
+        if not self._allow_provider_readiness:
+            return "NOT VERIFIED", "Provider readiness checks are disabled by configuration."
         if not self._provider_name:
             return "NOT VERIFIED", "No provider was explicitly selected."
         provider = self._providers.get(self._provider_name)
@@ -94,8 +100,8 @@ class Orchestrator:
 
     async def acheck_readiness(self) -> tuple[str, str]:
         """Probe a provider through its async transport without performing inference."""
-        if not self._allow_inference:
-            return "NOT VERIFIED", "Provider inference is disabled by configuration."
+        if not self._allow_provider_readiness:
+            return "NOT VERIFIED", "Provider readiness checks are disabled by configuration."
         if not self._provider_name:
             return "NOT VERIFIED", "No provider was explicitly selected."
         provider = self._providers.get(self._provider_name)

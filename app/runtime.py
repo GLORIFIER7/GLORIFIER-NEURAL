@@ -1,6 +1,6 @@
 """Explicit runtime configuration with request-scoped Cloudflare binding support.
 
-No provider is enabled unless inference and external egress are explicitly enabled.
+Task inference requires explicit inference enablement and external-egress consent. Read-only provider readiness can be separately authorized by external-egress consent alone.
 OpenAI is the default provider selection. Cloudflare secrets are read from the request environment,
 never copied into process-global environment state.
 """
@@ -55,7 +55,7 @@ def build_orchestrator_from_environment(
         ).strip().casefold() == "true"
     )
 
-    if enabled and external_egress_allowed and provider_name == NvidiaNimAdapter.name:
+    if external_egress_allowed and provider_name == NvidiaNimAdapter.name:
         api_key = _environment_value(environment, "NVIDIA_NIM_API_KEY")
         model = _environment_value(
             environment,
@@ -69,7 +69,7 @@ def build_orchestrator_from_environment(
                 fetch_fn=fetch_fn,
             )
         )
-    elif enabled and external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
+    elif external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
         registry.register(
             OpenAIResponsesAdapter(
                 api_key=_environment_value(environment, "OPENAI_API_KEY"),
@@ -85,5 +85,6 @@ def build_orchestrator_from_environment(
     return Orchestrator(
         providers=registry,
         allow_inference=enabled,
+        allow_provider_readiness=external_egress_allowed,
         provider_name=provider_name,
     )
