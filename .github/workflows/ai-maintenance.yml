@@ -107,11 +107,9 @@ jobs:
           fi
           agent_dir="$RUNNER_TEMP/neural-agent-workspace"
           rm -rf "$agent_dir"
-          mkdir -p "$agent_dir/scripts" "$agent_dir/.github/workflows"
+          mkdir -p "$agent_dir"
           cp -a app tests "$agent_dir/"
           cp pyproject.toml uv.lock "$agent_dir/"
-          cp scripts/validate_ai_maintenance_scope.py "$agent_dir/scripts/"
-          cp .github/workflows/ai-maintenance.yml "$agent_dir/.github/workflows/"
           if find "$agent_dir/app" "$agent_dir/tests" -type l -print -quit | grep -q .; then
             echo "::error::Symlink found in the isolated agent workspace."
             exit 1
@@ -119,12 +117,13 @@ jobs:
           git -C "$agent_dir" init -q
           git -C "$agent_dir" config user.name "NEURAL isolated maintenance workspace"
           git -C "$agent_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$agent_dir" add -- app tests pyproject.toml uv.lock scripts .github
+          git -C "$agent_dir" add -- app tests pyproject.toml uv.lock
           git -C "$agent_dir" commit -m "sandbox: trusted maintenance baseline"
           echo "path=$agent_dir" >> "$GITHUB_OUTPUT"
 
       - name: Install locked dependencies in isolated agent workspace
         if: ${{ steps.agent_workspace.outputs.path != '' }}
+        working-directory: ${{ steps.agent_workspace.outputs.path }}
         env:
           UV_PROJECT_ENVIRONMENT: ${{ steps.agent_workspace.outputs.path }}/.venv
         run: uv sync --locked --extra dev --no-install-project
