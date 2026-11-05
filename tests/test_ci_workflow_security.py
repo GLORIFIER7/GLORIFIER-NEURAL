@@ -62,3 +62,10 @@ def test_trusted_policy_module_has_a_preflight_before_execution():
     assert preflight >= 0, "The trusted module import preflight must be present"
     assert runner > preflight, "The import preflight must run before the policy module"
     assert 'run: python -c "import app.ai_review_policy;' in policy_job
+
+def test_policy_job_uses_canonical_pull_request_head_from_github_api():
+    policy_job = _job_section("ai-review-policy")
+    assert "id: current-pr" in policy_job
+    assert "pulls/{pull_number}" in policy_job
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "github.event.pull_request.head.sha" not in policy_job
