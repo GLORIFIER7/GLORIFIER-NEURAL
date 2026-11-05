@@ -23,7 +23,7 @@ def test_trusted_policy_writes_only_the_required_commit_status_permissions():
     assert "statuses: write" in WORKFLOW
     assert "contents: read" in WORKFLOW
     assert "contents: write" not in WORKFLOW
-    assert not re.search(r"\\$\\{\\{\\s*secrets\\s*(?:\\.|\\[)", WORKFLOW, re.IGNORECASE)
+    assert not re.search(r"\$\{\{\s*secrets\s*(?:\.|\[)", WORKFLOW, re.IGNORECASE)
 
 
 def test_trusted_policy_does_not_checkout_or_execute_pull_request_code():
