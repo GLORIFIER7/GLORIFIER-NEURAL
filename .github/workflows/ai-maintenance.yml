@@ -238,7 +238,6 @@ jobs:
     needs: codex
     if: ${{ needs.codex.outputs.patch_ready == 'true' }}
     permissions:
-      actions: write
       contents: write
       pull-requests: write
     runs-on: ubuntu-latest
@@ -295,18 +294,12 @@ jobs:
           git push --set-upstream origin "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
-      - name: Open ready-for-review pull request
+      - name: Open draft pull request
         if: ${{ steps.branch.outputs.branch != '' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create --base main --head "${{ steps.branch.outputs.branch }}" \
+          gh pr create --draft --base main --head "${{ steps.branch.outputs.branch }}" \
             --title "AI Maintenance: NEURAL reliability proposal" \
-            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. AI review and CI checks are required before a human owner merges. This workflow never enables auto-merge."
-
-      - name: Run CI against the generated PR branch
-        if: ${{ steps.branch.outputs.branch != '' && needs.codex.outputs.patch_ready == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref "${{ steps.branch.outputs.branch }}"
+            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. The pull_request CI and AI review policy run after publication. This workflow never enables auto-merge."
 
