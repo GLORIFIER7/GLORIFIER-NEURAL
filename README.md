@@ -56,12 +56,10 @@ vendored package contains the API, Neon, and PyTorch adapter modules before
 starting the Pyodide runtime.
 
 The account's Workers subdomain is `glorifier`. The live Worker address is
-`https://glorifier-neural.glorifier.workers.dev`. The Cloudflare deployment API
-reported deployment `c236adbf-c5aa-4ecb-993e-73bcec871719` at
-`2026-11-05T03:58:11.161764Z`, with 100% of production traffic assigned to
-version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8` in the observed inventory.
-Deployment success is not itself a readiness result; see **Current deployed
-state** below.
+`https://glorifier-neural.glorifier.workers.dev`. An earlier Cloudflare deployment inventory at `2026-11-05T03:58:11Z` observed
+version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8`; that inventory has been
+superseded by the newer deployment recorded under **Current deployed state**
+below. Deployment success is not itself a readiness result.
 
 The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
 `env` binding. A secret binding with this name is present on the current production
@@ -78,8 +76,8 @@ The current production Worker settings, read back directly from Cloudflare on
 are present by name; secret values are never read from the binding inventory.
 The `NVIDIA_NIM_API_KEY` binding is also present for the optional NVIDIA adapter,
 but NVIDIA is not the selected production provider. External egress is enabled
-for the read-only provider readiness request; inference remains independently
-disabled. The latest successful production smoke (GitHub Actions run
+for the read-only provider readiness request. The production inference flag is
+now `true`, but the latest successful production smoke (GitHub Actions run
 [#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798),
 2026-11-05T07:30Z) reported HTTP 200 from `/health` and `/ready`, with provider,
 read-only database connectivity, authentication, and rate limiting `VERIFIED`.
