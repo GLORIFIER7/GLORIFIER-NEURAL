@@ -75,6 +75,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable action pin
         with:
           python-version: "3.12"
+      - name: Verify the trusted policy runner is importable
+        working-directory: trusted-policy
+        run: python -c "import app.ai_review_policy; print('Trusted AI review policy runner import verified')"
       - name: Wait for both AI reviewers and enforce their findings
         env:
           GH_TOKEN: ${{ github.token }}
