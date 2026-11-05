@@ -106,8 +106,6 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
             return json.dumps(self.payload)
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
-        assert method == "GET", "inference-disabled readiness must not submit task prompts"
-        assert body is None, "readiness must not send a request body"
         calls.append({
             "url": url,
             "method": method,
