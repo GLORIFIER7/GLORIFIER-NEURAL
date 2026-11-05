@@ -128,3 +128,60 @@ def test_publication_steps_require_successful_validation(step_name: str):
     section = workflow[start:] if end < 0 else workflow[start:end]
 
     assert "steps.validation.outcome == 'success'" in section
+
+
+def test_scope_validator_validates_both_rename_source_and_destination(
+    tmp_path: Path,
+):
+    """--no-renames exposes both the deleted source and the added destination
+    as independent changed paths.  A rename entirely outside app/ and tests/
+    must be rejected on both sides."""
+    repository = _repository(tmp_path)
+    # README.md (root-level, outside allowed roots) → .github/workflows/evil.yml
+    # git mv stages both a deletion of README.md and an addition of evil.yml;
+    # with --no-renames the validator sees both paths independently.
+    _git(repository, "mv", "README.md", ".github/workflows/evil.yml")
+
+    result = _validate(repository)
+
+    assert result.returncode != 0
+    # Destination must be rejected
+    assert ".github/workflows/evil.yml" in result.stderr
+    # Source (README.md at repository root) must also be rejected
+    assert "README.md" in result.stderr
+
+
+def test_workflow_uses_four_hour_schedule():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "0 */4 * * *" in workflow
+    assert "41 2 * * 1" not in workflow
+
+
+def test_workflow_cost_control_uses_single_variable():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "AI_MAINTENANCE_AUTORUN" in workflow
+    assert "authorize_pull_request" not in workflow
+
+
+def test_workflow_codex_job_has_read_only_permissions():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    codex_start = workflow.index("  codex:")
+    publish_start = workflow.index("  publish:")
+    codex_section = workflow[codex_start:publish_start]
+
+    assert "contents: read" in codex_section
+    assert "contents: write" not in codex_section
+    assert "pull-requests: write" not in codex_section
+    assert "actions: write" not in codex_section
+
+
+def test_workflow_publish_job_has_minimal_write_permissions():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_start = workflow.index("  publish:")
+    publish_section = workflow[publish_start:]
+
+    assert "contents: write" in publish_section
+    assert "pull-requests: write" in publish_section
+    assert "actions: write" in publish_section
