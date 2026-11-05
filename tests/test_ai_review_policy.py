@@ -1,4 +1,11 @@
-from app.ai_review_policy import evaluate_reviews
+import pytest
+
+import app.ai_review_policy as policy
+from app.ai_review_policy import (
+    _fetch_review_threads,
+    _fetch_reviews,
+    evaluate_reviews,
+)
 
 
 HEAD_SHA = "a" * 40
@@ -37,7 +44,8 @@ def thread(
                     "body": body,
                     "commit": {"oid": commit_id},
                 }
-            ]
+            ],
+            "pageInfo": {"hasNextPage": False},
         },
     }
 
@@ -150,3 +158,77 @@ def test_codeant_actor_alias_is_recognized_in_review_threads():
     failures = evaluate_reviews(complete_reviews(), threads, HEAD_SHA)
 
     assert any("codeant-ai[bot]" in failure for failure in failures)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("isResolved", None),
+        ("isResolved", "false"),
+        ("isOutdated", None),
+        ("isOutdated", 0),
+    ],
+)
+def test_incomplete_thread_state_fails_closed(field, value):
+    malformed = thread("amazon-q-developer[bot]", ":stop_sign: hidden blocker")
+    malformed[field] = value
+
+    with pytest.raises(TypeError):
+        evaluate_reviews(complete_reviews(), [malformed], HEAD_SHA)
+
+
+def test_missing_thread_state_cannot_turn_a_blocker_into_success():
+    malformed = thread("amazon-q-developer[bot]", ":stop_sign: hidden blocker")
+    del malformed["isResolved"]
+
+    with pytest.raises(TypeError):
+        evaluate_reviews(complete_reviews(), [malformed], HEAD_SHA)
+
+
+def test_malformed_comment_author_or_commit_fails_closed():
+    malformed = thread("amazon-q-developer[bot]", ":stop_sign: hidden blocker")
+    malformed["comments"]["nodes"][0]["author"] = None
+
+    with pytest.raises(TypeError):
+        evaluate_reviews(complete_reviews(), [malformed], HEAD_SHA)
+
+
+def test_fetch_reviews_rejects_non_dictionary_entries(monkeypatch):
+    monkeypatch.setattr(
+        policy,
+        "_request_json",
+        lambda *args: [complete_reviews()[0], None, complete_reviews()[1]],
+    )
+
+    with pytest.raises(TypeError, match="malformed pull request review"):
+        _fetch_reviews("example/repo", 7, "token")
+
+
+def test_fetch_reviews_rejects_incomplete_submitted_reviews(monkeypatch):
+    malformed = review("amazon-q-developer[bot]")
+    del malformed["commit_id"]
+    monkeypatch.setattr(policy, "_request_json", lambda *args: [malformed])
+
+    with pytest.raises(TypeError, match="incomplete submitted review"):
+        _fetch_reviews("example/repo", 7, "token")
+
+
+def test_fetch_review_threads_rejects_missing_resolution_boolean(monkeypatch):
+    malformed = thread("amazon-q-developer[bot]", ":stop_sign: blocker")
+    malformed["isResolved"] = None
+    response = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [malformed],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+        }
+    }
+    monkeypatch.setattr(policy, "_request_json", lambda *args: response)
+
+    with pytest.raises(TypeError, match="resolution state"):
+        _fetch_review_threads("example/repo", 7, "token")
