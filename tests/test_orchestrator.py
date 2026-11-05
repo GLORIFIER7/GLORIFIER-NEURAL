@@ -404,6 +404,6 @@ def test_read_only_provider_readiness_can_run_without_enabling_inference():
 
     assert status == "VERIFIED"
     assert "read-only" in message
-    assert provider.readiness_calls == 1
     assert task.status == "NOT VERIFIED"
     assert task.evidence == ["inference:disabled", "execution:none"]
+    assert provider.readiness_calls == 1, "task execution must not invoke readiness or inference"
