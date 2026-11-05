@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: trusted-ai-review-status-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish-trusted-policy-status:
     name: Trusted AI Review Status
