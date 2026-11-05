@@ -32,3 +32,8 @@ In repository ruleset **GLORIFIER-NEURAL** (ID `26492703`), preserve deletion pr
 Target only `~DEFAULT_BRANCH`. Add **AI Review Policy** as a required status check from GitHub Actions with strict/latest-commit checking enabled. Do not add human or team reviewer requirements.
 
 A successful Actions run is not a mandatory merge gate until the ruleset explicitly lists the exact **AI Review Policy** check context. Re-read the ruleset after editing to verify that it is active, targets the default branch, the check is required, human approvals remain 0, and bypass actors remain empty.
+## Rechecking after a review-thread resolution
+
+Resolving an inline review thread does not itself create a `pull_request_review` event. GitHub documents the `pull_request_review_thread` webhook event, but it is not a supported GitHub Actions workflow trigger. After resolving a current-head blocker, re-run the failed **AI Review Policy** job from the associated Actions run, or cause a new formal review submission/edit/dismissal event. Before relying on the result, confirm that the run's `PR_HEAD_SHA` equals the pull request's current `head.sha`; a run against an earlier commit is stale and does not satisfy the policy.
+
+This is an operational recheck path, not an automatic thread-resolution trigger. Do not use `workflow_dispatch` for the required PR check: GitHub documents that checks created by workflow-dispatch jobs do not appear in the pull request checks section or satisfy required PR status checks.
