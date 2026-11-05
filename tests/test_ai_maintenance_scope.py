@@ -142,7 +142,7 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     branch_step = publish_section[branch:pull_request]
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
     assert "gh pr create --draft --base main" in publish_section
-    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "gh workflow run ci.yml --ref "$PR_BRANCH"" in publish_section
     assert "--field pull_request_number" in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
@@ -197,7 +197,7 @@ def test_generated_pr_is_draft_and_never_auto_merges():
     assert "- name: Open draft pull request" in publish_section
     assert "gh pr create --draft --base main" in publish_section
     assert "gh pr create --base main" not in publish_section
-    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "gh workflow run ci.yml --ref "$PR_BRANCH"" in publish_section
     assert "--field pull_request_number" in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
@@ -348,7 +348,7 @@ def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
 
     assert "actions: write" in publish_section
     assert "gh pr create --draft --base main" in publish_section
-    assert "gh workflow run ci.yml --ref main" in publish_section
+    assert "gh workflow run ci.yml --ref "$PR_BRANCH"" in publish_section
     assert "pull_request_head_sha" in publish_section
     assert "GH_REPO: ${{ github.repository }}" in publish_section
     assert "gh pr merge" not in publish_section
