@@ -20,11 +20,11 @@ def test_trusted_policy_runs_only_from_default_branch_events():
 
 def test_trusted_policy_has_exact_least_privilege_permissions():
     top_level = re.search(
-        r"(?ms)^permissions:\\n((?:^  [a-z-]+: [a-z]+\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [a-z-]+: [a-z]+\n)+)",
         WORKFLOW,
     )
     job_level = re.search(
-        r"(?ms)^    permissions:\\n((?:^      [a-z-]+: [a-z]+\\n)+)",
+        r"(?ms)^    permissions:\n((?:^      [a-z-]+: [a-z]+\n)+)",
         WORKFLOW,
     )
     assert top_level
@@ -37,7 +37,7 @@ def test_trusted_policy_has_exact_least_privilege_permissions():
         ("pull-requests", "read"),
         ("statuses", "write"),
     ]
-    assert not re.search(r"\\$\\{\\{\\s*secrets\\s*(?:\\.|\\[)", WORKFLOW, re.IGNORECASE)
+    assert not re.search(r"\$\{\{\s*secrets\s*(?:\.|\[)", WORKFLOW, re.IGNORECASE)
 
 
 def test_trusted_policy_does_not_checkout_or_execute_pull_request_code():
