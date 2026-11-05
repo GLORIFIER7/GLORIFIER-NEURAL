@@ -1,4 +1,4 @@
-name: Trusted AI Review Status
+name: AI Review Status Diagnostics
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   publish-trusted-policy-status:
-    name: Trusted AI Review Status
+    name: AI Review Status Diagnostics
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
