@@ -50,3 +50,9 @@ def test_trusted_policy_does_not_checkout_or_execute_pull_request_code():
 def test_trusted_policy_sweeps_do_not_overlap():
     assert "group: trusted-ai-review-status-" in WORKFLOW
     assert "cancel-in-progress: false" in WORKFLOW
+
+
+def test_trusted_policy_rechecks_after_ci_completion():
+    assert 'workflows: ["CI"]' in WORKFLOW
+    assert "workflow_run:" in WORKFLOW
+    assert "types: [completed]" in WORKFLOW
