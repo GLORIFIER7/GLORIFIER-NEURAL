@@ -44,7 +44,7 @@ The account-wide `All Workers` Access application remains enabled and still prot
 
 These read-only operational routes bypass the account-wide Access gate so monitoring and the post-deploy smoke job can reach them. The task endpoint `POST /v1/tasks` is not included in the bypass; it remains behind account-wide Access and also requires `GLORIFIER_API_TOKEN`. Public `GET /ready` is protected by a separate Cloudflare-native per-client rate limiter and a 30-second cache for provider/database probes. Do not broaden this exception to all Worker paths or disable the existing `All Workers` policy.
 
-Live check on 2026-11-04: `GET /health` returned HTTP 200 and process status `VERIFIED`. The latest rerun of the production smoke job (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) returned HTTP 503 from `/ready` with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. The smoke job passed the strict provider-disabled safe-mode branch. This is deployed safe mode, not provider readiness.
+Historical safe-mode observation (2026-11-04; superseded by the current production observation below): `GET /health` returned HTTP 200 and process status `VERIFIED`. The production smoke job (run [#41792456546](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41792456546), 13:33:52Z) returned HTTP 503 from `/ready` with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, and `inference_performed=false`. That run passed the strict provider-disabled safe-mode branch. This records the earlier non-provider-ready state only; it is not the current production readiness result.
 
 ## Cloudflare variables and secrets
 
@@ -115,14 +115,14 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 `GET /ready` performs read-only/configuration checks. For Cloudflare Workers it requires:
 
-- Provider readiness verified against the selected NVIDIA model catalogue.
+- Provider readiness verified through the selected provider adapter's bounded, read-only model-access probe. For the current OpenAI selection, this is `GET /v1/models/{model}`; the NVIDIA NIM catalogue probe applies only when NVIDIA NIM is explicitly selected.
 - Neon connectivity verified through `NEON_READONLY`.
 - `GLORIFIER_API_TOKEN` configured.
 - The `GLORIFIER_RATE_LIMITER` and `GLORIFIER_READINESS_LIMITER` bindings present.
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either provider-ready HTTP 200 from `/ready`, or the strict provider-disabled safe-mode HTTP 503 response when the database, authentication, and rate-limit checks are verified and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest production smoke rerun met the strict provider-disabled safe-mode branch: database, authentication, and rate-limit checks were VERIFIED, with `inference_performed=false`. Retain HTTP 503 as the correct non-provider-ready status until provider readiness is configured and verified.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The current production observation on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
 
 ## Rate limiting
 
@@ -169,7 +169,7 @@ separate authorization and controlled verification.
 1. Make code changes on a branch and open a pull request. The active repository ruleset requires one approving review, CodeQL/code-scanning and code-quality constraints, and prohibits deletion and non-fast-forward updates.
 2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
 3. After an approved merge to `main`, verify the automatic Cloudflare Workers Builds production build and active deployment. The separate GitHub Actions path can be manually dispatched with `deploy=true` using the configured GitHub Environment credentials. Verify the deployment job and intended Worker version/traffic before announcing release.
-4. Require live `/health` and `/ready` checks. A 503 is acceptable only for the explicit provider-disabled safe-mode response when database, authentication, and rate-limit controls are verified and `inference_performed=false`; it is not evidence of provider readiness.
+4. Require live `/health` and `/ready` checks. Expect `/ready` HTTP 200 when the selected provider, database, authentication, and rate-limit checks are verified. Accept HTTP 503 only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
 5. Separately perform a controlled authenticated inference request only after the owner provisions a valid credential for the selected provider, approves sending task content to that provider, and approves any applicable usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
 
 Do not declare full AI production readiness until provider model-catalog readiness and a separately controlled inference check succeed. Enable audit writes or task-run persistence only after their own schema, least-privilege credentials, backup, and read/write verification steps have been approved and completed.
