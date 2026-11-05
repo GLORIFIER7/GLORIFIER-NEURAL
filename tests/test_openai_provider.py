@@ -190,12 +190,15 @@ def test_openai_async_provider_sanitizes_upstream_errors():
 
 
 def test_openai_async_provider_rejects_empty_or_malformed_model_response():
+    class FakeResponse:
+        status = 200
+        headers = {}
+
+        async def text(self):
+            return "not-json"
+
     async def fake_fetch(*_args, **_kwargs):
-        return type("Response", (), {
-            "status": 200,
-            "headers": {},
-            "text": lambda self: None,
-        })()
+        return FakeResponse()
 
     adapter = OpenAIResponsesAdapter(
         api_key="test-key",
