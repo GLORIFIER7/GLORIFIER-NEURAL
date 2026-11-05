@@ -16,7 +16,7 @@ from urllib.parse import quote
 GITHUB_API_ROOT = "https://api.github.com"
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HEAD_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
-STATUS_CONTEXT = "AI Review Policy (trusted)"
+STATUS_CONTEXT = "AI Review Policy (diagnostic)"
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 900
 VALID_STATES = {"pending", "success", "failure", "error"}
 
