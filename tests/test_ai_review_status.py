@@ -229,3 +229,39 @@ def test_main_fails_when_any_status_cannot_be_published(monkeypatch):
     )
 
     assert publisher.main() == 1
+
+
+def test_malformed_pull_metadata_is_counted_and_other_prs_are_still_checked(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+    malformed_and_valid = [
+        {
+            "number": 1,
+            "base": [],
+            "head": {"sha": "a" * 40},
+            "html_url": "https://github.com/example/repo/pull/1",
+        },
+        _two_open_pull_requests()[1],
+    ]
+
+    def request_json(url, token, payload=None):
+        if url == "https://api.github.com/repos/example/repo":
+            return {"default_branch": "main"}
+        if "/pulls?" in url:
+            return malformed_and_valid
+        raise AssertionError(f"Unexpected API request: {url}")
+
+    published = []
+    monkeypatch.setattr(publisher, "_request_json", request_json)
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(
+            (sha, state)
+        ),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["error"] == 1
+    assert counts["success"] == 1
+    assert published == [("b" * 40, "success")]
