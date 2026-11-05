@@ -47,10 +47,10 @@ def test_deployment_smoke_accepts_explicit_safe_mode_without_claiming_readiness(
             "task_runs": "NOT CONFIGURED (OPTIONAL)",
         },
         "execution": {"inference_performed": False},
-        "message": "Provider inference is disabled by configuration.",
+        "message": "Provider readiness checks are disabled by configuration.",
     }
 
-    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_DISABLED"
+    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_READINESS_DISABLED"
 
 
 @pytest.mark.parametrize(
@@ -181,3 +181,21 @@ def test_smoke_main_reports_non_object_endpoint_payload_without_traceback(
     assert output.startswith("::error::")
     assert "JSON objects" in output
     assert "Traceback" not in output
+
+
+def test_deployment_smoke_accepts_current_provider_readiness_disabled_safe_mode():
+    payload = {
+        "status": "NOT READY",
+        "checks": {
+            "providers": "NOT VERIFIED",
+            "database": "VERIFIED",
+            "authentication": "VERIFIED",
+            "rate_limit": "VERIFIED",
+            "audit": "NOT CONFIGURED (OPTIONAL)",
+            "task_runs": "NOT CONFIGURED (OPTIONAL)",
+        },
+        "execution": {"inference_performed": False},
+        "message": "Provider readiness checks are disabled by configuration.",
+    }
+
+    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_READINESS_DISABLED"

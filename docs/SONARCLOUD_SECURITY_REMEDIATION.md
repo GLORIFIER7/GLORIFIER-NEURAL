@@ -1,34 +1,34 @@
 # SonarCloud Security Gate Remediation
 
-## Current evidence
+## Current evidence — 2026-11-05
 
 Repository: `GLORIFIER7/GLORIFIER-NEURAL`  
-Observed main commit: `02f700069782c67ee2711828c0e0b7a8f6561173`
+Observed main commit: `98e5b2772f327d9e8c3c70ba5f47fb4fec1ad069`
 
-- GitHub Actions CI completed successfully on the observed main commit, including Python 3.11 and 3.12 jobs, lint, tests, dependency audit, and a Docker build that does not publish an image.
-- CodeQL analysis job completed successfully on the observed main commit.
-- The CodeQL workflow currently sets `upload: false`; a successful analysis job therefore must not be represented as proof that results were uploaded to GitHub code scanning.
-- The disposable PostgreSQL migration workflow passed on commit `9b920c718d966c06ddb3fdaf76840e90b2a0b45a`; a run on the current main commit still needs confirmation.
-- GitHub reported branch protection disabled for `main` at the time of inspection.
-- SonarCloud main-branch Security Rating C remains unresolved. The exact vulnerability rule, file path, and line could not be independently retrieved from the available project view. Do not infer a security finding from maintainability messages.
+- GitHub Actions CI completed successfully on this main commit: Python 3.11 and 3.12 test jobs passed.
+- CodeQL completed successfully on this main commit. The repository is public; the workflow detected public visibility, set `upload: true`, and its log confirms: `Successfully uploaded results`. This supersedes the older observation below that described SARIF upload as disabled.
+- The active repository ruleset `GLORIFIER-NEURAL` applies to all branches. It blocks deletion and non-fast-forward updates, enforces code-scanning and code-quality rules, and requires one approving pull-request review.
+- SonarCloud Code Analysis on the observed main commit and current PR #46 still completes as `cancelled`, with the check output `The last analysis has failed`. The connected session does not expose the SonarCloud diagnostic or an authenticated project issue inventory. Treat SonarCloud as unresolved; do not infer a vulnerability, rule, source location, or severity from the failed check alone.
+- The disposable PostgreSQL migration workflow passed historically on commit `9b920c718d966c06ddb3fdaf76840e90b2a0b45a`. That historical result is not proof of a migration run on the observed main commit.
+- The prior main-branch Security Rating C observation remains historical until an authenticated current SonarCloud project view confirms its present status. Distinguish vulnerabilities from security hotspots and maintainability findings.
 
 ## Required remediation sequence
 
-1. In the authenticated SonarCloud project, open **Issues** and filter to open/confirmed security vulnerabilities on `main`. Record the rule key, issue type/severity, file, line, and remediation guidance. If the rating is instead affected by security hotspots, review those separately; hotspots and vulnerabilities are different issue types.
-2. Reproduce the finding against the current main source and fix the underlying code. Do not suppress, mark safe, or mark false-positive without a documented, evidence-based review.
-3. Add a regression test for the vulnerability and run the existing CI, dependency audit, Docker build, and CodeQL analysis.
-4. Verify SonarCloud analysis of the PR and confirm the new-code security gate. After merge, verify the main-branch dashboard independently.
-5. Review repository settings and configure branch protection/required checks only after confirming the intended required-check names and that the repository owner approves the policy.
-6. Re-run the disposable PostgreSQL migration workflow against the candidate commit. Production database changes remain out of scope for this PR.
+1. Restore authorized SonarQube Cloud organization/project access and working analysis authorization. Confirm the correct project key, organization, and analysis token permissions in the repository's configured CI environment; never print or expose token values.
+2. In the authenticated SonarCloud project, inspect open/confirmed security vulnerabilities on `main`. Record each rule key, issue type/severity, file, line, and remediation guidance. Review security hotspots separately.
+3. Reproduce each confirmed finding against current source, fix its root cause, and add a regression test. Do not suppress, mark safe, or mark false-positive without a documented, evidence-based review.
+4. Verify a successful SonarCloud analysis and quality-gate result on the PR, then verify the main-branch dashboard independently after an approved merge.
+5. Keep the active repository ruleset intact. Obtain the required independent approval; do not bypass review or downgrade code-scanning/code-quality enforcement to make a check green.
+6. Re-run the disposable PostgreSQL migration workflow against the candidate commit. Production database changes remain out of scope unless separately authorized.
 
 ## Acceptance criteria
 
-- The exact SonarCloud security issue is identified with a rule key and source location.
-- The code change addresses the root cause, with a regression test.
-- CI, CodeQL, dependency audit, container build, and applicable database migration tests pass on the candidate commit.
-- SonarCloud's security gate is green for the PR and then confirmed on main after merge.
-- No security gate is bypassed and no production database, deployment, secret, or paid-service setting is changed without explicit approval.
+- SonarCloud analysis succeeds for the candidate PR and the main branch.
+- Every current SonarCloud security issue is identified with a rule key and source location, and each confirmed vulnerability is addressed with a regression test.
+- CI, CodeQL result upload, dependency audit, container build, and applicable database migration tests pass on the candidate commit.
+- The required independent review is recorded and the active repository ruleset remains enforced.
+- No security gate is bypassed and no production database, deployment, secret, or paid-service setting is changed without explicit authorization.
 
 ## Scope note
 
-This document records verified status and a safe remediation process; it does **not** claim that the unknown SonarCloud vulnerability has been fixed. The code-level fix must be made once the authenticated issue details are available.
+This document records verified status and a safe remediation process; it does **not** claim that an unknown SonarCloud vulnerability has been fixed. The underlying SonarCloud issue cannot be responsibly diagnosed or repaired until authorized project access exposes the exact finding and source context.
