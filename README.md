@@ -40,7 +40,7 @@ pytest
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only model-access check against the explicitly configured provider; OpenAI uses `GET https://api.openai.com/v1/models/{model}`, while NVIDIA NIM queries its model catalogue. These checks do not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. Without inference opt-in and configured provider credentials, `/ready` remains HTTP 503.
+Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only model-access check against the explicitly configured provider; OpenAI uses `GET https://api.openai.com/v1/models/{model}`, while NVIDIA NIM queries its model catalogue. These checks do not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. Provider readiness is independent of inference: `/ready` can return HTTP 200 when the selected provider's read-only model-access probe and other required checks pass even while `GLORIFIER_ENABLE_INFERENCE=false`. Without a configured, accessible provider, provider readiness remains `NOT VERIFIED` and `/ready` returns HTTP 503.
 
 ## Cloudflare deployment
 
