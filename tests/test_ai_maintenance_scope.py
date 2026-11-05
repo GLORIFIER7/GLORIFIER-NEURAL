@@ -290,7 +290,7 @@ def test_validated_git_patch_artifact_preserves_deleted_tracked_files(tmp_path: 
         capture_output=True,
         text=True,
     ).stdout
-    assert "D\\tapp/service.py" in status
+    assert status.startswith("D") and "app/service.py" in status
 
 
 def test_workflow_cost_control_uses_single_variable():
