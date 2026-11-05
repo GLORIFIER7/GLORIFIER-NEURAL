@@ -142,7 +142,7 @@ async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -
 
 
 async def _enforce_readiness_rate_limit(request: Request) -> None:
-    """Bound public Worker readiness probes before they contact NVIDIA or Neon."""
+    """Bound public Worker readiness probes before they contact an external provider or Neon."""
     if request.scope.get("env") is None:
         return
     binding = _request_worker_binding(request, "GLORIFIER_READINESS_LIMITER")
@@ -190,6 +190,7 @@ def _worker_readiness_cache_key(request: Request) -> tuple[str, ...]:
         "GLORIFIER_ENABLE_INFERENCE",
         "GLORIFIER_PROVIDER",
         "NVIDIA_NIM_MODEL",
+        "OPENAI_MODEL",
         "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
         "GLORIFIER_NEON_CONNECTIVITY_ENABLED",
     )
@@ -197,6 +198,7 @@ def _worker_readiness_cache_key(request: Request) -> tuple[str, ...]:
     return (
         *values,
         "nvidia-key-present" if _request_environment_value(request, "NVIDIA_NIM_API_KEY") else "nvidia-key-absent",
+        "openai-key-present" if _request_environment_value(request, "OPENAI_API_KEY") else "openai-key-absent",
         "neon-readonly-bound" if _request_worker_binding(request, "NEON_READONLY") is not None else "neon-readonly-unbound",
     )
 

@@ -9,8 +9,9 @@ A governed, provider-neutral AI orchestration API built with Python and FastAPI,
 - Task request/response schemas with input limits, including a bounded action-class field.
 - Enforces a 64 KiB request-body limit against both the declared `Content-Length` and streamed ASGI body chunks; keep a matching limit at the reverse proxy as defense in depth.
 - Deny-by-default policy for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
-- Explicit provider adapter interface; no provider is registered by default.
-- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), wired only when `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are explicitly set.
+- Explicit provider adapter interface; OpenAI is the default provider selection, but no provider is registered unless inference and external egress are explicitly enabled.
+- OpenAI Responses API adapter (`OPENAI_API_KEY`, optional `OPENAI_MODEL`, default `gpt-6-luna`), registered only when `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai` (or unset), and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are set.
+- Optional NVIDIA NIM chat-completions adapter (`NVIDIA_NIM_API_KEY`, optional `NVIDIA_NIM_MODEL`), registered only when inference, NVIDIA provider selection, and external-egress consent are explicitly set.
 - Constant-time comparison for bearer-token validation and fail-closed behavior when the API token is absent.
 - Validated UUID-shaped `X-Correlation-ID` propagation: a valid caller-supplied value is echoed unchanged in `X-Correlation-ID` and stored as `details.correlation_id` on audit events. Invalid values are replaced with a server-generated UUID. Every response also carries a unique server-generated `X-Request-ID`, which is used as the audit-event `request_id`.
 - Optional PyTorch availability check.
@@ -39,7 +40,7 @@ pytest
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only check against the explicitly configured provider; for NVIDIA NIM it queries `GET https://integrate.api.nvidia.com/v1/models` and requires the selected model ID to be present. This does not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. With no provider configured, `/ready` remains HTTP 503.
+Open `http://127.0.0.1:8000/docs`. The `/health` endpoint reports process status separately from external dependencies. `/ready` performs a bounded read-only model-access check against the explicitly configured provider; OpenAI uses `GET https://api.openai.com/v1/models/{model}`, while NVIDIA NIM queries its model catalogue. These checks do not submit a prompt or execute inference. The optional Neon `SELECT 1` probe is reported separately and blocks readiness only when explicitly enabled but failing. Without inference opt-in and configured provider credentials, `/ready` remains HTTP 503.
 
 ## Cloudflare deployment
 
@@ -102,7 +103,7 @@ Do not expose the service publicly without TLS, monitoring, secret rotation, and
 
 ## Explicit inference configuration
 
-Inference remains disabled by default. To opt in to NVIDIA NIM, set `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, and `NVIDIA_NIM_API_KEY` in the deployment secret manager. The egress flag is a separate privacy control: the task text is sent to NVIDIA NIM when inference runs, so enable it only for data approved for external processing. Optionally set `NVIDIA_NIM_MODEL`; the default is `nvidia/nemotron-3.5-super-vl-120b-a12b`. Restart the service after changing environment variables. The API still applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check.
+Inference remains disabled by default. OpenAI is the default provider selection. To prepare GPT, store `OPENAI_API_KEY` as a Cloudflare Worker secret and optionally set `OPENAI_MODEL` (default `gpt-6-luna`). A controlled OpenAI readiness check additionally requires `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai` (or unset), and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`; the readiness probe performs only `GET /v1/models/{model}` and sends no prompt. Actual task inference requires the same explicit opt-ins and sends task text to the OpenAI Responses API, so enable egress only for data approved for external processing. Alternatively, NVIDIA NIM can be selected with `GLORIFIER_PROVIDER=nvidia_nim` and its own secret/model settings. The API applies action policy first, and requests requiring human approval do not reach the provider. Never put keys in requests, source files, logs, or chat. Unit tests mock provider calls and do not make live network requests. Live inference is **NOT VERIFIED** until an operator performs a controlled staging check. ChatGPT subscriptions and API billing are separate; configuring an API key can incur separate API charges.
 
 ## Current deployed state — observed 2026-11-05 (UTC+07:00)
 
@@ -138,8 +139,9 @@ A PostgreSQL-compatible audit schema starter is in `db/supabase/migrations/0001_
 
 ## Explicit limitations
 
-- NVIDIA NIM is wired through explicit runtime configuration only. Unless `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=nvidia_nim`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` are all set, requests do not perform inference. A server-side API key is also required; live inference remains NOT VERIFIED until a controlled staging check succeeds.
-- NVIDIA NIM readiness uses a bounded, authenticated `GET /v1/models` request and verifies the configured model ID is available. This proves model-catalog reachability only, not inference quality, latency, capacity, SLA, or factual correctness. Actual inference remains a separate controlled staging check. The NVIDIA key is used only server-side and readiness never sends task content.
+- OpenAI is the default provider selection, with `gpt-6-luna` as the configurable default model. It is only registered when inference, provider-egress consent, and the provider configuration path are explicitly enabled; the secret stays server-side.
+- OpenAI readiness uses a bounded, authenticated `GET /v1/models/{model}` request and verifies that the API key can access the selected model. This proves model-access reachability only, not inference quality, latency, capacity, SLA, or factual correctness. Actual inference remains a separate controlled staging check; readiness never sends task content.
+- NVIDIA NIM remains an optional explicitly selected alternative. Its readiness uses a bounded, authenticated model-catalogue request. Live provider inference remains NOT VERIFIED until a controlled staging check succeeds.
 - Neon has an optional, read-only connectivity probe. Install `.[neon]` for local execution (the Docker image includes this extra), set `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true` and `NEON_DATABASE_URL` in the deployment secret manager to make `/ready` run a bounded `SELECT 1` using certificate-verified TLS (`sslmode=verify-full`, system trust roots) and required channel binding. This does not create schemas or write data. The probe is disabled by default and is not proof of application-data readiness. The audit database integration remains optional and must be separately verified before it is treated as operational.
 - No Supabase migration, Neon application-data schema, dual-write, or reconciliation is implemented.
 - Supabase audit writes are opt-in through `GLORIFIER_AUDIT_ENABLED=true`, `SUPABASE_URL`, and server-side `SUPABASE_SERVICE_ROLE_KEY`; the API writes a sanitized pre-execution event before processing and a result event afterward. Audit persistence has not been verified against a live project.

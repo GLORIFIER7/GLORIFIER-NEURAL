@@ -1,7 +1,7 @@
 """Explicit runtime configuration with request-scoped Cloudflare binding support.
 
-No provider is enabled unless inference, external egress, and provider selection
-are explicitly configured. Cloudflare secrets are read from the request environment,
+No provider is enabled unless inference and external egress are explicitly enabled.
+OpenAI is the default provider selection. Cloudflare secrets are read from the request environment,
 never copied into process-global environment state.
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Any
 
 from app.orchestrator import Orchestrator
 from app.providers import NvidiaNimAdapter
+from app.providers.openai import OpenAIResponsesAdapter
 from app.providers.registry import ProviderRegistry
 
 
@@ -37,14 +38,14 @@ def build_orchestrator_from_environment(
 
     Pass the Cloudflare request environment from ASGI scope in Workers. The Fetch
     function can be injected in tests; production uses workers.fetch inside
-    the request handler when the NVIDIA adapter executes.
+    the request handler when the selected provider adapter executes.
     """
     enabled = _environment_value(
         environment, "GLORIFIER_ENABLE_INFERENCE"
     ).strip().casefold() == "true"
     provider_name = (
         _environment_value(environment, "GLORIFIER_PROVIDER").strip().casefold()
-        or None
+        or OpenAIResponsesAdapter.name
     )
     registry = ProviderRegistry()
 
@@ -65,6 +66,18 @@ def build_orchestrator_from_environment(
             NvidiaNimAdapter(
                 api_key=api_key,
                 model=model,
+                fetch_fn=fetch_fn,
+            )
+        )
+    elif enabled and external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
+        registry.register(
+            OpenAIResponsesAdapter(
+                api_key=_environment_value(environment, "OPENAI_API_KEY"),
+                model=_environment_value(
+                    environment,
+                    "OPENAI_MODEL",
+                    OpenAIResponsesAdapter.default_model,
+                ),
                 fetch_fn=fetch_fn,
             )
         )
