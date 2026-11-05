@@ -52,6 +52,22 @@ def test_timestamp_without_timezone_is_rejected():
         parse_commit_timestamp("2026-11-05T10:00:00")
 
 
+def test_future_dated_commit_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        publisher,
+        "_request_json",
+        lambda *args: {
+            "commit": {
+                "committer": {"date": "2099-01-01T00:00:00Z"},
+                "author": {"date": "2099-01-01T00:00:00Z"},
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="future"):
+        publisher._commit_age_seconds("example/repo", "token", "a" * 40)
+
+
 def _two_open_pull_requests():
     return [
         {
@@ -83,38 +99,13 @@ def _stub_sweep_inputs(monkeypatch):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
 
-def test_preliminary_pending_status_failure_does_not_abort_remaining_pull_requests(
-    monkeypatch,
-):
+def test_status_publish_failure_for_one_head_does_not_abort_other_heads(monkeypatch):
     _stub_sweep_inputs(monkeypatch)
-    calls = []
+    published = []
 
     def publish(repo, token, sha, state, description, target_url):
-        calls.append((sha, state))
-        if sha == "a" * 40 and state == "pending":
-            raise RuntimeError("temporary status write failure")
-
-    monkeypatch.setattr(publisher, "_publish_status", publish)
-
-    counts = publisher.sweep_open_pull_requests("example/repo", "token")
-
-    assert counts == {
-        "success": 1,
-        "pending": 0,
-        "failure": 0,
-        "error": 1,
-        "skipped": 0,
-    }
-    assert ("b" * 40, "success") in calls
-
-
-def test_final_status_write_failure_does_not_abort_remaining_pull_requests(monkeypatch):
-    _stub_sweep_inputs(monkeypatch)
-    calls = []
-
-    def publish(repo, token, sha, state, description, target_url):
-        calls.append((sha, state))
-        if sha == "a" * 40 and state == "success":
+        published.append((sha, state))
+        if sha == "a" * 40:
             raise RuntimeError("temporary status write failure")
 
     monkeypatch.setattr(publisher, "_publish_status", publish)
@@ -123,7 +114,75 @@ def test_final_status_write_failure_does_not_abort_remaining_pull_requests(monke
 
     assert counts["error"] == 1
     assert counts["success"] == 1
-    assert ("b" * 40, "success") in calls
+    assert ("b" * 40, "success") in published
+
+
+def test_malformed_review_evidence_becomes_error_and_sweep_continues(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+
+    def evidence(repo, number, token, sha):
+        if number == 1:
+            raise AttributeError("malformed nested GraphQL response")
+        return []
+
+    published = []
+    monkeypatch.setattr(publisher, "_fetch_policy_evidence", evidence)
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(
+            (sha, state)
+        ),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["error"] == 1
+    assert counts["success"] == 1
+    assert ("a" * 40, "error") in published
+    assert ("b" * 40, "success") in published
+
+
+def test_prs_sharing_a_head_sha_publish_one_conservative_status(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+    pulls = _two_open_pull_requests()
+    pulls[1]["head"]["sha"] = "a" * 40
+
+    def request_json(url, token, payload=None):
+        if url == "https://api.github.com/repos/example/repo":
+            return {"default_branch": "main"}
+        if "/pulls?" in url:
+            return pulls
+        raise AssertionError(f"Unexpected API request: {url}")
+
+    monkeypatch.setattr(publisher, "_request_json", request_json)
+    monkeypatch.setattr(
+        publisher,
+        "_fetch_policy_evidence",
+        lambda repo, number, token, sha: (
+            []
+            if number == 1
+            else [
+                "Missing a formal AI review from codeant-ai[bot] on the current head commit."
+            ]
+        ),
+    )
+    monkeypatch.setattr(publisher, "_commit_age_seconds", lambda *args: 900)
+    published = []
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(
+            (sha, state, description)
+        ),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["failure"] == 1
+    assert counts["success"] == 0
+    assert len(published) == 1
+    assert published[0][0:2] == ("a" * 40, "failure")
 
 
 def test_unsupported_derived_state_fails_closed_without_aborting_sweep(monkeypatch):
@@ -152,3 +211,21 @@ def test_repository_and_token_validation_have_distinct_errors():
         publisher.sweep_open_pull_requests("invalid repo", "token")
     with pytest.raises(ValueError, match="GH_TOKEN"):
         publisher.sweep_open_pull_requests("example/repo", "")
+
+
+def test_main_fails_when_any_status_cannot_be_published(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/repo")
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setattr(
+        publisher,
+        "sweep_open_pull_requests",
+        lambda repo, token: {
+            "success": 0,
+            "pending": 0,
+            "failure": 0,
+            "error": 1,
+            "skipped": 0,
+        },
+    )
+
+    assert publisher.main() == 1
