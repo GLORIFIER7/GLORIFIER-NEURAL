@@ -100,7 +100,7 @@ def _publish_status(
     head_sha: str,
     state: str,
     description: str,
-    target_url: str,
+    target_url: str | None,
 ) -> None:
     if state not in VALID_STATES:
         raise ValueError(f"Unsupported GitHub commit status: {state}")
@@ -108,8 +108,9 @@ def _publish_status(
         "state": state,
         "context": STATUS_CONTEXT,
         "description": description[:140],
-        "target_url": target_url,
     }
+    if target_url:
+        payload["target_url"] = target_url
     _request_json(
         f"{GITHUB_API_ROOT}/repos/{repo}/statuses/{head_sha}", token, payload
     )
@@ -242,10 +243,28 @@ def sweep_open_pull_requests(repo: str, token: str) -> dict[str, int]:
                 summary.append(f"PR #{number}: {state} — {description}")
 
         status, group_description = _aggregate_group_state(group_states)
-        target_url = str(
-            shared_pulls[0].get("html_url")
-            or f"https://github.com/{repo}/pull/{shared_pulls[0]['number']}"
+        target_url = next(
+            (
+                url
+                for pull in shared_pulls
+                if isinstance((url := pull.get("html_url")), str)
+                and url.startswith(f"https://github.com/{repo}/pull/")
+            ),
+            None,
         )
+        if target_url is None:
+            first_number = next(
+                (
+                    number
+                    for pull in shared_pulls
+                    if isinstance((number := pull.get("number")), int)
+                    and not isinstance(number, bool)
+                    and number > 0
+                ),
+                None,
+            )
+            if first_number is not None:
+                target_url = f"https://github.com/{repo}/pull/{first_number}"
         if len(shared_pulls) > 1:
             group_description = (
                 f"{len(shared_pulls)} PRs share this head SHA; {group_description}"
