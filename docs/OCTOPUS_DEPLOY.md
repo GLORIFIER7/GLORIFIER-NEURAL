@@ -5,7 +5,7 @@ GitHub Actions remains the CI authority. The GLORIFIER-owned Octopus Cloud insta
 ## Workflow behavior
 
 The Octopus Deploy workflow:
-- Starts automatically only after **CI** succeeds for a push to main.
+- Starts automatically only after the **CI** workflow completes successfully for a push to main, including its image-publishing job.
 - Can also be started manually from main.
 - Does not deploy pull requests, failed CI runs, scheduled CI runs, or manual CI runs.
 - Creates a release, deploys it to one configured Octopus environment, and waits for the deployment task to finish.
@@ -39,10 +39,11 @@ The workflow pins the official Octopus GitHub Actions to commit SHAs. It does no
 
 ## Deployment boundary
 
-This workflow creates and deploys an Octopus release; it does **not** build or publish a NEURAL container image. The existing NEURAL CI builds a local Docker image for verification but does not publish an image or package to an Octopus feed. The Octopus Project's deployment process must already know how to obtain and deploy the intended artifact.
+NEURAL CI builds the container image in its test matrix. On a push to `main`, the Python 3.12 test job saves that exact image as a short-lived Actions artifact. The `publish-container` job waits for the complete test matrix to pass, downloads that image (without rebuilding it), and publishes it to GitHub Container Registry as `ghcr.io/glorifier7/glorifier-neural:0.0.0-<full-commit-sha>` using the job-scoped `GITHUB_TOKEN` permission `packages: write`.
 
-Before enabling `OCTOPUS_ENABLED`, the Octopus feed must contain the package built for the source commit with version `0.0.0-<full-commit-sha>`. Both release paths pass `package_version: 0.0.0-${SOURCE_COMMIT}` so Octopus cannot silently select the feed's latest package. This workflow does not build or publish that package; release creation must fail if the exact version is absent. Preflight also compares the triggering source SHA with the current `main` head and refuses stale CI completions before OIDC authentication.
- A successful CI run or created release is not proof that the live application is healthy. The workflow waits for the Octopus deployment task result; a separate post-deployment application health check is still required.
+Configure an Octopus Docker/OCI feed for `ghcr.io/glorifier7/glorifier-neural` and a project deployment package step that consumes that image. Both Octopus release paths pass `package_version: 0.0.0-${SOURCE_COMMIT}` so Octopus selects the exact image produced by the passing CI run, never `latest`. If the GHCR package is private, store a read-only GitHub Packages credential in the Octopus feed settings, not in GitHub Actions or the repository. Release creation should fail if the exact image tag is absent. Preflight also compares the triggering source SHA with the current `main` head and refuses stale CI completions before OIDC authentication.
+
+A successful CI run or created release is not proof that the live application is healthy. The workflow waits for the Octopus deployment task result; a separate post-deployment application health check is still required.
 
 Verify the first deployment against a non-production target before setting OCTOPUS_ENVIRONMENT to production. Confirm artifact provenance, rollback behavior, target permissions, and operational costs before enabling recurring production deployments.
 
