@@ -52,10 +52,16 @@ def test_octopus_concurrency_is_job_scoped_and_normalized():
     )
     deploy = re.search(r"(?ms)^  deploy:\n(.*)\Z", WORKFLOW)
     assert deploy, "Octopus deploy job must exist"
-    assert (
-        "    concurrency:\n      group: octopus-deploy-${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref_name }}"
-        in deploy.group(0)
-    ), "Manual and automatic main deployments must share a job-level concurrency group"
+    expected_group = (
+        "    concurrency:\n"
+        "      group: octopus-deploy-${{ github.workflow }}-"
+        "${{ github.event.workflow_run.head_branch || github.ref_name }}"
+    )
+    assert expected_group in deploy.group(0), (
+        "Manual and automatic main deployments must share a job-level concurrency group"
+    )
+
+
 def test_octopus_preflight_rejects_stale_source_commit_before_oidc():
     preflight = re.search(
         r"(?ms)^      - name: Validate Octopus deployment configuration\n"
