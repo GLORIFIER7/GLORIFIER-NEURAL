@@ -405,3 +405,24 @@ def test_trusted_status_schedule_leaves_headroom_for_the_ten_minute_job():
 
     assert 'cron: "*/15 * * * *"' in workflow
     assert "timeout-minutes: 10" in workflow
+
+
+def test_malformed_commit_timestamp_has_a_descriptive_iso8601_error():
+    with pytest.raises(ValueError, match="valid ISO 8601"):
+        parse_commit_timestamp("not-a-date")
+
+
+def test_missing_committer_and_author_dates_have_an_attributable_error(monkeypatch):
+    monkeypatch.setattr(
+        publisher,
+        "_request_json",
+        lambda *args: {
+            "commit": {
+                "committer": {},
+                "author": {},
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="committer.date and author.date"):
+        publisher._commit_age_seconds("example/repo", "token", "a" * 40)
