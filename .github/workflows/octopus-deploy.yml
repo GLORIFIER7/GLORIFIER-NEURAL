@@ -199,6 +199,17 @@ jobs:
           )
           PY
 
+      - name: Validate Octopus service account secret is configured
+        shell: bash
+        env:
+          OCTOPUS_SERVICE_ACCOUNT_ID: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "${OCTOPUS_SERVICE_ACCOUNT_ID:-}" || {
+            echo "::error::Missing environment secret OCTOPUS_SERVICE_ACCOUNT_ID."
+            exit 1
+          }
+
       - name: Authenticate to Octopus Deploy using GitHub OIDC
         uses: OctopusDeploy/login@b6156b03b4b892ffc8e9c57d098e9fe1866dcdb3 # v2
         with:
