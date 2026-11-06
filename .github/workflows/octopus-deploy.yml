@@ -27,7 +27,6 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_sha == github.sha &&
        vars.OCTOPUS_ENABLED == 'true' &&
        vars.OCTOPUS_SPACE != '' &&
        vars.OCTOPUS_PROJECT != '' &&
@@ -44,7 +43,6 @@ jobs:
       OCTOPUS_SPACE: ${{ vars.OCTOPUS_SPACE }}
       OCTOPUS_PROJECT: ${{ vars.OCTOPUS_PROJECT }}
       OCTOPUS_ENVIRONMENT: ${{ vars.OCTOPUS_ENVIRONMENT }}
-      OCTOPUS_SERVICE_ACCOUNT_ID: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}
       OCTOPUS_CONFIG_AS_CODE: ${{ vars.OCTOPUS_CONFIG_AS_CODE }}
       SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -54,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for name in OCTOPUS_SPACE OCTOPUS_PROJECT OCTOPUS_ENVIRONMENT OCTOPUS_SERVICE_ACCOUNT_ID; do
+          for name in OCTOPUS_SPACE OCTOPUS_PROJECT OCTOPUS_ENVIRONMENT; do
             value="${!name:-}"
             if [[ -z "$value" ]]; then
               echo "::error::Missing required Octopus configuration: $name. Configure the Octopus integration before deploying."
@@ -156,7 +154,26 @@ jobs:
                   "The selected NEURAL CI run does not match a successful push to main for this exact source commit."
               )
 
-          jobs = get_json(root + "/jobs?per_page=100").get("jobs", [])
+          jobs = []
+page = 1
+while True:
+    page_query = urlencode({"per_page": 100, "page": page})
+    page_payload = get_json(root + "/jobs?" + page_query)
+    page_jobs = page_payload.get("jobs")
+    total_count = page_payload.get("total_count")
+    if (
+        not isinstance(page_jobs, list)
+        or not isinstance(total_count, int)
+        or isinstance(total_count, bool)
+        or total_count < 0
+    ):
+        raise SystemExit("GitHub returned malformed job pagination metadata; deployment blocked.")
+    jobs.extend(page_jobs)
+    if len(jobs) >= total_count:
+        break
+    if not page_jobs:
+        raise SystemExit("GitHub job pagination ended before total_count; deployment blocked.")
+    page += 1
           publishers = [
               job for job in jobs
               if job.get("name") == "Publish the CI-tested NEURAL image to GHCR"
@@ -186,7 +203,7 @@ jobs:
         uses: OctopusDeploy/login@b6156b03b4b892ffc8e9c57d098e9fe1866dcdb3 # v2
         with:
           server: ${{ env.OCTOPUS_URL }}
-          service_account_id: ${{ env.OCTOPUS_SERVICE_ACCOUNT_ID }}
+          service_account_id: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}
 
       - name: Create release for a database-backed Octopus project
         id: create_release_db
@@ -235,7 +252,7 @@ jobs:
           task_id="$(jq -er '
             if type == "array" and length == 1 and
               (.[0].serverTaskId |
-                type == "string" and length > 0 and (explode | all(.[]; . >= 32 and . != 127)))
+                type == "string" and test("^ServerTasks-[0-9]+$"))
             then .[0].serverTaskId
             else error("expected exactly one safe Octopus deployment task ID")
             end
