@@ -95,7 +95,7 @@ def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_comm
 
 
 def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
-    publish_start = CI_WORKFLOW.index("  publish-container:\\n")
+    publish_start = CI_WORKFLOW.index("  publish-container:")
     job = CI_WORKFLOW[publish_start:]
 
     assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in job
