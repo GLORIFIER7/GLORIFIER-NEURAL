@@ -78,6 +78,7 @@ jobs:
           fi
 
       - name: Verify the CI-tested NEURAL image publication succeeded for this commit
+        id: verify-image
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -186,16 +187,29 @@ jobs:
           steps = publishers[0].get("steps", [])
           publish_steps = [
               step for step in steps
-              if step.get("name") == "Publish the immutable commit-versioned image"
+              if step.get("name") == "Publish the CI-tested run-attempt image"
           ]
           if len(publish_steps) != 1 or publish_steps[0].get("conclusion") != "success":
               raise SystemExit(
                   "The exact commit-versioned NEURAL image was not published successfully; deployment blocked."
               )
 
+          run_attempt = upstream.get("run_attempt")
+          if (
+              not isinstance(run_attempt, int)
+              or isinstance(run_attempt, bool)
+              or run_attempt < 1
+          ):
+              raise SystemExit(
+                  "The selected CI run has an invalid run attempt; deployment blocked."
+              )
+          package_version = f"0.0.0-{source_commit}-{run_id}-{run_attempt}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("package_version=" + package_version + chr(10))
+
           print(
-              f"Verified the CI-tested NEURAL image for source commit {source_commit} "
-              f"from workflow run {run_id}."
+              f"Verified the CI-tested NEURAL image {package_version} "
+              f"for source commit {source_commit} from workflow run {run_id}."
           )
           PY
 
@@ -223,7 +237,7 @@ jobs:
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           project: ${{ env.OCTOPUS_PROJECT }}
-          package_version: 0.0.0-${{ env.SOURCE_COMMIT }}
+          package_version: ${{ steps.verify-image.outputs.package_version }}
           release_notes: |
             Automated release from ${{ github.repository }}.
             Source commit: ${{ env.SOURCE_COMMIT }}
@@ -236,7 +250,7 @@ jobs:
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           project: ${{ env.OCTOPUS_PROJECT }}
-          package_version: 0.0.0-${{ env.SOURCE_COMMIT }}
+          package_version: ${{ steps.verify-image.outputs.package_version }}
           git_ref: refs/heads/main
           git_commit: ${{ env.SOURCE_COMMIT }}
           release_notes: |
