@@ -5,7 +5,6 @@ and the orchestrator separately authorizes inference and external egress.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -14,6 +13,12 @@ import urllib.parse
 import urllib.request
 
 from app.providers.base import InferenceResult, ProviderAdapter
+from app.providers.http import (
+    ResponseBodyTooLargeError,
+    await_with_deadline,
+    create_abort_controller,
+    read_bounded_response_text,
+)
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -243,10 +248,15 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         """Fetch a bounded response and sanitize every upstream failure."""
         fetch_fn = self._resolve_fetch()
         deadline = time.monotonic() + timeout_seconds
+        abort_controller = create_abort_controller()
+        fetch_options = dict(options)
+        if abort_controller is not None:
+            fetch_options["signal"] = abort_controller.signal
         try:
-            response = await asyncio.wait_for(
-                fetch_fn(url, **options),
-                timeout=timeout_seconds,
+            response = await await_with_deadline(
+                fetch_fn(url, **fetch_options),
+                deadline=deadline,
+                abort_controller=abort_controller,
             )
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
@@ -264,33 +274,24 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             label = "readiness probe" if readiness else "request"
             raise RuntimeError(f"OpenAI {label} failed with HTTP {status}")
 
-        headers = getattr(response, "headers", None)
-        try:
-            length = headers.get("content-length") if headers is not None else None
-            if length and int(length) > max_bytes:
-                raise RuntimeError("OpenAI response exceeded the response size limit")
-        except ValueError:
-            raise RuntimeError("OpenAI returned an invalid content length") from None
-        except RuntimeError:
-            raise
-        except Exception:  # noqa: BLE001 - malformed headers are not trusted
-            label = "readiness endpoint" if readiness else "request"
-            raise RuntimeError(f"OpenAI {label} is unavailable") from None
-
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             label = "readiness probe" if readiness else "request"
             raise RuntimeError(f"OpenAI {label} exceeded its timeout")
         try:
-            raw = await asyncio.wait_for(response.text(), timeout=remaining)
+            raw = await read_bounded_response_text(
+                response,
+                max_bytes=max_bytes,
+                timeout_seconds=remaining,
+            )
+        except ResponseBodyTooLargeError:
+            raise RuntimeError("OpenAI response exceeded the response size limit") from None
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
             raise RuntimeError(f"OpenAI {label} exceeded its timeout") from None
         except Exception:  # noqa: BLE001 - response-body errors may contain credentials
             label = "readiness endpoint" if readiness else "request"
             raise RuntimeError(f"OpenAI {label} is unavailable") from None
-        if not isinstance(raw, str) or len(raw.encode("utf-8")) > max_bytes:
-            raise RuntimeError("OpenAI response exceeded the response size limit")
         return raw, response
 
     async def _fetch_json(
