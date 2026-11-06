@@ -89,6 +89,31 @@ def _abort_controller(controller: Any | None) -> None:
             abort()
 
 
+def _cancel_late_fetch_response(task: asyncio.Task[Any]) -> None:
+    """Cancel the body if a cancellation-resistant Fetch resolves after timeout."""
+    if task.cancelled():
+        return
+    try:
+        response = task.result()
+    except BaseException:
+        return
+    body = getattr(response, "body", None)
+    cancel = getattr(body, "cancel", None)
+    if not callable(cancel):
+        return
+    try:
+        cancellation = cancel()
+    except BaseException:
+        return
+    if cancellation is None:
+        return
+    try:
+        cleanup = asyncio.create_task(_await_js(cancellation))
+    except Exception:
+        return
+    cleanup.add_done_callback(_consume_task_result)
+
+
 async def await_with_deadline(
     awaitable: Any,
     *,
@@ -101,6 +126,7 @@ async def await_with_deadline(
         return await _await_task_until(task, deadline=deadline)
     except (TimeoutError, asyncio.CancelledError):
         _abort_controller(abort_controller)
+        task.add_done_callback(_cancel_late_fetch_response)
         raise
 
 
