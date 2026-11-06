@@ -5,7 +5,6 @@ and the orchestrator separately authorizes inference and external egress.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -14,7 +13,7 @@ import urllib.parse
 import urllib.request
 
 from app.providers.base import InferenceResult, ProviderAdapter
-from app.providers.http import ResponseBodyTooLargeError, await_js_until, read_bounded_response_text
+from app.providers.http import ResponseBodyTooLargeError, await_with_deadline, read_bounded_response_text
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -245,7 +244,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         fetch_fn = self._resolve_fetch()
         deadline = time.monotonic() + timeout_seconds
         try:
-            response = await await_js_until(
+            response = await await_with_deadline(
                 fetch_fn(url, **options),
                 deadline=deadline,
             )
