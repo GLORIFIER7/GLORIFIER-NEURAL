@@ -67,4 +67,4 @@ def test_octopus_preflight_rejects_stale_source_commit_before_oidc():
 
 
 def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
-    assert WORKFLOW.count("package_version: ${{ env.SOURCE_COMMIT }}") == 2
+    assert WORKFLOW.count("package_version: 0.0.0-${{ env.SOURCE_COMMIT }}") == 2
