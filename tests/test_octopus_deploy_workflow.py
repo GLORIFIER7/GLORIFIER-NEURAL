@@ -87,7 +87,9 @@ def test_octopus_preflight_rejects_stale_source_commit_before_oidc():
 
 def test_neural_octopus_only_deploys_a_successful_main_push():
     assert "github.event.workflow_run.event == 'push'" in WORKFLOW
-    assert "github.event.workflow_run.head_sha == github.sha" in WORKFLOW
+    assert "github.event.workflow_run.head_branch == 'main'" in WORKFLOW
+    assert "github.event.workflow_run.head_sha == github.sha" not in WORKFLOW
+    assert 'if [[ "$current_main_sha" != "$SOURCE_COMMIT" ]]; then' in WORKFLOW
 
 
 def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
@@ -140,3 +142,33 @@ def test_octopus_workflow_contains_exactly_one_release_and_deployment_sequence()
         "      - name: Wait for the Octopus deployment to finish",
     ):
         assert WORKFLOW.count(step) == 1
+
+
+def test_octopus_service_account_secret_is_scoped_to_the_oidc_login_step():
+    deploy = WORKFLOW[WORKFLOW.index("  deploy:"):]
+    job_env = re.search(r"(?ms)^    env:\n(.*?)(?=^    steps:)", deploy)
+    assert job_env, "The deploy job environment must be explicit"
+    assert "OCTOPUS_SERVICE_ACCOUNT_ID" not in job_env.group(1)
+
+    preflight = re.search(
+        r"(?ms)^      - name: Validate Octopus deployment configuration\n"
+        r"(.*?)(?=^      - name: Verify the CI-tested NEURAL image publication succeeded)",
+        deploy,
+    )
+    assert preflight, "The deployment preflight must exist"
+    assert "OCTOPUS_SERVICE_ACCOUNT_ID" not in preflight.group(1)
+
+    login = re.search(
+        r"(?ms)^      - name: Authenticate to Octopus Deploy using GitHub OIDC\n"
+        r"(.*?)(?=^      - name:)",
+        deploy,
+    )
+    assert login, "The Octopus OIDC login step must exist"
+    assert "service_account_id: \${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}" in login.group(1)
+
+
+def test_octopus_jobs_api_fetches_every_page_and_validates_total_count():
+    assert "total_count" in WORKFLOW
+    assert "page += 1" in WORKFLOW
+    assert "per_page" in WORKFLOW and "page" in WORKFLOW
+    assert "len(jobs) >= total_count" in WORKFLOW
