@@ -35,25 +35,20 @@ def test_pull_requests_read_permission_is_limited_to_policy_job():
 
 def test_untrusted_test_job_does_not_persist_github_token():
     test_job = _job_section("test")
-    checkout = re.search(
-        r"(?ms)^      - uses: actions/checkout@[^\n]+\n"
-        r"        with:\n"
-        r"          persist-credentials: false\s*$",
-        test_job,
-    )
-    assert checkout, (
+    assert "persist-credentials: false" in test_job, (
         "The test job executes pull-request-controlled code; "
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
+    assert "inputs.pull_request_head_sha" in test_job
+    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
 
-
-def test_review_event_uses_the_documented_top_level_pull_request_payload():
+def test_review_event_uses_documented_payload_and_trusted_dispatch_context():
     policy_job = _job_section("ai-review-policy")
     assert "github.event.review.pull_request" not in policy_job
-    assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
-    assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in policy_job
+    assert "github.event.pull_request.base.sha" in policy_job
+    assert "github.event_name == 'workflow_dispatch' && 'main'" in policy_job
+    assert "inputs.pull_request_number" in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
-
 
 def test_trusted_policy_module_has_a_preflight_before_execution():
     policy_job = _job_section("ai-review-policy")

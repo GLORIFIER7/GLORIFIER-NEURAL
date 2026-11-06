@@ -1,0 +1,346 @@
+name: NEURAL Governed AI Maintenance
+
+on:
+  schedule:
+    # Hourly checks; model execution remains cost-gated and blocked before 08:31 Asia/Vientiane.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neural-ai-maintenance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  codex:
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      patch_ready: ${{ steps.upload_patch.outputs.artifact-id != '' && 'true' || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve AI maintenance authorization
+        id: authorization
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_AUTHORIZATION: ${{ vars.AI_MAINTENANCE_AUTORUN }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCHEDULE_AUTHORIZATION" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check OpenAI credential availability
+        id: provider
+        if: ${{ steps.authorization.outputs.enabled == 'true' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # pinned action revision
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+          version: "0.13.6"
+
+      - name: Verify trusted dependency lock before agent execution
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        run: uv lock --check
+
+      - name: Prepare isolated agent workspace
+        id: agent_workspace
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find app tests -type l -print -quit | grep -q .; then
+            echo "::error::Existing symlink found in app/ or tests/; refusing to expose it to Codex."
+            exit 1
+          fi
+          agent_dir="$RUNNER_TEMP/neural-agent-workspace"
+          rm -rf "$agent_dir"
+          mkdir -p "$agent_dir"
+          cp -a app tests "$agent_dir/"
+          cp pyproject.toml uv.lock README.md "$agent_dir/"
+          if find "$agent_dir/app" "$agent_dir/tests" -type l -print -quit | grep -q .; then
+            echo "::error::Symlink found in the isolated agent workspace."
+            exit 1
+          fi
+          git -C "$agent_dir" init -q
+          git -C "$agent_dir" config user.name "NEURAL isolated maintenance workspace"
+          git -C "$agent_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$agent_dir" add -- app tests pyproject.toml uv.lock README.md
+          git -C "$agent_dir" commit -m "sandbox: trusted maintenance baseline"
+          echo "path=$agent_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Install locked dependencies in isolated agent workspace
+        if: ${{ steps.agent_workspace.outputs.path != '' }}
+        working-directory: ${{ steps.agent_workspace.outputs.path }}
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ steps.agent_workspace.outputs.path }}/.venv
+        run: uv sync --locked --extra dev --no-install-project
+
+      - name: Run Codex maintenance agent
+        id: codex
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.agent_workspace.outputs.path != '' }}
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          working-directory: ${{ steps.agent_workspace.outputs.path }}
+          permission-profile: ":workspace"
+          safety-strategy: "drop-sudo"
+          effort: high
+          prompt: |
+            Act as a senior Python reliability and security engineer maintaining GLORIFIER-NEURAL.
+            Inspect the application and its tests. Identify at most one concrete, reproducible,
+            low-risk bug or reliability weakness and implement a focused fix with a regression test.
+            Keep the patch small. Work only in app/ and tests/. Do not modify workflows, dependency
+            manifests or lockfiles, scripts/validate_ai_maintenance_scope.py, security policy,
+            app/ai_review_policy.py, or protected governance tests. Do not access secrets, credentials,
+            environment values, production systems, databases, or deployment APIs. This is an isolated
+            copy; only app/ and tests/ changes are eligible for copy-back. Run
+            "uv run --locked ruff check app tests" and the closest relevant focused test file(s).
+            The full repository Ruff and pytest suites run after copy-back. If no safe, evidence-backed
+            improvement is available, leave the working tree unchanged. Do not commit or push.
+
+      - name: Copy validated app and tests changes back
+        id: restore
+        if: ${{ steps.codex.outcome == 'success' && steps.agent_workspace.outputs.path != '' }}
+        env:
+          AGENT_WORKSPACE: ${{ steps.agent_workspace.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for allowed_dir in app tests; do
+            if [ ! -d "$AGENT_WORKSPACE/$allowed_dir" ]; then
+              echo "::error::Codex removed the required $allowed_dir directory."
+              exit 1
+            fi
+            if find "$AGENT_WORKSPACE/$allowed_dir" -type l -print -quit | grep -q .; then
+              echo "::error::Codex created a symlink in $allowed_dir; refusing to copy it back."
+              exit 1
+            fi
+          done
+          for protected in \
+            app/ai_review_policy.py \
+            tests/test_ai_maintenance_scope.py \
+            tests/test_ai_review_policy.py \
+            tests/test_ci_workflow_security.py; do
+            if [ -f "$GITHUB_WORKSPACE/$protected" ]; then
+              if [ ! -f "$AGENT_WORKSPACE/$protected" ] || ! cmp -s "$GITHUB_WORKSPACE/$protected" "$AGENT_WORKSPACE/$protected"; then
+                echo "::error::Codex changed a protected governance file: $protected"
+                exit 1
+              fi
+            fi
+          done
+          rsync -rlptD --delete "$AGENT_WORKSPACE/app/" "$GITHUB_WORKSPACE/app/"
+          rsync -rlptD --delete "$AGENT_WORKSPACE/tests/" "$GITHUB_WORKSPACE/tests/"
+
+      - name: Check changed paths and prepare review patch
+        id: stage
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.codex.outcome == 'success' && steps.restore.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --check
+          python scripts/validate_ai_maintenance_scope.py --repo "$GITHUB_WORKSPACE"
+          git add -- app tests
+          git diff --cached --check
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate generated patch with locked project checks
+        id: validation
+        if: ${{ steps.stage.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          uv lock --check
+          uv export --locked --extra dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.txt
+          python -m pip install --only-binary=:all: --require-hashes -r /tmp/requirements.txt
+          python -m pip install --only-binary=:all: --no-deps -e .
+          ruff check .
+          pytest
+
+      - name: Export validated Git patch for publish job
+        if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="$RUNNER_TEMP/ai-maintenance.patch"
+          git diff --cached --binary --no-ext-diff > "$patch_file"
+          if [ ! -s "$patch_file" ]; then
+            echo "::error::The validated change set produced an empty patch."
+            exit 1
+          fi
+
+      - name: Upload validated patch for publish job
+        id: upload_patch
+        if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ai-maintenance-patch-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-maintenance.patch
+          retention-days: 1
+
+      - name: Verify uploaded patch artifact ID
+        if: ${{ steps.upload_patch.outcome == 'success' }}
+        shell: bash
+        env:
+          PATCH_ARTIFACT_ID: ${{ steps.upload_patch.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          test -n "${PATCH_ARTIFACT_ID:-}" || {
+            echo "::error::Patch artifact upload did not return artifact-id."
+            exit 1
+          }
+
+      - name: Report that AI maintenance is not enabled
+        if: ${{ steps.authorization.outputs.enabled != 'true' }}
+        run: |
+          echo "::notice::No AI model was invoked. Enable recurring maintenance by setting the repository Actions variable AI_MAINTENANCE_AUTORUN=true."
+
+      - name: Report missing API key
+        if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured != 'true' }}
+        run: |
+          echo "::warning::OPENAI_API_KEY is not configured. AI maintenance did not run."
+
+      - name: Report Codex capacity limitation
+        if: ${{ failure() && steps.codex.outcome == 'failure' }}
+        run: echo "::warning::Codex execution failed; inspect provider quota/capacity and do not retry aggressively."
+
+  publish:
+    needs: codex
+    if: ${{ needs.codex.outputs.patch_ready == 'true' }}
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Enforce PR publication window (Laos)
+        id: time_window
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_hhmm="$(TZ=Asia/Vientiane date +%H%M)"
+          if [[ ! "$current_hhmm" =~ ^[0-9]{4}$ ]]; then
+            echo "::error::The Asia/Vientiane clock did not return HHMM digits."
+            exit 1
+          fi
+          current_hhmm_decimal=$((10#$current_hhmm))
+          if (( current_hhmm_decimal < 831 )); then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AI maintenance publication is held until after 08:30 Asia/Vientiane. No PR will be created by this run; the patch artifact remains available for inspection."
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: ${{ steps.time_window.outputs.allowed == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download validated patch artifact
+        if: ${{ steps.time_window.outputs.allowed == 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ai-maintenance-patch-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-maintenance-artifact
+
+      - name: Apply validated Git patch
+        id: apply_patch
+        if: ${{ steps.time_window.outputs.allowed == 'true' }}
+        shell: bash
+        env:
+          PATCH_FILE: ${{ runner.temp }}/ai-maintenance-artifact/ai-maintenance.patch
+        run: |
+          set -euo pipefail
+          test -s "$PATCH_FILE"
+          validation_index="$RUNNER_TEMP/ai-maintenance-validation-index"
+          index_path="$(git rev-parse --git-path index)"
+          cp "$index_path" "$validation_index"
+          GIT_INDEX_FILE="$validation_index" git apply --cached --binary "$PATCH_FILE"
+          GIT_INDEX_FILE="$validation_index" python scripts/validate_ai_maintenance_scope.py --repo "$GITHUB_WORKSPACE"
+          git apply --index --binary "$PATCH_FILE"
+          python scripts/validate_ai_maintenance_scope.py --repo "$GITHUB_WORKSPACE"
+          git diff --cached --check
+
+      - name: Create isolated maintenance branch and push
+        id: branch
+        if: ${{ steps.time_window.outputs.allowed == 'true' && steps.apply_patch.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          BRANCH="ai/maintenance/$RUN_ID"
+          git config user.name "GLORIFIER NEURAL AI Maintenance"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app tests
+          git -c core.hooksPath=/dev/null checkout -b "$BRANCH"
+          git -c core.hooksPath=/dev/null commit -m "ai: governed NEURAL maintenance"
+          gh auth setup-git
+          git config core.hooksPath /dev/null
+          git push --set-upstream origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open draft pull request
+        if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          gh pr create --draft --base main --head "$PR_BRANCH" \
+            --title "AI Maintenance: NEURAL reliability proposal" \
+            --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. Trusted CI tests the exact PR head and runs the current-head AI review policy. This workflow never enables auto-merge."
+
+      - name: Dispatch trusted CI and AI review for the exact PR head
+        if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_BRANCH: ${{ steps.branch.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_number="$(gh pr view "$PR_BRANCH" --json number --jq '.number')"
+          pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq '.headRefOid')"
+          [[ "$pr_number" =~ ^[0-9]+$ ]]
+          [[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]
+          gh workflow run ci.yml --ref "$PR_BRANCH" \
+            --field pull_request_number="$pr_number" \
+            --field pull_request_head_sha="$pr_head_sha"
+
