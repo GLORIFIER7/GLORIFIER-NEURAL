@@ -269,6 +269,13 @@ def test_caller_cancellation_cancels_reader_and_releases_lock():
             await asyncio.Event().wait()
             return FakeReadResult(done=True)
 
+        async def cancel(self):
+            self.cancel_calls += 1
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.1)
+
     async def exercise():
         response = FakeResponse([])
         response.body_reader = WaitingReader()
@@ -277,12 +284,14 @@ def test_caller_cancellation_cancels_reader_and_releases_lock():
             read_bounded_response_text(response, max_bytes=16, timeout_seconds=1.0)
         )
         await response.body_reader.started.wait()
+        started = time.monotonic()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        return response
+        return response, time.monotonic() - started
 
-    response = asyncio.run(exercise())
+    response, elapsed = asyncio.run(exercise())
+    assert elapsed < 0.15
 
     assert response.body_reader.cancel_calls == 1
     assert response.body_reader.release_calls == 1
