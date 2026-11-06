@@ -44,3 +44,29 @@ def test_octopus_job_timeout_leaves_headroom_after_await_action_timeout():
         "The GitHub job timeout must leave at least 30 minutes beyond the "
         "Octopus task wait timeout so setup and teardown cannot cut off the wait."
     )
+
+
+def test_octopus_concurrency_group_normalizes_manual_and_automatic_main_refs():
+    assert re.search(
+        r"(?m)^  group: octopus-deploy-\\$\\{\\{\\s*github\\.workflow\\s*\\}\\}-"
+        r"\\$\\{\\{\\s*github\\.event\\.workflow_run\\.head_branch\\s*\\|\\|\\s*github\\.ref_name\\s*\\}\\}$",
+        WORKFLOW,
+    ), "Manual and workflow_run deployments must share the same main concurrency group"
+
+
+def test_octopus_preflight_rejects_stale_source_commit_before_oidc():
+    preflight = re.search(
+        r"(?ms)^      - name: Validate Octopus deployment configuration\\n"
+        r"(.*?)(?=^      - name: Authenticate to Octopus Deploy using GitHub OIDC|\\Z)",
+        WORKFLOW,
+    )
+    assert preflight, "Octopus deployment configuration preflight must exist"
+    source = preflight.group(1)
+
+    assert "GH_TOKEN: ${{ github.token }}" in source
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha' in source
+    assert '[[ "$current_main_sha" != "$SOURCE_COMMIT" ]]' in source
+
+
+def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
+    assert WORKFLOW.count("package_version: ${{ env.SOURCE_COMMIT }}") == 2
