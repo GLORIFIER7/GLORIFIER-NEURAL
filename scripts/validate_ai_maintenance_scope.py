@@ -62,11 +62,11 @@ def _gitlink_paths(repository: Path) -> list[str]:
     """Return indexed nested-repository entries, including alternate-index entries."""
     raw_entries = _git_bytes(repository, "ls-files", "--stage", "-z")
     gitlinks: list[str] = []
-    for entry in raw_entries.split(b"\\0"):
+    for entry in raw_entries.split(b"\0"):
         if not entry:
             continue
         try:
-            metadata, raw_path = entry.split(b"\\t", 1)
+            metadata, raw_path = entry.split(b"\t", 1)
             mode, _object_id, _stage = metadata.split()
         except ValueError:
             raise RuntimeError("Git returned a malformed index entry.") from None
