@@ -58,8 +58,49 @@ def changed_paths(repository: Path) -> set[str]:
     }
 
 
+def _gitlink_paths(repository: Path) -> list[str]:
+    """Return indexed nested-repository entries, including alternate-index entries."""
+    raw_entries = _git_bytes(repository, "ls-files", "--stage", "-z")
+    gitlinks: list[str] = []
+    for entry in raw_entries.split(b"\\0"):
+        if not entry:
+            continue
+        try:
+            metadata, raw_path = entry.split(b"\\t", 1)
+            mode, _object_id, _stage = metadata.split()
+        except ValueError:
+            raise RuntimeError("Git returned a malformed index entry.") from None
+        path = os.fsdecode(raw_path)
+        relative = PurePosixPath(path)
+        if mode == b"160000" and any(
+            len(relative.parts) > 1 and relative.parts[0] == directory
+            for directory in ALLOWED_ROOTS
+        ):
+            gitlinks.append(path)
+    return gitlinks
+
+
+def _nested_git_metadata(repository: Path) -> list[str]:
+    """Find nested .git files/directories without following symlinked directories."""
+    found: list[str] = []
+    for allowed_root in ALLOWED_ROOTS:
+        base = repository / allowed_root
+        if not base.is_dir():
+            continue
+        for current, directories, files in os.walk(base, followlinks=False):
+            if ".git" in directories or ".git" in files:
+                path = Path(current, ".git").relative_to(repository).as_posix()
+                found.append(path)
+            directories[:] = [
+                name
+                for name in directories
+                if not (Path(current) / name).is_symlink()
+            ]
+    return sorted(found)
+
+
 def validate(repository: Path) -> list[str]:
-    """Reject every changed path outside app/ and tests/, including symlinks."""
+    """Reject changes outside app/ and tests/, including symlinks and Gitlinks."""
     try:
         root = Path(
             os.fsdecode(
@@ -67,10 +108,19 @@ def validate(repository: Path) -> list[str]:
             )
         ).resolve(strict=True)
         paths = changed_paths(root)
+        gitlinks = _gitlink_paths(root)
+        nested_git_metadata = _nested_git_metadata(root)
     except (OSError, RuntimeError) as exc:
         raise RuntimeError(f"Scope validation could not run: {exc}") from None
 
     rejected: list[str] = []
+    for path in gitlinks:
+        rejected.append(
+            f"Rejected Gitlink (nested repository) in AI maintenance changes: {path}"
+        )
+    for path in nested_git_metadata:
+        rejected.append(f"Rejected nested Git metadata: {path}")
+
     for raw_path in sorted(paths):
         relative = PurePosixPath(raw_path)
         allowed = any(
