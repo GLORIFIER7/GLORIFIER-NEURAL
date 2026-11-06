@@ -35,6 +35,15 @@ def changed_paths(repository: Path) -> set[str]:
         "-z",
         "HEAD",
     )
+    staged = _git_bytes(
+        repository,
+        "diff",
+        "--cached",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        "HEAD",
+    )
     untracked = _git_bytes(
         repository,
         "ls-files",
@@ -44,7 +53,7 @@ def changed_paths(repository: Path) -> set[str]:
     )
     return {
         os.fsdecode(item)
-        for item in (tracked + untracked).split(b"\0")
+        for item in (tracked + staged + untracked).split(b"\0")
         if item
     }
 
@@ -68,7 +77,7 @@ def validate(repository: Path) -> list[str]:
             len(relative.parts) > 1 and relative.parts[0] == directory
             for directory in ALLOWED_ROOTS
         )
-        if relative.is_absolute() or ".." in relative.parts or not allowed:
+        if relative.is_absolute() or ":" in raw_path or ".." in relative.parts or not allowed:
             rejected.append(f"Rejected AI change outside app/ and tests/: {raw_path}")
             continue
 
