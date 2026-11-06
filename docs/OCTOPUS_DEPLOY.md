@@ -32,14 +32,14 @@ The workflow pins the official Octopus GitHub Actions to commit SHAs. It does no
    | OCTOPUS_ENABLED | Set to `true` only after the Octopus project, target and OIDC trust are configured |
    | OCTOPUS_SPACE | Exact Octopus Space name |
    | OCTOPUS_PROJECT | Exact Octopus Project name |
-   | OCTOPUS_ENVIRONMENT | Exact single target Environment name |
+   | OCTOPUS_ENVIRONMENT | Exact single target Environment name; commas, CR, and LF are rejected |
    | OCTOPUS_CONFIG_AS_CODE | `true` only if the Octopus Project configuration is stored in Git; otherwise `false` or unset |
 
 6. Create and configure the Octopus Project deployment process, package feeds, deployment targets, variables, and lifecycle. For Config as Code, connect the project to its source repository through Octopus's GitHub connection and align its default branch with main.
 
 ## Deployment boundary
 
-NEURAL CI builds the container image in its test matrix for validation but does not upload or publish it. The Octopus workflow pins both release paths to `package_version: 0.0.0-${SOURCE_COMMIT}`; the configured Octopus package or Docker/OCI feed must already contain a trusted artifact with that exact version. This repository does not add a package-publishing job or a `packages: write` permission. The workflow cannot independently attest the provenance of an externally published artifact, so keep `OCTOPUS_ENABLED` unset until the feed's package provenance is independently verified. If the exact version is absent, release creation must fail closed rather than selecting `latest`. Preflight also compares the triggering source SHA with the current `main` head and refuses stale CI completions before OIDC authentication.
+NEURAL CI builds the container image in its test matrix. On a push to `main`, the Python 3.12 test job exports that exact image as a short-lived Actions artifact. The `publish-container` job runs only after the full test matrix succeeds, downloads the tested image without rebuilding it, and publishes it to GitHub Container Registry as `ghcr.io/glorifier7/glorifier-neural:0.0.0-<full-commit-sha>` using a job-scoped `GITHUB_TOKEN` with `packages: write`. The Octopus workflow verifies that the matching CI run and image-publishing step succeeded, then pins both release paths to `package_version: 0.0.0-${SOURCE_COMMIT}`. Configure an Octopus Docker/OCI feed for `ghcr.io/glorifier7/glorifier-neural`; make the package public for anonymous pull access or configure a read-only GHCR credential in the Octopus feed settings. Do not configure the deployment process to resolve `latest`. Preflight also compares the triggering source SHA with the current `main` head and refuses stale CI completions before OIDC authentication.
 
 A successful CI run or created release is not proof that the live application is healthy. The workflow waits for the Octopus deployment task result; a separate post-deployment application health check is still required.
 
