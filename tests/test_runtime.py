@@ -1,8 +1,12 @@
+import asyncio
+from types import SimpleNamespace
+from typing import ClassVar
+
+import pytest
+
 from app.providers import NvidiaNimAdapter
 from app.runtime import build_orchestrator_from_environment
 from app.schemas import TaskRequest
-from typing import ClassVar
-from types import SimpleNamespace
 
 
 class _RuntimeBodyReader:
@@ -229,12 +233,8 @@ def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch(mo
         )
         asyncio.get_running_loop().call_later(0.15, finish.set)
         started = asyncio.get_running_loop().time()
-        if "NVIDIA" == "OpenAI":
-            with pytest.raises(RuntimeError, match="request exceeded its timeout"):
-                await adapter.ainfer("bounded deadline")
-        else:
-            with pytest.raises(RuntimeError, match="readiness probe exceeded its timeout"):
-                await adapter.acheck_readiness()
+        with pytest.raises(RuntimeError, match="readiness probe exceeded its timeout"):
+            await adapter.acheck_readiness()
         assert asyncio.get_running_loop().time() - started < 0.10
         assert controller.abort_calls == 1
         assert controller.signal.aborted is True
