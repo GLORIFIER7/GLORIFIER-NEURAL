@@ -85,6 +85,21 @@ def test_rejects_oversized_chunked_response_before_reading_more_chunks():
     assert response.body_reader.release_calls == 1
 
 
+def test_accepts_response_exactly_at_the_configured_byte_limit():
+    response = FakeResponse([b"1234", b"5678"])
+
+    result = asyncio.run(
+        read_bounded_response_text(
+            response,
+            max_bytes=8,
+            timeout_seconds=1.0,
+        )
+    )
+
+    assert result == "12345678"
+    assert response.body_reader.cancel_calls == 0
+
+
 def test_rejects_declared_oversize_without_opening_the_stream():
     response = FakeResponse([b"{}"], headers={"content-length": "1024"})
 
