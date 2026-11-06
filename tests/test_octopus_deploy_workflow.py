@@ -95,12 +95,8 @@ def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_comm
 
 
 def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
-    publish = re.search(
-        r"(?ms)^  publish-container:\\n(.*)\\Z",
-        CI_WORKFLOW,
-    )
-    assert publish, "The NEURAL image publisher job must exist"
-    job = publish.group(1)
+    publish_start = CI_WORKFLOW.index("  publish-container:\\n")
+    job = CI_WORKFLOW[publish_start:]
 
     assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in job
     assert "needs: [test]" in job
@@ -121,5 +117,24 @@ def test_neural_octopus_requires_the_ci_image_publisher_to_succeed():
 
 
 def test_octopus_preflight_rejects_multiple_deployment_environments():
-    assert "OCTOPUS_ENVIRONMENT\" == *','*" in WORKFLOW
-    assert "exactly one environment name (no commas, CR, or LF)" in WORKFLOW
+    preflight_start = WORKFLOW.index("      - name: Validate Octopus deployment configuration")
+    verify_start = WORKFLOW.index("      - name: Verify the upstream CI-tested image publication succeeded")
+    assert preflight_start >= 0 and verify_start > preflight_start
+    preflight = WORKFLOW[preflight_start:verify_start]
+
+    for guard in (
+        `"$OCTOPUS_ENVIRONMENT" == *','*`,
+        `"$OCTOPUS_ENVIRONMENT" == *$'\\n'*`,
+        `"$OCTOPUS_ENVIRONMENT" == *$'\\r'*`,
+    ):
+        assert guard in preflight
+    assert "exactly one environment name (no commas, CR, or LF)" in preflight
+
+
+def test_octopus_workflow_contains_exactly_one_release_and_deployment_sequence():
+    for step in (
+        "      - name: Validate Octopus deployment configuration",
+        "      - name: Authenticate to Octopus Deploy using GitHub OIDC",
+        "      - name: Wait for the Octopus deployment to finish",
+    ):
+        assert WORKFLOW.count(step) == 1
