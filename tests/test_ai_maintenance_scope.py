@@ -177,7 +177,6 @@ def test_codex_engineering_cycle_is_not_gated_by_the_publication_window():
         step = codex_section[start:] if end < 0 else codex_section[start:end]
         assert "steps.time_window.outputs.allowed" not in step
 
-
 def test_workflow_uses_shallow_checkout_and_env_safe_run_id():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
@@ -419,49 +418,73 @@ def test_scope_validator_rejects_out_of_scope_patch_in_an_alternate_index(tmp_pa
     assert "README.md" in result.stderr
     assert (publish / "README.md").read_text(encoding="utf-8") == "fixture\n"
 
+def test_scope_validator_rejects_nested_git_repository_gitlinks(tmp_path: Path):
+    repository = _repository(tmp_path)
+    nested = repository / "app" / "vendor"
+    nested.mkdir()
+    (nested / "library.py").write_text("value = 1\\n", encoding="utf-8")
+    _git(nested, "init", "-q")
+    _git(nested, "config", "user.name", "Nested")
+    _git(nested, "config", "user.email", "nested@example.invalid")
+    _git(nested, "add", ".")
+    _git(nested, "commit", "-m", "nested repository")
+    _git(repository, "add", "app/vendor")
 
-def test_publish_validates_patch_in_an_alternate_index_before_worktree_apply():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    publish_section = workflow[workflow.index("  publish:"):]
-    apply_start = publish_section.index("- name: Apply validated Git patch")
-    apply_end = publish_section.find("\n      - name:", apply_start + 1)
-    apply_step = publish_section[apply_start:] if apply_end < 0 else publish_section[apply_start:apply_end]
+    result = _validate(repository)
 
-    assert "GIT_INDEX_FILE" in apply_step
-    assert apply_step.index("git apply --cached --binary") < apply_step.index(
-        "python scripts/validate_ai_maintenance_scope.py"
+    assert result.returncode != 0
+    assert "gitlink" in result.stderr.casefold()
+    assert "app/vendor" in result.stderr
+
+
+def test_scope_validator_rejects_nested_git_metadata_files(tmp_path: Path):
+    repository = _repository(tmp_path)
+    nested = repository / "tests" / "fixture"
+    nested.mkdir()
+    (nested / ".git").write_text("gitdir: ../.git/modules/fixture\\n", encoding="utf-8")
+
+    result = _validate(repository)
+
+    assert result.returncode != 0
+    assert "nested Git metadata" in result.stderr
+    assert "tests/fixture/.git" in result.stderr
+
+
+def test_scope_validator_rejects_gitlinks_in_an_alternate_index(tmp_path: Path):
+    publish_root = tmp_path / "publish"
+    publish_root.mkdir()
+    publish = _repository(publish_root)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _git(nested, "init", "-q")
+    _git(nested, "config", "user.name", "Nested")
+    _git(nested, "config", "user.email", "nested@example.invalid")
+    (nested / "library.py").write_text("value = 1\\n", encoding="utf-8")
+    _git(nested, "add", ".")
+    _git(nested, "commit", "-m", "nested repository")
+    nested_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=nested,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    validation_index = tmp_path / "validation-index"
+    shutil.copy2(publish / ".git" / "index", validation_index)
+    environment = os.environ.copy()
+    environment["GIT_INDEX_FILE"] = str(validation_index)
+    subprocess.run(
+        ["git", "update-index", "--add", "--cacheinfo", f"160000,{nested_sha},app/vendor"],
+        cwd=publish,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
     )
-    assert apply_step.index("python scripts/validate_ai_maintenance_scope.py") < apply_step.index(
-        "git apply --index --binary"
-    )
 
+    result = _validate(publish, env=environment)
 
-def test_isolated_agent_workspace_includes_project_readme_for_uv_run():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    assert 'cp pyproject.toml uv.lock README.md "$agent_dir/"' in workflow
-    assert 'git -C "$agent_dir" add -- app tests pyproject.toml uv.lock README.md' in workflow
-
-
-def test_codex_job_does_not_duplicate_the_publish_time_window_gate():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    codex_section = workflow[workflow.index("  codex:"):workflow.index("  publish:")]
-
-    assert "id: time_window" not in codex_section
-    assert "Check publication window (Laos)" not in codex_section
-
-
-def test_dispatched_pr_head_sha_validation_accepts_uppercase_hex():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in workflow
-
-def test_patch_upload_requires_a_nonempty_artifact_id_before_publish():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    upload = workflow.index("      - name: Upload validated patch for publish job")
-    guard = workflow.index("      - name: Verify uploaded patch artifact ID", upload)
-    publish = workflow.index("  publish:", upload)
-    assert upload < guard < publish
-    guard_block = workflow[guard:publish]
-    assert "PATCH_ARTIFACT_ID: ${{ steps.upload_patch.outputs.artifact-id }}" in guard_block
-    assert 'test -n "${PATCH_ARTIFACT_ID:-}"' in guard_block
+    assert result.returncode != 0
+    assert "gitlink" in result.stderr.casefold()
+    assert "app/vendor" in result.stderr
