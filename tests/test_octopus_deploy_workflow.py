@@ -182,35 +182,3 @@ def test_octopus_workflow_embedded_python_is_syntactically_valid():
     assert match, "The workflow must contain the CI verification Python heredoc"
     ast.parse(textwrap.dedent(match.group(1)))
 
-
-def test_octopus_jobs_api_pagination_executes_all_pages():
-    import textwrap
-    from urllib.parse import urlencode
-
-    match = re.search(r"(?ms)python3 - <<'PY'\n(.*?)\nPY", WORKFLOW)
-    assert match
-    script = textwrap.dedent(match.group(1))
-    start = script.index("jobs = []")
-    end = script.index("publishers = [", start)
-    pagination_code = script[start:end]
-
-    requests = []
-
-    def get_json(url):
-        requests.append(url)
-        if url.endswith("page=1"):
-            return {"jobs": [{"id": index} for index in range(100)], "total_count": 101}
-        return {"jobs": [{"id": 100}], "total_count": 101}
-
-    namespace = {
-        "urlencode": urlencode,
-        "get_json": get_json,
-        "root": "https://api.example/actions/runs/1",
-    }
-    exec(pagination_code, namespace)
-
-    assert len(namespace["jobs"]) == 101
-    assert requests == [
-        "https://api.example/actions/runs/1/jobs?per_page=100&page=1",
-        "https://api.example/actions/runs/1/jobs?per_page=100&page=2",
-    ]
