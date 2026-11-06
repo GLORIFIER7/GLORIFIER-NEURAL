@@ -63,10 +63,16 @@ def test_octopus_task_output_accepts_one_valid_server_task_id():
 
 
 def test_octopus_task_output_rejects_carriage_returns_and_newlines():
-    for server_task_id in (
+    invalid_ids = [
         "ServerTasks-1234\nINJECTED=value",
         "ServerTasks-1234\rINJECTED=value",
-    ):
+        "",
+        "ServerTasks-1234%0aINJECTED=value",
+        "ServerTasks-١٢٣٤",
+        "arbitrary-printable-task-id",
+        *["ServerTasks-1234" + chr(code) + "INJECTED=value" for code in (*range(32), 127)],
+    ]
+    for server_task_id in invalid_ids:
         result, output = _run_task_output(server_task_id)
 
         assert result.returncode != 0, "control characters must fail closed"
