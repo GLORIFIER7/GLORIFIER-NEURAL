@@ -155,25 +155,25 @@ jobs:
               )
 
           jobs = []
-page = 1
-while True:
-    page_query = urlencode({"per_page": 100, "page": page})
-    page_payload = get_json(root + "/jobs?" + page_query)
-    page_jobs = page_payload.get("jobs")
-    total_count = page_payload.get("total_count")
-    if (
-        not isinstance(page_jobs, list)
-        or not isinstance(total_count, int)
-        or isinstance(total_count, bool)
-        or total_count < 0
-    ):
-        raise SystemExit("GitHub returned malformed job pagination metadata; deployment blocked.")
-    jobs.extend(page_jobs)
-    if len(jobs) >= total_count:
-        break
-    if not page_jobs:
-        raise SystemExit("GitHub job pagination ended before total_count; deployment blocked.")
-    page += 1
+          page = 1
+          while True:
+              page_query = urlencode({"per_page": 100, "page": page})
+              page_payload = get_json(root + "/jobs?" + page_query)
+              page_jobs = page_payload.get("jobs")
+              total_count = page_payload.get("total_count")
+              if (
+                  not isinstance(page_jobs, list)
+                  or not isinstance(total_count, int)
+                  or isinstance(total_count, bool)
+                  or total_count < 0
+              ):
+                  raise SystemExit("GitHub returned malformed job pagination metadata; deployment blocked.")
+              jobs.extend(page_jobs)
+              if len(jobs) >= total_count:
+                  break
+              if not page_jobs:
+                  raise SystemExit("GitHub job pagination ended before total_count; deployment blocked.")
+              page += 1
           publishers = [
               job for job in jobs
               if job.get("name") == "Publish the CI-tested NEURAL image to GHCR"
