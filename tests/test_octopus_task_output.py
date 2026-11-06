@@ -71,4 +71,4 @@ def test_octopus_task_output_rejects_carriage_returns_and_newlines():
 
         assert result.returncode != 0, "control characters must fail closed"
         assert output == "", "invalid task IDs must not write to GITHUB_OUTPUT"
-        assert "unexpected newline" in result.stdout.lower()
+        assert "safe Octopus deployment task ID" in result.stderr
