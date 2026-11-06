@@ -214,12 +214,24 @@ def test_openai_async_provider_sanitizes_upstream_errors():
 
 
 def test_openai_async_provider_sanitizes_response_body_failures():
+    class BrokenReader:
+        async def read(self):
+            raise RuntimeError("sensitive body parser and credential detail")
+
+        async def cancel(self):
+            return None
+
+        def releaseLock(self):
+            return None
+
+    class BrokenStream:
+        def getReader(self):
+            return BrokenReader()
+
     class BrokenResponse:
         status = 200
         headers: ClassVar[dict[str, str]] = {}
-
-        async def text(self):
-            raise RuntimeError("sensitive body parser and credential detail")
+        body = BrokenStream()
 
     async def fake_fetch(*_args, **_kwargs):
         return BrokenResponse()
