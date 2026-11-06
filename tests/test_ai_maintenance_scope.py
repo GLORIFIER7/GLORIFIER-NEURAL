@@ -488,3 +488,12 @@ def test_scope_validator_rejects_gitlinks_in_an_alternate_index(tmp_path: Path):
     assert result.returncode != 0
     assert "gitlink" in result.stderr.casefold()
     assert "app/vendor" in result.stderr
+
+def test_workflow_top_level_permissions_are_minimal():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    permissions_start = workflow.index("permissions:")
+    permissions_end = workflow.index("\\nconcurrency:", permissions_start)
+    top_level_permissions = workflow[permissions_start:permissions_end]
+
+    assert "contents: read" in top_level_permissions
+    assert "pull-requests:" not in top_level_permissions
