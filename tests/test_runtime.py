@@ -179,7 +179,6 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
 
 def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkeypatch):
     import asyncio
-    import json
 
     clear_runtime_environment(monkeypatch)
 
