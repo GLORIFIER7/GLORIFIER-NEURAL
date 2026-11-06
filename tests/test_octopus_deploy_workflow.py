@@ -178,7 +178,7 @@ def test_octopus_workflow_embedded_python_is_syntactically_valid():
     import ast
     import textwrap
 
-    match = re.search(r"(?ms)python3 - <<'PY'\n(.*?)\nPY", WORKFLOW)
+    match = re.search(r"(?ms)^[ \t]*python3 - <<'PY'\n(.*?)^[ \t]*PY$", WORKFLOW)
     assert match, "The workflow must contain the CI verification Python heredoc"
     ast.parse(textwrap.dedent(match.group(1)))
 
