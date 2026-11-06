@@ -116,7 +116,7 @@ def test_rejects_malformed_content_length():
 
 
 def test_decodes_utf8_only_after_all_chunks_are_read():
-    encoded = "GLORIFIER — 你好 — 🌐".encode("utf-8")
+    encoded = "GLORIFIER — 你好 — 🌐".encode()
     response = FakeResponse([encoded[:8], encoded[8:14], encoded[14:]])
 
     result = asyncio.run(
