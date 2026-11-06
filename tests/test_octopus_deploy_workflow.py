@@ -122,12 +122,8 @@ def test_octopus_preflight_rejects_multiple_deployment_environments():
     assert preflight_start >= 0 and verify_start > preflight_start
     preflight = WORKFLOW[preflight_start:verify_start]
 
-    for guard in (
-        `"$OCTOPUS_ENVIRONMENT" == *','*`,
-        `"$OCTOPUS_ENVIRONMENT" == *$'\\n'*`,
-        `"$OCTOPUS_ENVIRONMENT" == *$'\\r'*`,
-    ):
-        assert guard in preflight
+    expected_guard = r'''if [[ "$OCTOPUS_ENVIRONMENT" == *','* || "$OCTOPUS_ENVIRONMENT" == *$'\\n'* || "$OCTOPUS_ENVIRONMENT" == *$'\\r'* ]]; then'''
+    assert expected_guard in preflight
     assert "exactly one environment name (no commas, CR, or LF)" in preflight
 
 
