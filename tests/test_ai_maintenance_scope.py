@@ -455,3 +455,13 @@ def test_dispatched_pr_head_sha_validation_accepts_uppercase_hex():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in workflow
+
+def test_patch_upload_requires_a_nonempty_artifact_id_before_publish():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    upload = workflow.index("      - name: Upload validated patch for publish job")
+    guard = workflow.index("      - name: Verify uploaded patch artifact ID", upload)
+    publish = workflow.index("  publish:", upload)
+    assert upload < guard < publish
+    guard_block = workflow[guard:publish]
+    assert "PATCH_ARTIFACT_ID: ${{ steps.upload_patch.outputs.artifact-id }}" in guard_block
+    assert 'test -n "${PATCH_ARTIFACT_ID:-}"' in guard_block
