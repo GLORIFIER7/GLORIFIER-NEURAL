@@ -12,7 +12,11 @@ import urllib.error
 import urllib.request
 
 from app.providers.base import InferenceResult, ProviderAdapter
-from app.providers.http import ResponseBodyTooLargeError, await_with_deadline, read_bounded_response_text
+from app.providers.http import (
+    ResponseBodyTooLargeError,
+    await_with_deadline,
+    read_bounded_response_text,
+)
 
 
 class _NvidiaNimHttpStatusError(RuntimeError):
