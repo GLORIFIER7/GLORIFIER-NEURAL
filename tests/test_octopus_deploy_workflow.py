@@ -112,13 +112,20 @@ def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
 
 def test_neural_octopus_requires_the_ci_image_publisher_to_succeed():
     assert "actions: read" in WORKFLOW
-    assert 'job.get("name") == "publish-container"' in WORKFLOW
+    assert 'job.get("name") == "Publish the CI-tested NEURAL image to GHCR"' in WORKFLOW
     assert 'step.get("name") == "Publish the immutable commit-versioned image"' in WORKFLOW
+
+def test_manual_dispatch_requires_a_successful_image_publish_for_the_current_commit():
+    assert 'elif event_name == "workflow_dispatch":' in WORKFLOW
+    assert "actions/workflows/ci.yml/runs?" in WORKFLOW
+    assert '"head_sha": source_commit' in WORKFLOW
+    assert "No successful main-branch CI push exists for this exact source commit" in WORKFLOW
+    assert 'event_name == "workflow_run"' in WORKFLOW
 
 
 def test_octopus_preflight_rejects_multiple_deployment_environments():
     preflight_start = WORKFLOW.index("      - name: Validate Octopus deployment configuration")
-    verify_start = WORKFLOW.index("      - name: Verify the upstream CI-tested image publication succeeded")
+    verify_start = WORKFLOW.index("      - name: Verify the CI-tested NEURAL image publication succeeded for this commit")
     assert preflight_start >= 0 and verify_start > preflight_start
     preflight = WORKFLOW[preflight_start:verify_start]
 
