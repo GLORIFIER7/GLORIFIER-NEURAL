@@ -94,7 +94,32 @@ def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_comm
     assert WORKFLOW.count("package_version: 0.0.0-${{ env.SOURCE_COMMIT }}") == 2
 
 
-def test_octopus_integration_does_not_add_package_publication_permissions():
-    assert "publish-container:" not in CI_WORKFLOW
-    assert "packages: write" not in CI_WORKFLOW
-    assert "Upload the exact CI-tested container image" not in CI_WORKFLOW
+def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
+    publish = re.search(
+        r"(?ms)^  publish-container:\\n(.*)\\Z",
+        CI_WORKFLOW,
+    )
+    assert publish, "The NEURAL image publisher job must exist"
+    job = publish.group(1)
+
+    assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in job
+    assert "needs: [test]" in job
+    assert "packages: write" in job
+    assert "Download the exact image exported by the passing CI matrix" in job
+    assert "docker load --input /tmp/glorifier-neural-image/glorifier-neural-ci.tar" in job
+    assert "ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}" in job
+    assert "docker build" not in job, "The publisher must publish the tested artifact, not rebuild it"
+
+    assert "Upload the CI-tested container image" in CI_WORKFLOW
+    assert "matrix.python-version == '3.12'" in CI_WORKFLOW
+
+
+def test_neural_octopus_requires_the_ci_image_publisher_to_succeed():
+    assert "actions: read" in WORKFLOW
+    assert 'job.get("name") == "publish-container"' in WORKFLOW
+    assert 'step.get("name") == "Publish the immutable commit-versioned image"' in WORKFLOW
+
+
+def test_octopus_preflight_rejects_multiple_deployment_environments():
+    assert "OCTOPUS_ENVIRONMENT\" == *','*" in WORKFLOW
+    assert "exactly one environment name (no commas, CR, or LF)" in WORKFLOW
