@@ -10,7 +10,7 @@ import time
 from typing import Any, NoReturn
 
 
-CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.05
+CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.01
 
 
 class ResponseBodyTooLargeError(ValueError):
@@ -64,6 +64,12 @@ async def _await_task_until(task: asyncio.Task[Any], *, deadline: float) -> Any:
         task.add_done_callback(_consume_task_result)
         raise TimeoutError("provider response body exceeded its deadline")
     return task.result()
+
+
+async def await_js_until(awaitable: Any, *, deadline: float) -> Any:
+    """Await a Fetch coroutine or JavaScript Promise without exceeding its deadline."""
+    task = asyncio.create_task(_await_js(awaitable))
+    return await _await_task_until(task, deadline=deadline)
 
 
 async def _cancel_target(target: Any, *, deadline: float) -> None:
@@ -175,11 +181,22 @@ def _read_result_field(result: Any, name: str) -> Any:
     return getattr(result, name, None)
 
 
-async def _read_chunks(reader: Any, *, max_bytes: int, deadline: float) -> bytearray:
+async def _read_chunks(
+    reader: Any,
+    *,
+    max_bytes: int,
+    deadline: float,
+    pending_reads: set[asyncio.Task[Any]],
+) -> bytearray:
     collected = bytearray()
     while True:
         read_task = asyncio.create_task(_await_js(reader.read()))
-        result = await _await_task_until(read_task, deadline=deadline)
+        try:
+            result = await _await_task_until(read_task, deadline=deadline)
+        except BaseException:
+            if not read_task.done():
+                pending_reads.add(read_task)
+            raise
         if _read_result_field(result, "done") is True:
             return collected
         value = _read_result_field(result, "value")
@@ -201,6 +218,27 @@ def _release_reader(reader: Any) -> None:
     if callable(release):
         with suppress(Exception):  # do not mask the read result during cleanup
             release()
+
+
+def _release_reader_when_idle(
+    reader: Any,
+    pending_reads: set[asyncio.Task[Any]],
+) -> None:
+    """Release the Web Streams lock only after every outstanding read settles."""
+    outstanding = {task for task in pending_reads if not task.done()}
+    if not outstanding:
+        _release_reader(reader)
+        return
+
+    remaining = set(outstanding)
+
+    def release_after_read(task: asyncio.Task[Any]) -> None:
+        remaining.discard(task)
+        if not remaining:
+            _release_reader(reader)
+
+    for task in outstanding:
+        task.add_done_callback(release_after_read)
 
 
 async def read_bounded_response_text(
@@ -226,8 +264,14 @@ async def read_bounded_response_text(
     deadline = time.monotonic() + timeout_value
     reader = await _response_reader(response, max_bytes=max_bytes, deadline=deadline)
     read_deadline = deadline - min(0.05, timeout_value * 0.1)
+    pending_reads: set[asyncio.Task[Any]] = set()
     try:
-        collected = await _read_chunks(reader, max_bytes=max_bytes, deadline=read_deadline)
+        collected = await _read_chunks(
+            reader,
+            max_bytes=max_bytes,
+            deadline=read_deadline,
+            pending_reads=pending_reads,
+        )
         try:
             return collected.decode("utf-8")
         except UnicodeDecodeError:
@@ -239,4 +283,4 @@ async def read_bounded_response_text(
         await _cancel_target(reader, deadline=deadline)
         raise
     finally:
-        _release_reader(reader)
+        _release_reader_when_idle(reader, pending_reads)
