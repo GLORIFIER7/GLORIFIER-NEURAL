@@ -345,3 +345,63 @@ def test_malformed_pull_list_item_does_not_abort_valid_pull_requests(monkeypatch
     assert counts["error"] == 1
     assert counts["success"] == 1
     assert published == [("d" * 40, "success")]
+
+
+def test_missing_pr_number_and_url_never_publish_a_pull_none_target(monkeypatch):
+    _stub_sweep_inputs(monkeypatch)
+    pulls = [
+        {
+            "number": None,
+            "base": {"ref": "main"},
+            "head": {"sha": "c" * 40},
+            "html_url": None,
+        }
+    ]
+
+    def request_json(url, token, payload=None):
+        if url == "https://api.github.com/repos/example/repo":
+            return {"default_branch": "main"}
+        if "/pulls?" in url:
+            return pulls
+        raise AssertionError(f"Unexpected API request: {url}")
+
+    published = []
+    monkeypatch.setattr(publisher, "_request_json", request_json)
+    monkeypatch.setattr(
+        publisher,
+        "_publish_status",
+        lambda repo, token, sha, state, description, target_url: published.append(target_url),
+    )
+
+    counts = publisher.sweep_open_pull_requests("example/repo", "token")
+
+    assert counts["error"] == 1
+    assert published == [None]
+
+
+def test_publish_status_omits_target_url_when_no_safe_pr_link_exists(monkeypatch):
+    payloads = []
+    monkeypatch.setattr(
+        publisher,
+        "_request_json",
+        lambda url, token, payload=None: payloads.append(payload),
+    )
+
+    publisher._publish_status("example/repo", "token", "a" * 40, "error", "metadata error", None)
+
+    assert len(payloads) == 1
+    assert "target_url" not in payloads[0]
+
+
+def test_trusted_status_schedule_leaves_headroom_for_the_ten_minute_job():
+    from pathlib import Path
+
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "ai-review-policy-trusted.yml"
+    ).read_text(encoding="utf-8")
+
+    assert 'cron: "*/15 * * * *"' in workflow
+    assert "timeout-minutes: 10" in workflow
