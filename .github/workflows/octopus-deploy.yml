@@ -79,23 +79,26 @@ jobs:
             exit 1
           fi
 
-      - name: Verify the upstream CI-tested image publication succeeded
-        if: github.event_name == 'workflow_run'
+      - name: Verify the CI-tested NEURAL image publication succeeded for this commit
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
           UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_COMMIT: ${{ env.SOURCE_COMMIT }}
         run: |
           python3 - <<'PY'
           import json
           import os
+          from urllib.parse import urlencode
           from urllib.request import Request, urlopen
 
           repository = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GH_TOKEN"]
-          run_id = os.environ["UPSTREAM_RUN_ID"]
+          event_name = os.environ["EVENT_NAME"]
+          upstream_run_id = os.environ.get("UPSTREAM_RUN_ID", "").strip()
           source_commit = os.environ["SOURCE_COMMIT"]
+          api = f"https://api.github.com/repos/{repository}"
           headers = {
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {token}",
@@ -107,26 +110,76 @@ jobs:
               with urlopen(request, timeout=20) as response:
                   return json.loads(response.read().decode("utf-8"))
 
-          root = f"https://api.github.com/repos/{repository}/actions/runs/{run_id}"
+          if event_name == "workflow_run":
+              if not upstream_run_id:
+                  raise SystemExit("The triggering CI run ID is missing; deployment blocked.")
+              run_id = upstream_run_id
+          elif event_name == "workflow_dispatch":
+              query = urlencode({
+                  "branch": "main",
+                  "event": "push",
+                  "head_sha": source_commit,
+                  "status": "success",
+                  "per_page": 100,
+              })
+              candidates = get_json(
+                  f"{api}/actions/workflows/ci.yml/runs?{query}"
+              ).get("workflow_runs", [])
+              candidates = [
+                  run for run in candidates
+                  if run.get("head_sha") == source_commit
+                  and run.get("head_branch") == "main"
+                  and run.get("event") == "push"
+                  and run.get("conclusion") == "success"
+              ]
+              if not candidates:
+                  raise SystemExit(
+                      "No successful main-branch CI push exists for this exact source commit; manual deployment blocked."
+                  )
+              candidates.sort(
+                  key=lambda run: (run.get("run_number", 0), run.get("created_at", "")),
+                  reverse=True,
+              )
+              run_id = str(candidates[0]["id"])
+          else:
+              raise SystemExit(f"Unsupported deployment trigger: {event_name}")
+
+          root = f"{api}/actions/runs/{run_id}"
           upstream = get_json(root)
           if (
               upstream.get("head_sha") != source_commit
               or upstream.get("head_branch") != "main"
+              or upstream.get("event") != "push"
               or upstream.get("conclusion") != "success"
           ):
-              raise SystemExit("Upstream NEURAL CI run does not match a successful main-branch run.")
+              raise SystemExit(
+                  "The selected NEURAL CI run does not match a successful push to main for this exact source commit."
+              )
 
           jobs = get_json(root + "/jobs?per_page=100").get("jobs", [])
-          publishers = [job for job in jobs if job.get("name") == "publish-container"]
+          publishers = [
+              job for job in jobs
+              if job.get("name") == "Publish the CI-tested NEURAL image to GHCR"
+          ]
           if len(publishers) != 1 or publishers[0].get("conclusion") != "success":
-              raise SystemExit("The publish-container job did not complete successfully; deployment blocked.")
+              raise SystemExit(
+                  "The CI image-publishing job did not complete successfully; deployment blocked."
+              )
 
           steps = publishers[0].get("steps", [])
-          publish_steps = [step for step in steps if step.get("name") == "Publish the immutable commit-versioned image"]
+          publish_steps = [
+              step for step in steps
+              if step.get("name") == "Publish the immutable commit-versioned image"
+          ]
           if len(publish_steps) != 1 or publish_steps[0].get("conclusion") != "success":
-              raise SystemExit("The exact commit-versioned NEURAL image was not published successfully; deployment blocked.")
+              raise SystemExit(
+                  "The exact commit-versioned NEURAL image was not published successfully; deployment blocked."
+              )
 
-          print(f"Verified published NEURAL container image for source commit {source_commit}.")
+          print(
+              f"Verified the CI-tested NEURAL image for source commit {source_commit} "
+              f"from workflow run {run_id}."
+          )
           PY
 
       - name: Authenticate to Octopus Deploy using GitHub OIDC
