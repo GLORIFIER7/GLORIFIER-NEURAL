@@ -157,9 +157,9 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
 def test_time_window_uses_decimal_hhmm_and_blocks_before_0831():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert workflow.count('current_hhmm_decimal=$((10#$current_hhmm))') == 2
-    assert workflow.count("current_hhmm_decimal < 831") == 2
-    assert workflow.count('[[ ! "$current_hhmm" =~ ^[0-9]{4}$ ]]') == 2
+    assert workflow.count('current_hhmm_decimal=$((10#$current_hhmm))') == 1
+    assert workflow.count("current_hhmm_decimal < 831") == 1
+    assert workflow.count('[[ ! "$current_hhmm" =~ ^[0-9]{4}$ ]]') == 1
 
 
 def test_codex_engineering_cycle_is_not_gated_by_the_publication_window():
@@ -439,7 +439,7 @@ def test_publish_validates_patch_in_an_alternate_index_before_worktree_apply():
 def test_isolated_agent_workspace_includes_project_readme_for_uv_run():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'cp README.md "$agent_dir/"' in workflow
+    assert 'cp pyproject.toml uv.lock README.md "$agent_dir/"' in workflow
     assert 'git -C "$agent_dir" add -- app tests pyproject.toml uv.lock README.md' in workflow
 
 
