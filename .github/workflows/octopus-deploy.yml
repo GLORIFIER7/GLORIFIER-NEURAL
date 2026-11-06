@@ -56,7 +56,7 @@ jobs:
           for name in OCTOPUS_SPACE OCTOPUS_PROJECT OCTOPUS_ENVIRONMENT OCTOPUS_SERVICE_ACCOUNT_ID; do
             value="${!name:-}"
             if [[ -z "$value" ]]; then
-              echo "::error::Missing repository Actions variable: $name. Configure the Octopus integration before deploying."
+              echo "::error::Missing required Octopus configuration: $name. Configure the Octopus integration before deploying."
               exit 1
             fi
           done
