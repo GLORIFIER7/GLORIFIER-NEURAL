@@ -147,11 +147,11 @@ jobs:
         with:
           name: glorifier-neural-image-${{ github.sha }}
           path: /tmp/glorifier-neural-image
-      - name: Publish the immutable commit-versioned image
+      - name: Publish the CI-tested run-attempt image
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
-          IMAGE: ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}
+          IMAGE: ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
