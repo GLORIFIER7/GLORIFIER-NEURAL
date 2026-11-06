@@ -178,18 +178,48 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
 
 
 
-def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch():
-    import asyncio
+def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch(monkeypatch):
+    import app.providers as nvidia_module
+    class FakeController:
+        class Signal:
+            aborted = False
+
+        def __init__(self):
+            self.signal = self.Signal()
+            self.abort_calls = 0
+
+        def abort(self):
+            self.abort_calls += 1
+            self.signal.aborted = True
+
+    class FakeBody:
+        def __init__(self):
+            self.cancel_calls = 0
+
+        async def cancel(self):
+            self.cancel_calls += 1
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self):
+            self.body = FakeBody()
+
+    controller = FakeController()
+    monkeypatch.setattr(nvidia_module, "create_abort_controller", lambda: controller)
 
     async def exercise():
         finish = asyncio.Event()
+        response = FakeResponse()
 
-        async def resistant_fetch(*_args, **_kwargs):
+        async def resistant_fetch(*_args, signal=None, **_kwargs):
+            assert signal is controller.signal
             try:
                 await finish.wait()
             except asyncio.CancelledError:
+                # Simulate a Fetch promise that completes late despite abort().
                 await finish.wait()
-                raise
+                return response
 
         adapter = NvidiaNimAdapter(
             api_key="test-key",
@@ -199,13 +229,19 @@ def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch():
         )
         asyncio.get_running_loop().call_later(0.15, finish.set)
         started = asyncio.get_running_loop().time()
-        try:
-            await adapter.acheck_readiness()
-        except RuntimeError as error:
-            assert str(error) == "NVIDIA NIM readiness probe exceeded its timeout"
+        if "NVIDIA" == "OpenAI":
+            with pytest.raises(RuntimeError, match="request exceeded its timeout"):
+                await adapter.ainfer("bounded deadline")
         else:
-            raise AssertionError("expected the NVIDIA Fetch deadline to expire")
+            with pytest.raises(RuntimeError, match="readiness probe exceeded its timeout"):
+                await adapter.acheck_readiness()
         assert asyncio.get_running_loop().time() - started < 0.10
+        assert controller.abort_calls == 1
+        assert controller.signal.aborted is True
+        finish.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert response.body.cancel_calls == 1
 
     asyncio.run(exercise())
 
