@@ -199,9 +199,11 @@ def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch(mo
     class FakeBody:
         def __init__(self):
             self.cancel_calls = 0
+            self.cancelled = asyncio.Event()
 
         async def cancel(self):
             self.cancel_calls += 1
+            self.cancelled.set()
 
     class FakeResponse:
         status = 200
@@ -239,8 +241,7 @@ def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch(mo
         assert controller.abort_calls == 1
         assert controller.signal.aborted is True
         finish.set()
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await asyncio.wait_for(response.body.cancelled.wait(), timeout=0.2)
         assert response.body.cancel_calls == 1
 
     asyncio.run(exercise())
