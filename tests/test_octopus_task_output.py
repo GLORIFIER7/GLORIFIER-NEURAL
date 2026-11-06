@@ -31,7 +31,7 @@ def _task_output_script() -> str:
     assert run, "The task validation step must contain an inline Bash script"
 
     return "\n".join(
-        line[10:] if line.startswith("          ") else line
+        line.removeprefix("          ")
         for line in run.group(1).splitlines()
     ).rstrip()
 
