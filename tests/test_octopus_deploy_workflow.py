@@ -70,5 +70,12 @@ def test_octopus_preflight_rejects_stale_source_commit_before_oidc():
     assert 'if [[ "$current_main_sha" != "$SOURCE_COMMIT" ]]; then' in source
 
 
+
+
+def test_neural_octopus_only_deploys_a_successful_main_push():
+    assert "github.event.workflow_run.event == 'push'" in WORKFLOW
+    assert "github.event.workflow_run.head_sha == github.sha" in WORKFLOW
+
+
 def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
     assert WORKFLOW.count("package_version: 0.0.0-${{ env.SOURCE_COMMIT }}") == 2
