@@ -5,7 +5,6 @@ secret manager and explicitly inject it into the provider registry.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -13,7 +12,7 @@ import urllib.error
 import urllib.request
 
 from app.providers.base import InferenceResult, ProviderAdapter
-from app.providers.http import ResponseBodyTooLargeError, await_js_until, read_bounded_response_text
+from app.providers.http import ResponseBodyTooLargeError, await_with_deadline, read_bounded_response_text
 
 
 class _NvidiaNimHttpStatusError(RuntimeError):
@@ -172,7 +171,7 @@ class NvidiaNimAdapter(ProviderAdapter):
         """Fetch and bound the response text before JSON decoding."""
         deadline = time.monotonic() + min(timeout_seconds, self._timeout)
         try:
-            response = await await_js_until(
+            response = await await_with_deadline(
                 fetch_fn(url, **options),
                 deadline=deadline,
             )
