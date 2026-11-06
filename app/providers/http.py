@@ -37,7 +37,7 @@ async def _cancel_reader(reader: Any) -> None:
     if callable(cancel):
         try:
             await _await_js(cancel())
-        except Exception:  # noqa: BLE001 - cancellation is best effort
+        except Exception:  # noqa: BLE001, S110 - cancellation is best effort
             pass
 
 
@@ -88,7 +88,7 @@ async def read_bounded_response_text(
     if not callable(get_reader):
         get_reader = getattr(body, "get_reader", None)
     if not callable(get_reader):
-        raise ValueError("provider response does not expose a readable stream")
+        raise TypeError("provider response does not expose a readable stream")
 
     reader = get_reader()
     deadline = time.monotonic() + float(timeout_seconds)
@@ -131,5 +131,5 @@ async def read_bounded_response_text(
         if callable(release):
             try:
                 release()
-            except Exception:  # noqa: BLE001 - do not mask the read result
+            except Exception:  # noqa: BLE001, S110 - do not mask the read result
                 pass
