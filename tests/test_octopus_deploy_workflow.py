@@ -164,7 +164,7 @@ def test_octopus_service_account_secret_is_scoped_to_the_oidc_login_step():
         deploy,
     )
     assert login, "The Octopus OIDC login step must exist"
-    assert "service_account_id: \${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}" in login.group(1)
+    assert "service_account_id: " + "${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}" in login.group(1)
 
 
 def test_octopus_jobs_api_fetches_every_page_and_validates_total_count():
