@@ -167,6 +167,19 @@ def test_octopus_service_account_secret_is_scoped_to_the_oidc_login_step():
     assert "service_account_id: " + "${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}" in login.group(1)
 
 
+def test_octopus_service_account_secret_has_a_step_scoped_presence_check():
+    validation = re.search(
+        r"(?ms)^      - name: Validate Octopus service account secret is configured\\n"
+        r"(.*?)(?=^      - name:|\\Z)",
+        WORKFLOW,
+    )
+    assert validation, "A step-scoped service-account secret preflight must exist"
+    step = validation.group(1)
+    assert "OCTOPUS_SERVICE_ACCOUNT_ID: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}" in step
+    assert 'test -n "${OCTOPUS_SERVICE_ACCOUNT_ID:-}"' in step
+    assert "echo \"::error::Missing environment secret OCTOPUS_SERVICE_ACCOUNT_ID.\"" in step
+
+
 def test_octopus_jobs_api_fetches_every_page_and_validates_total_count():
     assert "total_count" in WORKFLOW
     assert "page += 1" in WORKFLOW
