@@ -166,19 +166,23 @@ class NvidiaNimAdapter(ProviderAdapter):
         readiness: bool,
     ) -> str:
         """Fetch and bound the response text before JSON decoding."""
+        deadline = time.monotonic() + min(timeout_seconds, self._timeout)
         try:
             response = await asyncio.wait_for(
                 fetch_fn(url, **options),
-                timeout=min(timeout_seconds, self._timeout),
+                timeout=max(0.001, deadline - time.monotonic()),
             )
             status = int(response.status)
             if status != 200:
                 label = "readiness probe" if readiness else "request"
                 raise RuntimeError(f"NVIDIA NIM {label} failed with HTTP {status}")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NVIDIA NIM response exceeded its deadline")
             raw = await read_bounded_response_text(
                 response,
                 max_bytes=max_bytes,
-                timeout_seconds=min(timeout_seconds, self._timeout),
+                timeout_seconds=remaining,
             )
         except ResponseBodyTooLargeError:
             raise RuntimeError("NVIDIA NIM response exceeded the response size limit") from None
