@@ -118,7 +118,7 @@ def test_neural_octopus_requires_the_ci_image_publisher_to_succeed():
 def test_manual_dispatch_requires_a_successful_image_publish_for_the_current_commit():
     assert 'elif event_name == "workflow_dispatch":' in WORKFLOW
     assert "actions/workflows/ci.yml/runs?" in WORKFLOW
-    assert '"head_sha": source_commit' in WORKFLOW
+    assert 'upstream.get("head_sha") != source_commit' in WORKFLOW
     assert "No successful main-branch CI push exists for this exact source commit" in WORKFLOW
     assert 'event_name == "workflow_run"' in WORKFLOW
 
