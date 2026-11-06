@@ -152,7 +152,7 @@ jobs:
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
-          IMAGE: ghcr.io/glorifier7/glorifier-neural:sha-${{ github.sha }}
+          IMAGE: ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}
         run: |
           set -euo pipefail
           docker load --input /tmp/glorifier-neural-image/glorifier-neural-ci.tar
