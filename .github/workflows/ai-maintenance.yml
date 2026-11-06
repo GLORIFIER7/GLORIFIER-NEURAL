@@ -212,6 +212,18 @@ jobs:
           path: ${{ runner.temp }}/ai-maintenance.patch
           retention-days: 1
 
+      - name: Verify uploaded patch artifact ID
+        if: ${{ steps.upload_patch.outcome == 'success' }}
+        shell: bash
+        env:
+          PATCH_ARTIFACT_ID: ${{ steps.upload_patch.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PATCH_ARTIFACT_ID:-}" ]]; then
+            echo "::error::Patch artifact upload did not return artifact-id."
+            exit 1
+          fi
+
       - name: Report that AI maintenance is not enabled
         if: ${{ steps.authorization.outputs.enabled != 'true' }}
         run: |
