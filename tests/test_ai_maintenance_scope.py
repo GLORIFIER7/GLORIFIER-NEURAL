@@ -1,6 +1,8 @@
 """Security regression tests for the autonomous NEURAL maintenance workflow."""
 
 from pathlib import Path
+import os
+import shutil
 import subprocess
 import sys
 
@@ -42,12 +44,15 @@ def _repository(tmp_path: Path) -> Path:
     return repository
 
 
-def _validate(repository: Path) -> subprocess.CompletedProcess[str]:
+def _validate(
+    repository: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(VALIDATOR), "--repo", str(repository)],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -353,3 +358,100 @@ def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
     assert "GH_REPO: ${{ github.repository }}" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
+
+
+def test_scope_validator_rejects_rename_from_outside_into_allowed_root(tmp_path: Path):
+    repository = _repository(tmp_path)
+    _git(repository, "mv", "README.md", "app/evil.py")
+
+    result = _validate(repository)
+
+    assert result.returncode != 0
+    assert "README.md" in result.stderr
+
+
+def test_scope_validator_rejects_drive_qualified_paths_inside_allowed_roots(tmp_path: Path):
+    repository = _repository(tmp_path)
+    drive_path = repository / "app" / "C:" / "evil.py"
+    drive_path.parent.mkdir()
+    drive_path.write_text("outside = True\n", encoding="utf-8")
+
+    result = _validate(repository)
+
+    assert result.returncode != 0
+    assert "app/C:/evil.py" in result.stderr
+
+
+def test_scope_validator_rejects_out_of_scope_patch_in_an_alternate_index(tmp_path: Path):
+    source_root = tmp_path / "source"
+    publish_root = tmp_path / "publish"
+    source_root.mkdir()
+    publish_root.mkdir()
+    source = _repository(source_root)
+    publish = _repository(publish_root)
+
+    (source / "README.md").write_text("changed outside allowed roots\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    patch = subprocess.run(
+        ["git", "diff", "--cached", "--binary"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert patch
+
+    validation_index = tmp_path / "validation-index"
+    shutil.copy2(publish / ".git" / "index", validation_index)
+    environment = os.environ.copy()
+    environment["GIT_INDEX_FILE"] = str(validation_index)
+    subprocess.run(
+        ["git", "apply", "--cached", "--binary", "-"],
+        cwd=publish,
+        input=patch,
+        check=True,
+        capture_output=True,
+        env=environment,
+    )
+
+    result = _validate(publish, env=environment)
+
+    assert result.returncode != 0
+    assert "README.md" in result.stderr
+    assert (publish / "README.md").read_text(encoding="utf-8") == "fixture\n"
+
+
+def test_publish_validates_patch_in_an_alternate_index_before_worktree_apply():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+    apply_start = publish_section.index("- name: Apply validated Git patch")
+    apply_end = publish_section.find("\n      - name:", apply_start + 1)
+    apply_step = publish_section[apply_start:] if apply_end < 0 else publish_section[apply_start:apply_end]
+
+    assert "GIT_INDEX_FILE" in apply_step
+    assert apply_step.index("git apply --cached --binary") < apply_step.index(
+        "python scripts/validate_ai_maintenance_scope.py"
+    )
+    assert apply_step.index("python scripts/validate_ai_maintenance_scope.py") < apply_step.index(
+        "git apply --index --binary"
+    )
+
+
+def test_isolated_agent_workspace_includes_project_readme_for_uv_run():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'cp README.md "$agent_dir/"' in workflow
+    assert 'git -C "$agent_dir" add -- app tests pyproject.toml uv.lock README.md' in workflow
+
+
+def test_codex_job_does_not_duplicate_the_publish_time_window_gate():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    codex_section = workflow[workflow.index("  codex:"):workflow.index("  publish:")]
+
+    assert "id: time_window" not in codex_section
+    assert "Check publication window (Laos)" not in codex_section
+
+
+def test_dispatched_pr_head_sha_validation_accepts_uppercase_hex():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in workflow
