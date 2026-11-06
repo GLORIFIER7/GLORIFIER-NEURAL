@@ -2,6 +2,33 @@ from app.providers import NvidiaNimAdapter
 from app.runtime import build_orchestrator_from_environment
 from app.schemas import TaskRequest
 from typing import ClassVar
+from types import SimpleNamespace
+
+
+class _RuntimeBodyReader:
+    def __init__(self, body: bytes):
+        self._body = body
+        self._read = False
+
+    async def read(self):
+        if self._read:
+            return SimpleNamespace(done=True, value=None)
+        self._read = True
+        return SimpleNamespace(done=False, value=self._body)
+
+    async def cancel(self):
+        return None
+
+    def releaseLock(self):
+        return None
+
+
+class _RuntimeReadableStream:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def getReader(self):
+        return _RuntimeBodyReader(self._body)
 
 
 def clear_runtime_environment(monkeypatch):
@@ -101,9 +128,7 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
             self.status = 200
             self.headers = {"content-length": str(len(json.dumps(payload)))}
             self.payload = payload
-
-        async def text(self):
-            return json.dumps(self.payload)
+            self.body = _RuntimeReadableStream(json.dumps(payload).encode())
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
         calls.append({
@@ -152,9 +177,76 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
     assert calls[1]["redirect"] == "manual"
 
 
+
+def test_nvidia_fetch_deadline_does_not_wait_for_cancellation_resistant_fetch(monkeypatch):
+    import app.providers as nvidia_module
+    class FakeController:
+        class Signal:
+            aborted = False
+
+        def __init__(self):
+            self.signal = self.Signal()
+            self.abort_calls = 0
+
+        def abort(self):
+            self.abort_calls += 1
+            self.signal.aborted = True
+
+    class FakeBody:
+        def __init__(self):
+            self.cancel_calls = 0
+
+        async def cancel(self):
+            self.cancel_calls += 1
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self):
+            self.body = FakeBody()
+
+    controller = FakeController()
+    monkeypatch.setattr(nvidia_module, "create_abort_controller", lambda: controller)
+
+    async def exercise():
+        finish = asyncio.Event()
+        response = FakeResponse()
+
+        async def resistant_fetch(*_args, signal=None, **_kwargs):
+            assert signal is controller.signal
+            try:
+                await finish.wait()
+            except asyncio.CancelledError:
+                # Simulate a Fetch promise that completes late despite abort().
+                await finish.wait()
+                return response
+
+        adapter = NvidiaNimAdapter(
+            api_key="test-key",
+            model="nvidia/test-model",
+            timeout_seconds=0.04,
+            fetch_fn=resistant_fetch,
+        )
+        asyncio.get_running_loop().call_later(0.15, finish.set)
+        started = asyncio.get_running_loop().time()
+        if "NVIDIA" == "OpenAI":
+            with pytest.raises(RuntimeError, match="request exceeded its timeout"):
+                await adapter.ainfer("bounded deadline")
+        else:
+            with pytest.raises(RuntimeError, match="readiness probe exceeded its timeout"):
+                await adapter.acheck_readiness()
+        assert asyncio.get_running_loop().time() - started < 0.10
+        assert controller.abort_calls == 1
+        assert controller.signal.aborted is True
+        finish.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert response.body.cancel_calls == 1
+
+    asyncio.run(exercise())
+
 def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkeypatch):
     import asyncio
-    import json
 
     clear_runtime_environment(monkeypatch)
 
@@ -163,9 +255,7 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
     class FakeResponse:
         status = 200
         headers: ClassVar[dict[str, str]] = {}
-
-        async def text(self):
-            return json.dumps({"id": "gpt-6-luna", "object": "model"})
+        body = _RuntimeReadableStream(b'{"id":"gpt-6-luna","object":"model"}')
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
         assert method == "GET", "inference-disabled readiness must not submit task prompts"
