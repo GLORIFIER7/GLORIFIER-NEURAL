@@ -219,10 +219,10 @@ jobs:
           PATCH_ARTIFACT_ID: ${{ steps.upload_patch.outputs.artifact-id }}
         run: |
           set -euo pipefail
-          if [[ -z "${PATCH_ARTIFACT_ID:-}" ]]; then
+          test -n "${PATCH_ARTIFACT_ID:-}" || {
             echo "::error::Patch artifact upload did not return artifact-id."
             exit 1
-          fi
+          }
 
       - name: Report that AI maintenance is not enabled
         if: ${{ steps.authorization.outputs.enabled != 'true' }}
