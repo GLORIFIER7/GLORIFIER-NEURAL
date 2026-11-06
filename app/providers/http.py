@@ -10,7 +10,7 @@ import time
 from typing import Any, NoReturn
 
 
-CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.01
+CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.05
 
 
 class ResponseBodyTooLargeError(ValueError):
@@ -50,7 +50,7 @@ async def _await_task_until(task: asyncio.Task[Any], *, deadline: float) -> Any:
     if remaining <= 0:
         task.cancel()
         task.add_done_callback(_consume_task_result)
-        raise TimeoutError("provider response body exceeded its deadline")
+        raise TimeoutError("provider operation exceeded its deadline")
 
     try:
         completed, _ = await asyncio.wait({task}, timeout=remaining)
@@ -62,18 +62,18 @@ async def _await_task_until(task: asyncio.Task[Any], *, deadline: float) -> Any:
     if not completed:
         task.cancel()
         task.add_done_callback(_consume_task_result)
-        raise TimeoutError("provider response body exceeded its deadline")
+        raise TimeoutError("provider operation exceeded its deadline")
     return task.result()
 
 
-async def await_js_until(awaitable: Any, *, deadline: float) -> Any:
-    """Await a Fetch coroutine or JavaScript Promise without exceeding its deadline."""
+async def await_with_deadline(awaitable: Any, *, deadline: float) -> Any:
+    """Await a provider fetch without blocking on cancellation-resistant work."""
     task = asyncio.create_task(_await_js(awaitable))
     return await _await_task_until(task, deadline=deadline)
 
 
 async def _cancel_target(target: Any, *, deadline: float) -> None:
-    """Request cancellation, but never spend more than the remaining deadline."""
+    """Request cancellation with a small, bounded cleanup budget."""
     cancel = getattr(target, "cancel", None)
     cleanup_deadline = min(deadline, time.monotonic() + CANCELLATION_CLEANUP_BUDGET_SECONDS)
     if not callable(cancel) or cleanup_deadline <= time.monotonic():
@@ -186,17 +186,14 @@ async def _read_chunks(
     *,
     max_bytes: int,
     deadline: float,
-    pending_reads: set[asyncio.Task[Any]],
+    pending_read: list[asyncio.Task[Any] | None],
 ) -> bytearray:
     collected = bytearray()
     while True:
         read_task = asyncio.create_task(_await_js(reader.read()))
-        try:
-            result = await _await_task_until(read_task, deadline=deadline)
-        except BaseException:
-            if not read_task.done():
-                pending_reads.add(read_task)
-            raise
+        pending_read[0] = read_task
+        result = await _await_task_until(read_task, deadline=deadline)
+        pending_read[0] = None
         if _read_result_field(result, "done") is True:
             return collected
         value = _read_result_field(result, "value")
@@ -220,25 +217,15 @@ def _release_reader(reader: Any) -> None:
             release()
 
 
-def _release_reader_when_idle(
-    reader: Any,
-    pending_reads: set[asyncio.Task[Any]],
-) -> None:
-    """Release the Web Streams lock only after every outstanding read settles."""
-    outstanding = {task for task in pending_reads if not task.done()}
-    if not outstanding:
+def _defer_reader_release(reader: Any, pending_read: asyncio.Task[Any] | None) -> bool:
+    if pending_read is None or pending_read.done():
+        return False
+
+    def release_after_read(_task: asyncio.Task[Any]) -> None:
         _release_reader(reader)
-        return
 
-    remaining = set(outstanding)
-
-    def release_after_read(task: asyncio.Task[Any]) -> None:
-        remaining.discard(task)
-        if not remaining:
-            _release_reader(reader)
-
-    for task in outstanding:
-        task.add_done_callback(release_after_read)
+    pending_read.add_done_callback(release_after_read)
+    return True
 
 
 async def read_bounded_response_text(
@@ -250,8 +237,8 @@ async def read_bounded_response_text(
     """Read a Fetch Response incrementally under a byte and absolute-time ceiling.
 
     The body stream is cancelled on malformed or oversized declared lengths,
-    streamed overflow, timeout, caller cancellation, and read failure. Read and
-    cancellation waits cannot block the caller beyond the remaining deadline.
+    streamed overflow, timeout, caller cancellation, and read failure. A reader
+    lock is released only after any pending read has settled.
     """
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
         raise ValueError("max_bytes must be a positive integer")
@@ -264,23 +251,31 @@ async def read_bounded_response_text(
     deadline = time.monotonic() + timeout_value
     reader = await _response_reader(response, max_bytes=max_bytes, deadline=deadline)
     read_deadline = deadline - min(0.05, timeout_value * 0.1)
-    pending_reads: set[asyncio.Task[Any]] = set()
+    pending_read: list[asyncio.Task[Any] | None] = [None]
+    release_deferred = False
     try:
         collected = await _read_chunks(
             reader,
             max_bytes=max_bytes,
             deadline=read_deadline,
-            pending_reads=pending_reads,
+            pending_read=pending_read,
         )
         try:
             return collected.decode("utf-8")
         except UnicodeDecodeError:
             raise ValueError("provider response was not valid UTF-8") from None
     except asyncio.CancelledError:
-        await _cancel_target(reader, deadline=deadline)
+        try:
+            await _cancel_target(reader, deadline=deadline)
+        finally:
+            release_deferred = _defer_reader_release(reader, pending_read[0])
         raise
     except Exception:
-        await _cancel_target(reader, deadline=deadline)
+        try:
+            await _cancel_target(reader, deadline=deadline)
+        finally:
+            release_deferred = _defer_reader_release(reader, pending_read[0])
         raise
     finally:
-        _release_reader_when_idle(reader, pending_reads)
+        if not release_deferred:
+            _release_reader(reader)
