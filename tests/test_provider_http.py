@@ -171,6 +171,47 @@ def test_stalled_cancellation_cannot_extend_absolute_deadline():
     assert response.body_reader.release_calls == 1
 
 
+
+def test_reader_lock_is_released_only_after_cancelled_read_finishes():
+    class ResistantReader(FakeReader):
+        def __init__(self):
+            super().__init__([])
+            self.started = asyncio.Event()
+            self.finish = asyncio.Event()
+
+        async def read(self):
+            self.read_calls += 1
+            self.started.set()
+            try:
+                await self.finish.wait()
+            except asyncio.CancelledError:
+                # Simulate a Web Streams read whose Promise settles after cancellation.
+                await self.finish.wait()
+            return FakeReadResult(done=True)
+
+    response = FakeResponse([])
+    response.body_reader = ResistantReader()
+    response.body = FakeStream(response.body_reader)
+
+    async def exercise():
+        task = asyncio.create_task(
+            read_bounded_response_text(
+                response, max_bytes=16, timeout_seconds=0.05
+            )
+        )
+        await response.body_reader.started.wait()
+        with pytest.raises(TimeoutError):
+            await task
+
+        # A real ReadableStream reader cannot release while a read request remains pending.
+        assert response.body_reader.release_calls == 0
+        response.body_reader.finish.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert response.body_reader.release_calls == 1
+
+    asyncio.run(exercise())
+
 def test_rejects_oversized_typed_array_before_materializing_bytes():
     class OversizedUint8Array:
         byteLength = 1_000_000
