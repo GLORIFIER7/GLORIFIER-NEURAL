@@ -93,7 +93,7 @@ def test_neural_octopus_only_deploys_a_successful_main_push():
 
 
 def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
-    assert WORKFLOW.count("package_version: 0.0.0-${{ env.SOURCE_COMMIT }}") == 2
+    assert WORKFLOW.count("package_version: ${{ steps.verify-image.outputs.package_version }}") == 2
 
 
 def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
@@ -105,7 +105,7 @@ def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
     assert "packages: write" in job
     assert "Download the exact image exported by the passing CI matrix" in job
     assert "docker load --input /tmp/glorifier-neural-image/glorifier-neural-ci.tar" in job
-    assert "ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}" in job
+    assert "ghcr.io/glorifier7/glorifier-neural:0.0.0-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}" in job
     assert "docker build" not in job, "The publisher must publish the tested artifact, not rebuild it"
 
     assert "Upload the CI-tested container image" in CI_WORKFLOW
@@ -115,7 +115,7 @@ def test_neural_main_ci_publishes_the_exact_image_that_passed_the_test_matrix():
 def test_neural_octopus_requires_the_ci_image_publisher_to_succeed():
     assert "actions: read" in WORKFLOW
     assert 'job.get("name") == "Publish the CI-tested NEURAL image to GHCR"' in WORKFLOW
-    assert 'step.get("name") == "Publish the immutable commit-versioned image"' in WORKFLOW
+    assert 'step.get("name") == "Publish the CI-tested run-attempt image"' in WORKFLOW
 
 def test_manual_dispatch_requires_a_successful_image_publish_for_the_current_commit():
     assert 'elif event_name == "workflow_dispatch":' in WORKFLOW
@@ -123,6 +123,16 @@ def test_manual_dispatch_requires_a_successful_image_publish_for_the_current_com
     assert 'upstream.get("head_sha") != source_commit' in WORKFLOW
     assert "No successful main-branch CI push exists for this exact source commit" in WORKFLOW
     assert 'event_name == "workflow_run"' in WORKFLOW
+
+
+
+def test_octopus_release_uses_the_exact_verified_ci_run_attempt_image():
+    assert 'run_attempt = upstream.get("run_attempt")' in WORKFLOW
+    assert "isinstance(run_attempt, bool)" in WORKFLOW
+    assert "isinstance(run_attempt, int)" in WORKFLOW
+    assert 'package_version = f"0.0.0-{source_commit}-{run_id}-{run_attempt}"' in WORKFLOW
+    assert 'output.write("package_version=" + package_version + chr(10))' in WORKFLOW
+    assert WORKFLOW.count("steps.verify-image.outputs.package_version") == 2
 
 
 def test_octopus_preflight_rejects_multiple_deployment_environments():
