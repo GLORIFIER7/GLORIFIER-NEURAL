@@ -49,7 +49,10 @@ def parse_commit_timestamp(value: str) -> datetime:
     normalized = value.strip()
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
-    parsed = datetime.fromisoformat(normalized)
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("GitHub commit timestamp is malformed; expected valid ISO 8601.") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("GitHub commit timestamp must include a timezone.")
     return parsed.astimezone(UTC)
@@ -87,6 +90,8 @@ def _commit_age_seconds(repo: str, token: str, head_sha: str) -> float:
     if not isinstance(committer, dict) or not isinstance(author, dict):
         raise TypeError("GitHub returned malformed commit identity data.")
     timestamp = committer.get("date") or author.get("date")
+    if not timestamp:
+        raise ValueError("GitHub commit is missing both committer.date and author.date.")
     committed_at = parse_commit_timestamp(timestamp)
     age_seconds = (datetime.now(UTC) - committed_at).total_seconds()
     if age_seconds < 0:
