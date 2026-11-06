@@ -178,6 +178,11 @@ def test_reader_lock_is_released_only_after_cancelled_read_finishes():
             super().__init__([])
             self.started = asyncio.Event()
             self.finish = asyncio.Event()
+            self.released = asyncio.Event()
+
+        def releaseLock(self):
+            super().releaseLock()
+            self.released.set()
 
         async def read(self):
             self.read_calls += 1
@@ -206,8 +211,7 @@ def test_reader_lock_is_released_only_after_cancelled_read_finishes():
         # A real ReadableStream reader cannot release while a read request remains pending.
         assert response.body_reader.release_calls == 0
         response.body_reader.finish.set()
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await asyncio.wait_for(response.body_reader.released.wait(), timeout=0.05)
         assert response.body_reader.release_calls == 1
 
     asyncio.run(exercise())
