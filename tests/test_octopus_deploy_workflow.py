@@ -11,6 +11,13 @@ WORKFLOW = (
     / "octopus-deploy.yml"
 ).read_text(encoding="utf-8")
 
+CI_WORKFLOW = (
+    Path(__file__).resolve().parents[1]
+    / ".github"
+    / "workflows"
+    / "ci.yml"
+).read_text(encoding="utf-8")
+
 
 def test_octopus_job_timeout_leaves_headroom_after_await_action_timeout():
     deploy = re.search(
@@ -85,3 +92,9 @@ def test_neural_octopus_only_deploys_a_successful_main_push():
 
 def test_both_octopus_release_paths_pin_package_version_to_ci_tested_source_commit():
     assert WORKFLOW.count("package_version: 0.0.0-${{ env.SOURCE_COMMIT }}") == 2
+
+
+def test_octopus_integration_does_not_add_package_publication_permissions():
+    assert "publish-container:" not in CI_WORKFLOW
+    assert "packages: write" not in CI_WORKFLOW
+    assert "Upload the exact CI-tested container image" not in CI_WORKFLOW
