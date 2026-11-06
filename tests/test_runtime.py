@@ -2,6 +2,33 @@ from app.providers import NvidiaNimAdapter
 from app.runtime import build_orchestrator_from_environment
 from app.schemas import TaskRequest
 from typing import ClassVar
+from types import SimpleNamespace
+
+
+class _RuntimeBodyReader:
+    def __init__(self, body: bytes):
+        self._body = body
+        self._read = False
+
+    async def read(self):
+        if self._read:
+            return SimpleNamespace(done=True, value=None)
+        self._read = True
+        return SimpleNamespace(done=False, value=self._body)
+
+    async def cancel(self):
+        return None
+
+    def releaseLock(self):
+        return None
+
+
+class _RuntimeReadableStream:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def getReader(self):
+        return _RuntimeBodyReader(self._body)
 
 
 def clear_runtime_environment(monkeypatch):
@@ -101,9 +128,7 @@ def test_cloudflare_runtime_uses_request_scoped_nvidia_bindings_and_fetch():
             self.status = 200
             self.headers = {"content-length": str(len(json.dumps(payload)))}
             self.payload = payload
-
-        async def text(self):
-            return json.dumps(self.payload)
+            self.body = _RuntimeReadableStream(json.dumps(payload).encode())
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
         calls.append({
@@ -163,9 +188,7 @@ def test_openai_readiness_can_be_verified_without_enabling_task_inference(monkey
     class FakeResponse:
         status = 200
         headers: ClassVar[dict[str, str]] = {}
-
-        async def text(self):
-            return json.dumps({"id": "gpt-6-luna", "object": "model"})
+        body = _RuntimeReadableStream(b'{"id":"gpt-6-luna","object":"model"}')
 
     async def fake_fetch(url, *, method, headers, body=None, redirect="manual"):
         assert method == "GET", "inference-disabled readiness must not submit task prompts"
