@@ -10,12 +10,13 @@ WORKFLOW = (
 ).read_text(encoding="utf-8")
 
 
-def test_trusted_policy_runs_only_from_default_branch_events():
+def test_trusted_policy_runs_from_base_branch_pull_request_target_events():
     assert "schedule:" in WORKFLOW
     assert "push:" in WORKFLOW
     assert "branches: [main]" in WORKFLOW
+    assert "pull_request_target:" in WORKFLOW
+    assert "types: [opened, reopened, synchronize, ready_for_review]" in WORKFLOW
     assert "pull_request:" not in WORKFLOW
-    assert "pull_request_target:" not in WORKFLOW
 
 
 def test_trusted_policy_has_exact_least_privilege_permissions():
