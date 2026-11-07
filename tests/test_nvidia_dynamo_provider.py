@@ -59,6 +59,10 @@ def test_dynamo_adapter_requires_https_and_an_exact_origin_allowlist():
         allowed_origin="https://dynamo.example",
     ).is_configured()
     assert not _adapter(allowed_origin="https://*.example").is_configured()
+    assert not _adapter(
+        base_url="https://*.example/v1",
+        allowed_origin="https://*.example",
+    ).is_configured()
     assert not _adapter(base_url="https://user:pass@dynamo.example/v1").is_configured()
     assert not _adapter(base_url="https://dynamo.example/v1?forward=1").is_configured()
 
@@ -384,8 +388,14 @@ def test_dynamo_sync_readiness_accepts_a_real_http_client_response(monkeypatch):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
+    class RetainedHTTPConnection(
+        dynamo_module._RetainSocketDuringResponseMixin,
+        http.client.HTTPConnection,
+    ):
+        pass
+
     def open_local_http(_url, *, timeout):
-        return http.client.HTTPConnection(
+        return RetainedHTTPConnection(
             "127.0.0.1",
             server.server_port,
             timeout=timeout,
