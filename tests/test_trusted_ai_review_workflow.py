@@ -21,6 +21,7 @@ def test_trusted_policy_uses_default_branch_workflow_run_not_pr_workflow_code():
     assert 'workflows: ["CI"]' in workflow_run
     assert "types: [completed]" in workflow_run
     assert "branches:" not in workflow_run
+    assert "branches-ignore:" not in workflow_run
 
 
 def test_trusted_policy_has_exact_least_privilege_permissions():
