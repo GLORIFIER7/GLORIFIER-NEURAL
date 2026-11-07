@@ -26,18 +26,6 @@ class _DynamoHttpStatusError(RuntimeError):
     """Sanitized HTTP status failure from the configured Dynamo frontend."""
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Never forward an inference credential to a redirect destination."""
-
-    def redirect_request(self, request, response, code, message, headers, new_url):
-        return None
-
-
-def _open_dynamo_request(request: urllib.request.Request, *, timeout: float):
-    opener = urllib.request.build_opener(_NoRedirectHandler())
-    return opener.open(request, timeout=timeout)
-
-
 def _canonical_https_origin(value: str) -> str | None:
     """Return an exact HTTPS origin, rejecting credentials and non-origin components."""
     try:
