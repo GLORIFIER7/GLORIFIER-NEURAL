@@ -249,24 +249,15 @@ class _FakeSyncResponse:
     status = 200
 
     def __init__(self, body: bytes, *, clock=None, read_delay: float = 0.0) -> None:
-        from types import SimpleNamespace
-
         self.headers = {"x-request-id": "req-dynamo-sync"}
-        self.socket = _FakeSocket()
-        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
         self._body = body
         self._clock = clock
         self._read_delay = read_delay
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return None
+        self.connection = None
 
     def read1(self, limit: int) -> bytes:
         if self._clock is not None and self._read_delay:
-            available = self.socket.current_timeout or 0.0
+            available = self.connection.sock.current_timeout or 0.0
             if self._read_delay > available:
                 self._clock[0] += available
                 raise TimeoutError("simulated slow Dynamo response")
@@ -274,6 +265,29 @@ class _FakeSyncResponse:
         chunk = self._body[:limit]
         self._body = self._body[len(chunk):]
         return chunk
+
+
+class _FakeSyncConnection:
+    def __init__(self, response, captured: dict) -> None:
+        self.sock = _FakeSocket()
+        self.response = response
+        self.captured = captured
+        self.response.connection = self
+        self.closed = False
+
+    def request(self, method, path, *, body=None, headers=None):
+        self.captured.update({
+            "method": method,
+            "path": path,
+            "body": body,
+            "headers": headers or {},
+        })
+
+    def getresponse(self):
+        return self.response
+
+    def close(self):
+        self.closed = True
 
 
 def test_dynamo_sync_readiness_uses_authenticated_model_catalogue_request(monkeypatch):
@@ -286,19 +300,18 @@ def test_dynamo_sync_readiness_uses_authenticated_model_catalogue_request(monkey
     }).encode()
     response = _FakeSyncResponse(body)
 
-    def fake_open(request, *, timeout):
-        captured["url"] = request.full_url
-        captured["method"] = request.get_method()
-        captured["authorization"] = request.get_header("Authorization")
+    def fake_open(url, *, timeout):
+        captured["url"] = url
         captured["timeout"] = timeout
-        return response
+        return _FakeSyncConnection(response, captured)
 
-    monkeypatch.setattr(dynamo_module, "_open_dynamo_request", fake_open)
+    monkeypatch.setattr(dynamo_module, "_open_sync_connection", fake_open)
     _adapter().check_readiness()
 
     assert captured["url"] == "https://dynamo.example/v1/models"
+    assert captured["path"] == "/v1/models"
     assert captured["method"] == "GET"
-    assert captured["authorization"] == "Bearer dynamo-test-secret"
+    assert captured["headers"]["Authorization"] == "Bearer dynamo-test-secret"
     assert 0 < captured["timeout"] <= 5
 
 
@@ -312,20 +325,74 @@ def test_dynamo_sync_readiness_uses_one_deadline_for_connect_and_body(monkeypatc
         "data": [{"id": "Qwen/Qwen3-0.6B", "object": "model"}],
     }).encode()
     response = _FakeSyncResponse(body, clock=clock, read_delay=0.6)
+    captured = {}
 
-    def open_after_slow_connection(_request, *, timeout):
+    def open_after_slow_connection(url, *, timeout):
+        assert url == "https://dynamo.example/v1/models"
         assert timeout == pytest.approx(5.0)
         clock[0] += 4.5
-        return response
+        return _FakeSyncConnection(response, captured)
 
     monkeypatch.setattr(
         dynamo_module,
-        "_open_dynamo_request",
+        "_open_sync_connection",
         open_after_slow_connection,
     )
 
     with pytest.raises(RuntimeError, match="unavailable or exceeded its timeout"):
         _adapter().check_readiness()
 
-    assert response.socket.timeouts == pytest.approx([0.5])
+    assert response.connection.sock.timeouts[-1] == pytest.approx(0.5)
     assert clock[0] == pytest.approx(105.0)
+    assert response.connection.closed is True
+
+
+def test_dynamo_sync_readiness_accepts_a_real_http_client_response(monkeypatch):
+    import http.client
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    import app.providers.dynamo as dynamo_module
+
+    payload = json.dumps({
+        "object": "list",
+        "data": [{"id": "Qwen/Qwen3-0.6B", "object": "model"}],
+    }).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if (
+                self.path != "/v1/models"
+                or self.headers.get("Authorization") != "Bearer dynamo-test-secret"
+            ):
+                self.send_error(400)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("X-Request-ID", "req-local-http")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def open_local_http(_url, *, timeout):
+        return http.client.HTTPConnection(
+            "127.0.0.1",
+            server.server_port,
+            timeout=timeout,
+        )
+
+    monkeypatch.setattr(dynamo_module, "_open_sync_connection", open_local_http)
+    try:
+        _adapter().check_readiness()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
