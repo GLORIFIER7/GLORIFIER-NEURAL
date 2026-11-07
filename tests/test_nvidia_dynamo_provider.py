@@ -363,6 +363,9 @@ def test_dynamo_sync_readiness_accepts_a_real_http_client_response(monkeypatch):
     }).encode()
 
     class Handler(BaseHTTPRequestHandler):
+        # Exercise HTTP/1.0's normal connection-close response semantics.
+        protocol_version = "HTTP/1.0"
+
         def do_GET(self):
             if (
                 self.path != "/v1/models"
