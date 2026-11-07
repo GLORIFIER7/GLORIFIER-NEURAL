@@ -402,3 +402,13 @@ def test_dynamo_sync_readiness_accepts_a_real_http_client_response(monkeypatch):
         server.server_close()
         thread.join(timeout=2)
 
+@pytest.mark.parametrize(
+    ("base_url", "allowed_origin"),
+    [
+        ("https://*.example/v1", "https://*.example"),
+        ("https://api.*.example/v1", "https://api.*.example"),
+    ],
+)
+def test_dynamo_adapter_rejects_matching_wildcard_hostnames(base_url, allowed_origin):
+    """A wildcard in both the API URL and allowlist must never authorize egress."""
+    assert not _adapter(base_url=base_url, allowed_origin=allowed_origin).is_configured()
