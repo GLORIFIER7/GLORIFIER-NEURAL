@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-classifiers = ["License :: OSI Approved :: Apache Software License"]
 dependencies = ["fastapi>=0.115,<1.0", "uvicorn[standard]>=0.30,<1.0", "pydantic>=2.8,<3.0"]
 
 [project.optional-dependencies]
