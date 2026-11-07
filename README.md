@@ -2,6 +2,10 @@
 
 A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest successful production smoke on 2026-11-05 returned HTTP 200 from `/health` and `/ready`; provider access, read-only Neon connectivity, authentication, and rate limiting were VERIFIED. A direct Cloudflare settings read-back later that day confirmed `GLORIFIER_PROVIDER=openai`, external data egress enabled, Neon connectivity enabled, and `GLORIFIER_ENABLE_INFERENCE=true`. Optional audit and task-run persistence remain unconfigured. The smoke test did not submit a prompt or perform inference, so end-to-end model execution remains NOT VERIFIED.
 
+## License
+
+This project is distributed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the complete terms. The license does not grant rights to use GLORIFIER names, logos, or trademarks. Third-party dependencies and assets remain subject to their respective licenses and notices.
+
 ## Current capabilities
 
 - FastAPI liveness/status endpoint at `GET /health`.
