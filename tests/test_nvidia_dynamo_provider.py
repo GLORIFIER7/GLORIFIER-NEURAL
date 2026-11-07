@@ -1,6 +1,5 @@
 import asyncio
 import json
-import urllib.error
 from typing import ClassVar
 
 import pytest
