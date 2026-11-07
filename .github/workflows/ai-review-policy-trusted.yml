@@ -5,6 +5,8 @@ on:
     branches: [main]
   schedule:
     - cron: "*/15 * * * *"
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
