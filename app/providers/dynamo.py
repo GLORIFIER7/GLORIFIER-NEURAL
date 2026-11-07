@@ -37,6 +37,7 @@ def _canonical_https_origin(value: str) -> str | None:
     if (
         parsed.scheme.casefold() != "https"
         or not parsed.hostname
+        or "*" in parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path not in ("", "/")
@@ -59,6 +60,7 @@ def _validated_api_base(base_url: str, allowed_origin: str) -> str | None:
         origin is None
         or parsed.scheme.casefold() != "https"
         or not parsed.hostname
+        or "*" in parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path.rstrip("/") != "/v1"
@@ -72,12 +74,37 @@ def _validated_api_base(base_url: str, allowed_origin: str) -> str | None:
     return f"{origin}/v1"
 
 
+class _RetainSocketDuringResponseMixin:
+    """Keep an HTTP connection socket alive while a close-after-response body is read."""
+
+    _retain_socket_during_getresponse = False
+
+    def getresponse(self):
+        self._retain_socket_during_getresponse = True
+        try:
+            return super().getresponse()
+        finally:
+            self._retain_socket_during_getresponse = False
+
+    def close(self):
+        if self._retain_socket_during_getresponse:
+            return
+        super().close()
+
+
+class _DeadlineHTTPSConnection(
+    _RetainSocketDuringResponseMixin,
+    http.client.HTTPSConnection,
+):
+    """HTTPS connection that retains its socket for bounded response reads."""
+
+
 def _open_sync_connection(url: str, *, timeout: float) -> http.client.HTTPSConnection:
-    """Create a normal certificate-validating HTTPS connection to the pinned origin."""
+    """Create a certificate-validating HTTPS connection with a retained response socket."""
     parsed = urlsplit(url)
     if parsed.scheme.casefold() != "https" or not parsed.hostname:
         raise OSError("NVIDIA Dynamo sync transport requires an HTTPS URL")
-    return http.client.HTTPSConnection(
+    return _DeadlineHTTPSConnection(
         parsed.hostname,
         parsed.port or 443,
         timeout=timeout,
