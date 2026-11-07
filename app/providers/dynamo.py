@@ -191,7 +191,7 @@ class NvidiaDynamoAdapter(ProviderAdapter):
         except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
             raise RuntimeError("NVIDIA Dynamo returned an invalid JSON response") from None
         if not isinstance(payload, dict):
-            raise RuntimeError("NVIDIA Dynamo returned an invalid JSON object")
+            raise TypeError("NVIDIA Dynamo returned an invalid JSON object")
         return payload
 
     def _validate_prompt(self, prompt: str, timeout_seconds: float) -> None:
