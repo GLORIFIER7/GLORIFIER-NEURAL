@@ -200,6 +200,9 @@ def _worker_readiness_cache_key(request: Request) -> tuple[str, ...]:
         "GLORIFIER_ENABLE_INFERENCE",
         "GLORIFIER_PROVIDER",
         "NVIDIA_NIM_MODEL",
+        "NVIDIA_DYNAMO_MODEL",
+        "NVIDIA_DYNAMO_BASE_URL",
+        "NVIDIA_DYNAMO_ALLOWED_ORIGIN",
         "OPENAI_MODEL",
         "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS",
         "GLORIFIER_NEON_CONNECTIVITY_ENABLED",
@@ -208,6 +211,7 @@ def _worker_readiness_cache_key(request: Request) -> tuple[str, ...]:
     return (
         *values,
         "nvidia-key-present" if _request_environment_value(request, "NVIDIA_NIM_API_KEY") else "nvidia-key-absent",
+        "dynamo-key-present" if _request_environment_value(request, "NVIDIA_DYNAMO_API_KEY") else "dynamo-key-absent",
         "openai-key-present" if _request_environment_value(request, "OPENAI_API_KEY") else "openai-key-absent",
         "neon-readonly-bound" if _request_worker_binding(request, "NEON_READONLY") is not None else "neon-readonly-unbound",
     )
