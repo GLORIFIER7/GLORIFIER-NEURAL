@@ -87,11 +87,11 @@ def _validated_api_base(base_url: str, allowed_origin: str) -> str | None:
 def _read_sync_bounded_response(
     response,
     *,
-    timeout_seconds: float,
+    deadline: float,
     max_bytes: int,
 ) -> bytes:
-    """Read in bounded chunks against one absolute deadline."""
-    deadline = time.monotonic() + timeout_seconds
+    """Read in bounded chunks against the request's absolute deadline."""
+
     response_file = getattr(response, "fp", None)
     raw_stream = getattr(response_file, "raw", None)
     response_socket = getattr(raw_stream, "_sock", None)
@@ -235,15 +235,18 @@ class NvidiaDynamoAdapter(ProviderAdapter):
             headers=self._request_headers(has_body=body is not None),
         )
         label = "readiness probe" if readiness else "request"
-        deadline_budget = min(timeout_seconds, self._timeout)
+        deadline = time.monotonic() + min(timeout_seconds, self._timeout)
         try:
-            with _open_dynamo_request(request, timeout=deadline_budget) as response:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NVIDIA Dynamo request exceeded its deadline")
+            with _open_dynamo_request(request, timeout=remaining) as response:
                 status = int(response.status)
                 if status != 200:
                     raise _DynamoHttpStatusError(f"NVIDIA Dynamo {label} failed with HTTP {status}")
                 raw = _read_sync_bounded_response(
                     response,
-                    timeout_seconds=deadline_budget,
+                    deadline=deadline,
                     max_bytes=max_bytes,
                 )
                 response_id = self._request_id(response)
