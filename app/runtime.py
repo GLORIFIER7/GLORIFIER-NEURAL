@@ -12,6 +12,7 @@ from typing import Any
 
 from app.orchestrator import Orchestrator
 from app.providers import NvidiaNimAdapter
+from app.providers.dynamo import NvidiaDynamoAdapter
 from app.providers.openai import OpenAIResponsesAdapter
 from app.providers.registry import ProviderRegistry
 
@@ -66,6 +67,18 @@ def build_orchestrator_from_environment(
             NvidiaNimAdapter(
                 api_key=api_key,
                 model=model,
+                fetch_fn=fetch_fn,
+            )
+        )
+    elif external_egress_allowed and provider_name == NvidiaDynamoAdapter.name:
+        registry.register(
+            NvidiaDynamoAdapter(
+                api_key=_environment_value(environment, "NVIDIA_DYNAMO_API_KEY"),
+                model=_environment_value(environment, "NVIDIA_DYNAMO_MODEL"),
+                base_url=_environment_value(environment, "NVIDIA_DYNAMO_BASE_URL"),
+                allowed_origin=_environment_value(
+                    environment, "NVIDIA_DYNAMO_ALLOWED_ORIGIN"
+                ),
                 fetch_fn=fetch_fn,
             )
         )
