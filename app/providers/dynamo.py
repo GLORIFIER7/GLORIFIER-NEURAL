@@ -6,11 +6,11 @@ through the runtime factory.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
+import ssl
 import time
-import urllib.error
-import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 from app.providers.base import InferenceResult, ProviderAdapter
@@ -84,33 +84,51 @@ def _validated_api_base(base_url: str, allowed_origin: str) -> str | None:
     return f"{origin}/v1"
 
 
+def _open_sync_connection(url: str, *, timeout: float) -> http.client.HTTPSConnection:
+    """Create a normal certificate-validating HTTPS connection to the pinned origin."""
+    parsed = urlsplit(url)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        raise OSError("NVIDIA Dynamo sync transport requires an HTTPS URL")
+    return http.client.HTTPSConnection(
+        parsed.hostname,
+        parsed.port or 443,
+        timeout=timeout,
+        context=ssl.create_default_context(),
+    )
+
+
+def _set_sync_connection_timeout(connection, *, deadline: float) -> None:
+    """Apply the remaining absolute request budget to the public connection socket."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("NVIDIA Dynamo request exceeded its deadline")
+    connection_socket = getattr(connection, "sock", None)
+    if connection_socket is None:
+        raise OSError("NVIDIA Dynamo HTTPS connection has no active socket")
+    connection_socket.settimeout(remaining)
+
+
 def _read_sync_bounded_response(
     response,
     *,
+    connection,
     deadline: float,
     max_bytes: int,
 ) -> bytes:
-    """Read in bounded chunks against the request's absolute deadline."""
-
-    response_file = getattr(response, "fp", None)
-    raw_stream = getattr(response_file, "raw", None)
-    response_socket = getattr(raw_stream, "_sock", None)
+    """Read a standard HTTPResponse in bounded chunks against one absolute deadline."""
     read_once = getattr(response, "read1", None)
-    if response_socket is None or not callable(read_once):
-        raise OSError("Dynamo response does not expose a bounded deadline-capable stream")
+    if not callable(read_once):
+        raise OSError("NVIDIA Dynamo HTTP response does not support bounded reads")
 
     body = bytearray()
     while len(body) < max_bytes + 1:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("Dynamo response exceeded its deadline")
-        response_socket.settimeout(remaining)
+        _set_sync_connection_timeout(connection, deadline=deadline)
         chunk = read_once(min(8_192, max_bytes + 1 - len(body)))
         if not chunk:
             break
         body.extend(chunk)
     if time.monotonic() > deadline:
-        raise TimeoutError("Dynamo response exceeded its deadline")
+        raise TimeoutError("NVIDIA Dynamo response exceeded its deadline")
     return bytes(body)
 
 
@@ -228,37 +246,51 @@ class NvidiaDynamoAdapter(ProviderAdapter):
         readiness: bool,
     ) -> tuple[dict, object]:
         self._require_configured()
-        request = urllib.request.Request(
-            self._url(path),
-            data=body.encode("utf-8") if body is not None else None,
-            method=method,
-            headers=self._request_headers(has_body=body is not None),
-        )
+        url = self._url(path)
+        parsed = urlsplit(url)
+        request_target = urlunsplit(("", "", parsed.path, parsed.query, ""))
         label = "readiness probe" if readiness else "request"
         deadline = time.monotonic() + min(timeout_seconds, self._timeout)
+        connection = None
         try:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("NVIDIA Dynamo request exceeded its deadline")
-            with _open_dynamo_request(request, timeout=remaining) as response:
-                status = int(response.status)
-                if status != 200:
-                    raise _DynamoHttpStatusError(f"NVIDIA Dynamo {label} failed with HTTP {status}")
-                raw = _read_sync_bounded_response(
-                    response,
-                    deadline=deadline,
-                    max_bytes=max_bytes,
+            connection = _open_sync_connection(url, timeout=remaining)
+            connection.request(
+                method,
+                request_target,
+                body=body.encode("utf-8") if body is not None else None,
+                headers=self._request_headers(has_body=body is not None),
+            )
+            _set_sync_connection_timeout(connection, deadline=deadline)
+            response = connection.getresponse()
+            status = int(response.status)
+            if status != 200:
+                raise _DynamoHttpStatusError(
+                    f"NVIDIA Dynamo {label} failed with HTTP {status}"
                 )
-                response_id = self._request_id(response)
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"NVIDIA Dynamo {label} failed with HTTP {exc.code}") from None
+            raw = _read_sync_bounded_response(
+                response,
+                connection=connection,
+                deadline=deadline,
+                max_bytes=max_bytes,
+            )
+            response_id = response.getheader("x-request-id")
         except _DynamoHttpStatusError:
             raise
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise RuntimeError(f"NVIDIA Dynamo {label} is unavailable or exceeded its timeout") from None
+        except (http.client.HTTPException, TimeoutError, OSError):
+            raise RuntimeError(
+                f"NVIDIA Dynamo {label} is unavailable or exceeded its timeout"
+            ) from None
+        finally:
+            if connection is not None:
+                connection.close()
+
         if len(raw) > max_bytes:
             raise RuntimeError("NVIDIA Dynamo response exceeded the response size limit")
         return self._decode_json(raw), response_id
+
 
     def check_readiness(self) -> None:
         """Check the selected model catalogue only; this does not run inference."""
