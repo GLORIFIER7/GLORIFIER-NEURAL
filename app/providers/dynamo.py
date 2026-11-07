@@ -22,6 +22,18 @@ from app.providers.http import (
 )
 
 
+class _ConnectionOwnedHTTPResponse(http.client.HTTPResponse):
+    """Keep the connection socket owned until the bounded response body is consumed."""
+
+    def begin(self) -> None:
+        super().begin()
+        # HTTPConnection.getresponse() closes its socket immediately for a
+        # Connection: close response. This adapter still needs the socket to
+        # enforce the remaining deadline while reading the response body, and
+        # _sync_json_request closes the connection in its finally block.
+        self.will_close = False
+
+
 class _DynamoHttpStatusError(RuntimeError):
     """Sanitized HTTP status failure from the configured Dynamo frontend."""
 
@@ -244,6 +256,8 @@ class NvidiaDynamoAdapter(ProviderAdapter):
             if remaining <= 0:
                 raise TimeoutError("NVIDIA Dynamo request exceeded its deadline")
             connection = _open_sync_connection(url, timeout=remaining)
+            if isinstance(connection, http.client.HTTPConnection):
+                connection.response_class = _ConnectionOwnedHTTPResponse
             connection.request(
                 method,
                 request_target,
