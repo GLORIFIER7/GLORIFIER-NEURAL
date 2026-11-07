@@ -255,6 +255,9 @@ class _FakeSyncResponse:
         self._read_delay = read_delay
         self.connection = None
 
+    def getheader(self, name: str):
+        return self.headers.get(name)
+
     def read1(self, limit: int) -> bytes:
         if self._clock is not None and self._read_delay:
             available = self.connection.sock.current_timeout or 0.0
