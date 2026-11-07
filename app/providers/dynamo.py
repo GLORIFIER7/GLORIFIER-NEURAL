@@ -49,6 +49,7 @@ def _canonical_https_origin(value: str) -> str | None:
     if (
         parsed.scheme.casefold() != "https"
         or not parsed.hostname
+        or "*" in parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path not in ("", "/")
@@ -71,6 +72,7 @@ def _validated_api_base(base_url: str, allowed_origin: str) -> str | None:
         origin is None
         or parsed.scheme.casefold() != "https"
         or not parsed.hostname
+        or "*" in parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path.rstrip("/") != "/v1"
