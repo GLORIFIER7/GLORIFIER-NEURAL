@@ -10,13 +10,17 @@ WORKFLOW = (
 ).read_text(encoding="utf-8")
 
 
-def test_trusted_policy_runs_from_base_branch_pull_request_target_events():
+def test_trusted_policy_uses_default_branch_workflow_run_not_pr_workflow_code():
     assert "schedule:" in WORKFLOW
     assert "push:" in WORKFLOW
-    assert "branches: [main]" in WORKFLOW
-    assert "pull_request_target:" in WORKFLOW
-    assert "types: [opened, reopened, synchronize, ready_for_review]" in WORKFLOW
     assert "pull_request:" not in WORKFLOW
+    assert "pull_request_target:" not in WORKFLOW
+    workflow_run = WORKFLOW.partition("  workflow_run:")[2].partition(
+        "permissions:"
+    )[0]
+    assert 'workflows: ["CI"]' in workflow_run
+    assert "types: [completed]" in workflow_run
+    assert "branches:" not in workflow_run
 
 
 def test_trusted_policy_has_exact_least_privilege_permissions():
@@ -59,8 +63,10 @@ def test_trusted_policy_rechecks_after_ci_completion():
     assert "types: [completed]" in WORKFLOW
 
 
-def test_trusted_policy_workflow_run_is_limited_to_default_branch_ci():
+def test_trusted_policy_workflow_run_includes_pr_ci_completions():
     workflow_run = WORKFLOW.partition("  workflow_run:")[2].partition(
         "permissions:"
     )[0]
-    assert "branches: [main]" in workflow_run
+    assert 'workflows: ["CI"]' in workflow_run
+    assert "types: [completed]" in workflow_run
+    assert "branches:" not in workflow_run
