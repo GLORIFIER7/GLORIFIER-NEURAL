@@ -267,9 +267,15 @@ class NvidiaDynamoAdapter(ProviderAdapter):
             response_id = response.getheader("x-request-id")
         except _DynamoHttpStatusError:
             raise
-        except (http.client.HTTPException, TimeoutError, OSError):
+        except (http.client.HTTPException, TimeoutError, OSError) as exc:
+            error_kind = type(exc).__name__
+            error_number = getattr(exc, "errno", None)
+            suffix = f" (transport={error_kind}"
+            if isinstance(error_number, int):
+                suffix += f", errno={error_number}"
+            suffix += ")"
             raise RuntimeError(
-                f"NVIDIA Dynamo {label} is unavailable or exceeded its timeout"
+                f"NVIDIA Dynamo {label} is unavailable or exceeded its timeout{suffix}"
             ) from None
         finally:
             if connection is not None:
