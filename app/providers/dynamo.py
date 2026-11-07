@@ -85,12 +85,11 @@ def _open_sync_connection(url: str, *, timeout: float) -> http.client.HTTPSConne
     )
 
 
-def _set_sync_connection_timeout(connection, *, deadline: float) -> None:
-    """Apply the remaining absolute request budget to the public connection socket."""
+def _set_sync_socket_timeout(connection_socket, *, deadline: float) -> None:
+    """Apply the remaining absolute request budget to a retained public socket."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("NVIDIA Dynamo request exceeded its deadline")
-    connection_socket = getattr(connection, "sock", None)
     if connection_socket is None:
         raise OSError("NVIDIA Dynamo HTTPS connection has no active socket")
     connection_socket.settimeout(remaining)
@@ -99,7 +98,7 @@ def _set_sync_connection_timeout(connection, *, deadline: float) -> None:
 def _read_sync_bounded_response(
     response,
     *,
-    connection,
+    connection_socket,
     deadline: float,
     max_bytes: int,
 ) -> bytes:
@@ -110,7 +109,7 @@ def _read_sync_bounded_response(
 
     body = bytearray()
     while len(body) < max_bytes + 1:
-        _set_sync_connection_timeout(connection, deadline=deadline)
+        _set_sync_socket_timeout(connection_socket, deadline=deadline)
         chunk = read_once(min(8_192, max_bytes + 1 - len(body)))
         if not chunk:
             break
@@ -251,7 +250,8 @@ class NvidiaDynamoAdapter(ProviderAdapter):
                 body=body.encode("utf-8") if body is not None else None,
                 headers=self._request_headers(has_body=body is not None),
             )
-            _set_sync_connection_timeout(connection, deadline=deadline)
+            connection_socket = getattr(connection, "sock", None)
+            _set_sync_socket_timeout(connection_socket, deadline=deadline)
             response = connection.getresponse()
             status = int(response.status)
             if status != 200:
@@ -260,7 +260,7 @@ class NvidiaDynamoAdapter(ProviderAdapter):
                 )
             raw = _read_sync_bounded_response(
                 response,
-                connection=connection,
+                connection_socket=connection_socket,
                 deadline=deadline,
                 max_bytes=max_bytes,
             )
