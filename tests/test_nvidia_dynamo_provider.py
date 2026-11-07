@@ -1,6 +1,5 @@
 import asyncio
 import json
-from typing import ClassVar
 
 import pytest
 
@@ -36,7 +35,7 @@ class _FakeStream:
 class _FakeResponse:
     def __init__(self, status: int, payload: dict | bytes, request_id: str = "req-dynamo-1"):
         self.status = status
-        self.headers: ClassVar[dict[str, str]] = {"x-request-id": request_id}
+        self.headers: dict[str, str] = {"x-request-id": request_id}
         body = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
         self.body = _FakeStream(body)
 
@@ -135,7 +134,8 @@ def test_dynamo_async_inference_uses_openai_chat_completions_without_streaming()
 
 def test_dynamo_readiness_rejects_missing_model_without_running_inference():
     async def fake_fetch(_url, *, method, **_kwargs):
-        assert method == "GET"
+        if method != "GET":
+            raise RuntimeError(f"Expected GET, got {method}")
         return _FakeResponse(200, {"object": "list", "data": [{"id": "different-model"}]})
 
     with pytest.raises(RuntimeError, match="not present"):
