@@ -233,3 +233,99 @@ def test_runtime_does_not_register_dynamo_when_external_egress_is_not_authorized
     orchestrator = build_orchestrator_from_environment(environment)
 
     assert orchestrator._providers.get("nvidia_dynamo") is None
+
+
+class _FakeSocket:
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+        self.current_timeout: float | None = None
+
+    def settimeout(self, timeout: float) -> None:
+        self.current_timeout = timeout
+        self.timeouts.append(timeout)
+
+
+class _FakeSyncResponse:
+    status = 200
+
+    def __init__(self, body: bytes, *, clock=None, read_delay: float = 0.0) -> None:
+        from types import SimpleNamespace
+
+        self.headers = {"x-request-id": "req-dynamo-sync"}
+        self.socket = _FakeSocket()
+        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self.socket))
+        self._body = body
+        self._clock = clock
+        self._read_delay = read_delay
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read1(self, limit: int) -> bytes:
+        if self._clock is not None and self._read_delay:
+            available = self.socket.current_timeout or 0.0
+            if self._read_delay > available:
+                self._clock[0] += available
+                raise TimeoutError("simulated slow Dynamo response")
+            self._clock[0] += self._read_delay
+        chunk = self._body[:limit]
+        self._body = self._body[len(chunk):]
+        return chunk
+
+
+def test_dynamo_sync_readiness_uses_authenticated_model_catalogue_request(monkeypatch):
+    import app.providers.dynamo as dynamo_module
+
+    captured = {}
+    body = json.dumps({
+        "object": "list",
+        "data": [{"id": "Qwen/Qwen3-0.6B", "object": "model"}],
+    }).encode()
+    response = _FakeSyncResponse(body)
+
+    def fake_open(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        return response
+
+    monkeypatch.setattr(dynamo_module, "_open_dynamo_request", fake_open)
+    _adapter().check_readiness()
+
+    assert captured["url"] == "https://dynamo.example/v1/models"
+    assert captured["method"] == "GET"
+    assert captured["authorization"] == "Bearer dynamo-test-secret"
+    assert 0 < captured["timeout"] <= 5
+
+
+def test_dynamo_sync_readiness_uses_one_deadline_for_connect_and_body(monkeypatch):
+    import app.providers.dynamo as dynamo_module
+
+    clock = [100.0]
+    monkeypatch.setattr(dynamo_module.time, "monotonic", lambda: clock[0])
+    body = json.dumps({
+        "object": "list",
+        "data": [{"id": "Qwen/Qwen3-0.6B", "object": "model"}],
+    }).encode()
+    response = _FakeSyncResponse(body, clock=clock, read_delay=0.6)
+
+    def open_after_slow_connection(_request, *, timeout):
+        assert timeout == pytest.approx(5.0)
+        clock[0] += 4.5
+        return response
+
+    monkeypatch.setattr(
+        dynamo_module,
+        "_open_dynamo_request",
+        open_after_slow_connection,
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable or exceeded its timeout"):
+        _adapter().check_readiness()
+
+    assert response.socket.timeouts == pytest.approx([0.5])
+    assert clock[0] == pytest.approx(105.0)
