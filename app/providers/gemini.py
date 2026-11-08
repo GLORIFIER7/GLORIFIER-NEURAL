@@ -263,6 +263,9 @@ class GeminiInteractionsAdapter(ProviderAdapter):
         fetch_options = dict(options)
         if abort_controller is not None:
             fetch_options["signal"] = abort_controller.signal
+
+        transport_error = None
+        response = None
         try:
             response = await await_with_deadline(
                 fetch_fn(url, **fetch_options),
@@ -271,16 +274,22 @@ class GeminiInteractionsAdapter(ProviderAdapter):
             )
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
-            raise RuntimeError(f"Gemini {label} exceeded its timeout") from None
+            transport_error = f"Gemini {label} exceeded its timeout"
         except Exception:  # noqa: BLE001 - transport errors may contain credentials
             label = "readiness endpoint" if readiness else "request"
-            raise RuntimeError(f"Gemini {label} is unavailable") from None
+            transport_error = f"Gemini {label} is unavailable"
+        if transport_error is not None:
+            # Raise after leaving the except block so the original exception is not
+            # retained in __context__ or exposed by a caller's traceback.
+            raise RuntimeError(transport_error)
 
         try:
             status = int(response.status)
         except Exception:  # noqa: BLE001 - do not expose malformed transport responses
+            status = None
+        if status is None:
             label = "readiness endpoint" if readiness else "request"
-            raise RuntimeError(f"Gemini {label} is unavailable") from None
+            raise RuntimeError(f"Gemini {label} is unavailable")
         if status != 200:
             label = "readiness probe" if readiness else "request"
             raise RuntimeError(f"Gemini {label} failed with HTTP {status}")
@@ -289,6 +298,9 @@ class GeminiInteractionsAdapter(ProviderAdapter):
         if remaining <= 0:
             label = "readiness probe" if readiness else "request"
             raise RuntimeError(f"Gemini {label} exceeded its timeout")
+
+        body_error = None
+        raw = None
         try:
             raw = await read_bounded_response_text(
                 response,
@@ -296,13 +308,16 @@ class GeminiInteractionsAdapter(ProviderAdapter):
                 timeout_seconds=remaining,
             )
         except ResponseBodyTooLargeError:
-            raise RuntimeError("Gemini response exceeded the response size limit") from None
+            body_error = f"Gemini response exceeded the response size limit"
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
-            raise RuntimeError(f"Gemini {label} exceeded its timeout") from None
+            body_error = f"Gemini {label} exceeded its timeout"
         except Exception:  # noqa: BLE001 - body errors may contain credentials
             label = "readiness endpoint" if readiness else "request"
-            raise RuntimeError(f"Gemini {label} is unavailable") from None
+            body_error = f"Gemini {label} is unavailable"
+        if body_error is not None:
+            # As above, do not retain an upstream exception as implicit context.
+            raise RuntimeError(body_error)
         return raw, response
 
     async def _fetch_json(
