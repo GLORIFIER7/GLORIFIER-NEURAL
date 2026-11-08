@@ -308,7 +308,7 @@ class GeminiInteractionsAdapter(ProviderAdapter):
                 timeout_seconds=remaining,
             )
         except ResponseBodyTooLargeError:
-            body_error = f"Gemini response exceeded the response size limit"
+            body_error = "Gemini response exceeded the response size limit"
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
             body_error = f"Gemini {label} exceeded its timeout"
