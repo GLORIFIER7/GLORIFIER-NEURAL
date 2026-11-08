@@ -294,7 +294,7 @@ class AnthropicMessagesAdapter(ProviderAdapter):
                 timeout_seconds=remaining,
             )
         except ResponseBodyTooLargeError:
-            body_error = f"Anthropic response exceeded the response size limit"
+            body_error = "Anthropic response exceeded the response size limit"
         except TimeoutError:
             label = "readiness probe" if readiness else "request"
             body_error = f"Anthropic {label} exceeded its timeout"
