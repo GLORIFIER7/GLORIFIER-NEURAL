@@ -90,8 +90,8 @@ The service supports Gemini through Google's recommended Interactions API. The d
 Configure the following only after the owner has supplied a valid Gemini API key:
 
 - Set `GLORIFIER_PROVIDER=gemini`.
-- Set `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` to permit provider readiness and external requests.
-- Set `GLORIFIER_ENABLE_INFERENCE=true` separately before task prompts may be sent.
+- Explicitly set `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` at deployment time to permit provider readiness and external requests; the tracked Worker configuration defaults this switch to `false`.
+- Separately set `GLORIFIER_ENABLE_INFERENCE=true` only after an authorized inference test is approved; the tracked Worker configuration defaults this switch to `false`.
 - Store `GEMINI_API_KEY` as a Cloudflare Worker secret.
 - Optionally set `GEMINI_MODEL`; the default is `gemini-3.8-flash`.
 
@@ -104,8 +104,8 @@ The service supports Claude through Anthropic's Messages API. The default model 
 Configure the following only after the owner has supplied a valid Anthropic API key:
 
 - Set `GLORIFIER_PROVIDER=anthropic`.
-- Set `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` to permit provider readiness and external requests.
-- Set `GLORIFIER_ENABLE_INFERENCE=true` separately before task prompts may be sent.
+- Explicitly set `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true` at deployment time to permit provider readiness and external requests; the tracked Worker configuration defaults this switch to `false`.
+- Separately set `GLORIFIER_ENABLE_INFERENCE=true` only after an authorized inference test is approved; the tracked Worker configuration defaults this switch to `false`.
 - Store `ANTHROPIC_API_KEY` as a Cloudflare Worker secret.
 - Optionally set `ANTHROPIC_MODEL`; the default is `claude-sonnet-5`.
 
