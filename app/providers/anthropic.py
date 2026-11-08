@@ -176,8 +176,7 @@ class AnthropicMessagesAdapter(ProviderAdapter):
             label = "readiness endpoint" if readiness else "request"
             raise RuntimeError(f"Anthropic {label} is unavailable") from None
         if len(raw) > max_bytes:
-            label = "model response" if readiness else "response"
-            raise RuntimeError(f"Anthropic {label} exceeded the response size limit")
+            raise RuntimeError("Anthropic response exceeded the response size limit")
         return self._decode_json(raw), request_id
 
     def check_readiness(self) -> None:
