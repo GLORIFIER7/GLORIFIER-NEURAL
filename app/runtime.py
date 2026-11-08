@@ -88,11 +88,7 @@ def build_orchestrator_from_environment(
         registry.register(
             GeminiInteractionsAdapter(
                 api_key=_environment_value(environment, "GEMINI_API_KEY"),
-                model=_environment_value(
-                    environment,
-                    "GEMINI_MODEL",
-                    GeminiInteractionsAdapter.default_model,
-                ),
+                model=_environment_value(environment, "GEMINI_MODEL"),
                 fetch_fn=fetch_fn,
             )
         )
@@ -100,11 +96,7 @@ def build_orchestrator_from_environment(
         registry.register(
             AnthropicMessagesAdapter(
                 api_key=_environment_value(environment, "ANTHROPIC_API_KEY"),
-                model=_environment_value(
-                    environment,
-                    "ANTHROPIC_MODEL",
-                    AnthropicMessagesAdapter.default_model,
-                ),
+                model=_environment_value(environment, "ANTHROPIC_MODEL"),
                 fetch_fn=fetch_fn,
             )
         )
