@@ -109,6 +109,30 @@ def test_anthropic_async_provider_sanitizes_upstream_errors():
 
     assert "request-scoped-secret" not in str(exc_info.value)
     assert "private upstream detail" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_anthropic_async_readiness_rejects_http_errors_without_echoing_upstream_body():
+    async def failed_fetch(*_args, **_kwargs):
+        return FakeResponse(
+            {"error": {"message": "private upstream body contains request-scoped-secret"}},
+            status=502,
+        )
+
+    adapter = AnthropicMessagesAdapter(
+        api_key="request-scoped-secret",
+        model="claude-sonnet-5",
+        fetch_fn=failed_fetch,
+    )
+
+    with pytest.raises(RuntimeError, match="readiness probe failed with HTTP 502") as exc_info:
+        asyncio.run(adapter.acheck_readiness())
+
+    assert "request-scoped-secret" not in str(exc_info.value)
+    assert "private upstream body" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_anthropic_async_provider_rejects_malformed_or_empty_message_output():
