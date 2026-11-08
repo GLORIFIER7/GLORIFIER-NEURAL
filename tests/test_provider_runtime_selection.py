@@ -20,6 +20,20 @@ def test_runtime_registers_gemini_only_with_explicit_egress_and_credentials():
     assert orchestrator._allow_inference is False
 
 
+def test_runtime_does_not_register_gemini_with_blank_api_key():
+    environment = {
+        "GLORIFIER_PROVIDER": "gemini",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
+        "GEMINI_API_KEY": "",
+        "GEMINI_MODEL": "gemini-3.8-flash",
+    }
+
+    orchestrator = build_orchestrator_from_environment(environment)
+
+    assert orchestrator._providers.get("gemini") is None
+    assert orchestrator._providers.configured_names() == ()
+
+
 def test_runtime_does_not_register_gemini_without_egress_consent():
     environment = {
         "GLORIFIER_PROVIDER": "gemini",
@@ -72,6 +86,20 @@ def test_runtime_registers_anthropic_only_with_explicit_egress_and_credentials()
     assert isinstance(adapter, AnthropicMessagesAdapter)
     assert orchestrator._provider_name == "anthropic"
     assert orchestrator._allow_inference is False
+
+
+def test_runtime_does_not_register_anthropic_with_blank_api_key():
+    environment = {
+        "GLORIFIER_PROVIDER": "anthropic",
+        "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS": "true",
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_MODEL": "claude-sonnet-5",
+    }
+
+    orchestrator = build_orchestrator_from_environment(environment)
+
+    assert orchestrator._providers.get("anthropic") is None
+    assert orchestrator._providers.configured_names() == ()
 
 
 def test_runtime_does_not_register_anthropic_without_egress_consent():
