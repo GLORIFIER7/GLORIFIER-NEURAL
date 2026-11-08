@@ -1,6 +1,5 @@
 import asyncio
 import json
-from typing import ClassVar
 
 import pytest
 
@@ -36,7 +35,7 @@ class FakeStream:
 class FakeResponse:
     def __init__(self, payload, status=200, *, headers=None):
         self.status = status
-        self.headers: ClassVar[dict[str, str]] = headers or {}
+        self.headers: dict[str, str] = headers or {}
         self.body = FakeStream(json.dumps(payload).encode("utf-8"))
 
 
@@ -109,6 +108,30 @@ def test_gemini_async_provider_sanitizes_upstream_errors():
 
     assert "request-scoped-secret" not in str(exc_info.value)
     assert "private upstream detail" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_gemini_async_readiness_rejects_http_errors_without_echoing_upstream_body():
+    async def failed_fetch(*_args, **_kwargs):
+        return FakeResponse(
+            {"error": {"message": "private upstream body contains request-scoped-secret"}},
+            status=429,
+        )
+
+    adapter = GeminiInteractionsAdapter(
+        api_key="request-scoped-secret",
+        model="gemini-3.8-flash",
+        fetch_fn=failed_fetch,
+    )
+
+    with pytest.raises(RuntimeError, match="readiness probe failed with HTTP 429") as exc_info:
+        asyncio.run(adapter.acheck_readiness())
+
+    assert "request-scoped-secret" not in str(exc_info.value)
+    assert "private upstream body" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_gemini_async_provider_rejects_malformed_or_empty_interaction_output():
