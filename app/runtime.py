@@ -85,21 +85,21 @@ def build_orchestrator_from_environment(
             )
         )
     elif external_egress_allowed and provider_name == GeminiInteractionsAdapter.name:
-        registry.register(
-            GeminiInteractionsAdapter(
-                api_key=_environment_value(environment, "GEMINI_API_KEY"),
-                model=_environment_value(environment, "GEMINI_MODEL"),
-                fetch_fn=fetch_fn,
-            )
+        adapter = GeminiInteractionsAdapter(
+            api_key=_environment_value(environment, "GEMINI_API_KEY"),
+            model=_environment_value(environment, "GEMINI_MODEL"),
+            fetch_fn=fetch_fn,
         )
+        if adapter.is_configured():
+            registry.register(adapter)
     elif external_egress_allowed and provider_name == AnthropicMessagesAdapter.name:
-        registry.register(
-            AnthropicMessagesAdapter(
-                api_key=_environment_value(environment, "ANTHROPIC_API_KEY"),
-                model=_environment_value(environment, "ANTHROPIC_MODEL"),
-                fetch_fn=fetch_fn,
-            )
+        adapter = AnthropicMessagesAdapter(
+            api_key=_environment_value(environment, "ANTHROPIC_API_KEY"),
+            model=_environment_value(environment, "ANTHROPIC_MODEL"),
+            fetch_fn=fetch_fn,
         )
+        if adapter.is_configured():
+            registry.register(adapter)
     elif external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
         registry.register(
             OpenAIResponsesAdapter(
