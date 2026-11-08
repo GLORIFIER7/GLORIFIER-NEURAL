@@ -104,13 +104,21 @@ def test_anthropic_async_provider_sanitizes_upstream_errors():
         fetch_fn=failed_fetch,
     )
 
-    with pytest.raises(RuntimeError, match="endpoint is unavailable") as exc_info:
+    with pytest.raises(RuntimeError, match="endpoint is unavailable") as readiness_error:
         asyncio.run(adapter.acheck_readiness())
 
-    assert "request-scoped-secret" not in str(exc_info.value)
-    assert "private upstream detail" not in str(exc_info.value)
-    assert exc_info.value.__cause__ is None
-    assert exc_info.value.__context__ is None
+    assert "request-scoped-secret" not in str(readiness_error.value)
+    assert "private upstream detail" not in str(readiness_error.value)
+    assert readiness_error.value.__cause__ is None
+    assert readiness_error.value.__context__ is None
+
+    with pytest.raises(RuntimeError, match="request is unavailable") as inference_error:
+        asyncio.run(adapter.ainfer("controlled prompt"))
+
+    assert "request-scoped-secret" not in str(inference_error.value)
+    assert "private upstream detail" not in str(inference_error.value)
+    assert inference_error.value.__cause__ is None
+    assert inference_error.value.__context__ is None
 
 
 def test_anthropic_async_readiness_rejects_http_errors_without_echoing_upstream_body():
