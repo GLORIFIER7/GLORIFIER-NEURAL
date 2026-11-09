@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
-import secrets
 import uuid
 from collections.abc import Mapping
 
@@ -93,7 +92,7 @@ async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
             Cloudflare rate-limit binding is missing, invalid, or unavailable.
     """
     credential_key = hmac.new(
-        api_token.encode("utf-8"), b"glorifier-rate-limit-v1", hashlib.sha256
+        api_token.encode(), b"glorifier-rate-limit-v1", hashlib.sha256
     ).hexdigest()
     worker_env = request.scope.get("env")
     if worker_env is None:
@@ -593,11 +592,11 @@ async def run_task(
     internal_service_token = _request_environment_value(
         request, "GLORIFIER_INTERNAL_SERVICE_TOKEN"
     )
-    supplied_authorization = (authorization or "").encode("utf-8")
+    supplied_authorization = (authorization or "").encode()
     authenticated_token = None
     for candidate in (api_token, internal_service_token):
         if candidate and hmac.compare_digest(
-            supplied_authorization, f"Bearer {candidate}".encode("utf-8")
+            supplied_authorization, f"Bearer {candidate}".encode()
         ):
             authenticated_token = candidate
             break
