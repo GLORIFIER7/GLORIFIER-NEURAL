@@ -40,7 +40,7 @@ def _job_sections(workflow: str) -> list[str]:
 
 def _assert_no_write_all_permissions(scope: str) -> None:
     assert not re.search(
-        r"(?mi)^\s*permissions:\s*write-all\s*$",
+        r"(?mi)^\s*permissions:\s*write-all(?:\s+#.*)?\s*$",
         scope,
     ), "permissions: write-all is not permitted in this workflow scope"
 
@@ -53,10 +53,13 @@ def _assert_no_write_permissions(scope: str) -> None:
     ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
 
 
-def test_permission_guard_rejects_write_all_job_overrides():
+@pytest.mark.parametrize(
+    "scope",
+    ("permissions: write-all" + chr(10), "permissions: write-all # broad grant" + chr(10)),
+)
+def test_permission_guard_rejects_write_all_job_overrides(scope: str):
     with pytest.raises(AssertionError, match="write-all"):
-        _assert_no_write_permissions("permissions: write-all" + chr(10))
-
+        _assert_no_write_permissions(scope)
 
 
 
