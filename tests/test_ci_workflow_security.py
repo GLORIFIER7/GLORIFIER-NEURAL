@@ -26,12 +26,10 @@ def _job_section(workflow: str, name: str) -> str:
 
 
 def _assert_no_write_permissions(scope: str) -> None:
-    for permission in ("contents", "pull-requests", "actions", "id-token"):
-        assert not re.search(
-            rf"(?m)^\s*{re.escape(permission)}:\s*write\s*$",
-            scope,
-        ), f"{permission}: write is not permitted in this workflow scope"
-
+    assert not re.search(
+        r"(?m)^\s*[a-z0-9_-]+:\s*write\s*$",
+        scope,
+    ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
