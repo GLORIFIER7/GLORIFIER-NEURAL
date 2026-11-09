@@ -28,7 +28,7 @@ def _job_section(workflow: str, name: str) -> str:
 def _assert_no_write_permissions(scope: str) -> None:
     for permission in ("contents", "pull-requests", "actions", "id-token"):
         assert not re.search(
-            rf"(?m)^\\s*{re.escape(permission)}:\\s*write\\s*$",
+            rf"(?m)^\s*{re.escape(permission)}:\s*write\s*$",
             scope,
         ), f"{permission}: write is not permitted in this workflow scope"
 
