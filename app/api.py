@@ -159,8 +159,6 @@ async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
         )
 
 
-async def _write_audit_event
-
 async def _write_audit_event(sink, event: AuditEvent, *, worker_request: bool) -> None:
     """Persist audit events through Fetch on Workers and urllib in local deployments."""
     if worker_request:
