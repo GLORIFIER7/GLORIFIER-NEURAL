@@ -27,11 +27,26 @@ def _job_section(workflow: str, name: str) -> str:
     return match.group(1)
 
 
-def _assert_no_write_permissions(scope: str) -> None:
+def _job_sections(workflow: str) -> list[str]:
+    jobs_match = re.search(r"(?ms)^jobs:\n(.*)\Z", workflow)
+    assert jobs_match, "Workflow must define a jobs section"
+    sections = re.findall(
+        r"(?ms)^  [a-z0-9_-]+:\n.*?(?=^  [a-z0-9_-]+:\n|\Z)",
+        jobs_match.group(1),
+    )
+    assert sections, "Workflow must define at least one job"
+    return sections
+
+
+def _assert_no_write_all_permissions(scope: str) -> None:
     assert not re.search(
         r"(?mi)^\s*permissions:\s*write-all\s*$",
         scope,
     ), "permissions: write-all is not permitted in this workflow scope"
+
+
+def _assert_no_write_permissions(scope: str) -> None:
+    _assert_no_write_all_permissions(scope)
     assert not re.search(
         r"(?m)^\s*[a-z0-9_-]+:\s*write\s*$",
         scope,
@@ -41,6 +56,19 @@ def test_permission_guard_rejects_write_all_job_overrides():
     with pytest.raises(AssertionError, match="write-all"):
         _assert_no_write_permissions("permissions: write-all" + chr(10))
 
+
+
+
+def test_every_workflow_job_rejects_write_all_permission_overrides():
+    for workflow_path in (CI_WORKFLOW_PATH, TRUSTED_POLICY_WORKFLOW_PATH):
+        workflow = _read_workflow(workflow_path)
+        for job in _job_sections(workflow):
+            _assert_no_write_all_permissions(job)
+
+    ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
+    publish_container = _job_section(ci_workflow, "publish-container")
+    assert "packages: write" in publish_container
+    _assert_no_write_all_permissions(publish_container)
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
