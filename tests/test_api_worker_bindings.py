@@ -185,12 +185,12 @@ def test_internal_task_verification_rejects_non_ascii_access_identity_headers():
 
     invalid_headers = (
         [
-            (b"cf-access-client-id", b"unexpected-\\xe9"),
+            (b"cf-access-client-id", b"unexpected-\xe9"),
             (b"cf-access-client-secret", client_secret.encode("utf-8")),
         ],
         [
             (b"cf-access-client-id", client_id.encode("utf-8")),
-            (b"cf-access-client-secret", b"unexpected-\\xe9"),
+            (b"cf-access-client-secret", b"unexpected-\xe9"),
         ],
     )
     for headers in invalid_headers:
