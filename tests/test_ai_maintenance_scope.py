@@ -346,7 +346,7 @@ def test_workflow_publish_job_has_minimal_write_permissions():
 def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_separate(trusted_policy_workflow: str):
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "pull_request_number:" in workflow
+    assert "pull_request_number:" not in workflow
     assert "pull_request_head_sha:" in workflow
     assert "inputs.pull_request_head_sha" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
@@ -370,6 +370,8 @@ def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
     assert "pull_request_head_sha" in publish_section
     assert "GH_REPO: ${{ github.repository }}" in publish_section
+    assert "--field pull_request_number" not in publish_section
+    assert "pr_number=" not in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
 
