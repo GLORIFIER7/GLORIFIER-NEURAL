@@ -9,10 +9,6 @@ on:
     types: [submitted, edited, dismissed]
   workflow_dispatch:
     inputs:
-      pull_request_number:
-        description: "Optional PR number to run trusted current-head AI review policy."
-        required: false
-        type: number
       pull_request_head_sha:
         description: "Exact immutable PR head SHA to test when dispatching for a generated PR."
         required: false
