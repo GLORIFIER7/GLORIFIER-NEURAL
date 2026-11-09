@@ -350,7 +350,7 @@ def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_drive
     assert "pull_request_review:" in trusted_review
     assert "ai-review-policy:" in trusted_review
     assert "github.event.pull_request.base.sha" in trusted_review
-    assert "Wait for both AI reviewers" in trusted_review
+    assert "Enforce both AI reviewer findings on the exact current PR head" in trusted_review
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
