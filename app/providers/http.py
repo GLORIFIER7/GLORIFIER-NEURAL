@@ -9,6 +9,7 @@ import functools
 import http.client
 import io
 import math
+import threading
 import time
 from typing import Any, NoReturn
 import urllib.request
@@ -499,7 +500,7 @@ class _DeadlineConnectionMixin:
         def establish_connection() -> None:
             try:
                 super(_DeadlineConnectionMixin, self).connect()
-            except BaseException as exc:  # propagate the original transport failure
+            except Exception as exc:  # propagate the original transport failure
                 state["error"] = exc
             finally:
                 late_socket = None
