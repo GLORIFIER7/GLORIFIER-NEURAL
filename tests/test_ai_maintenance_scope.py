@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TRUSTED_POLICY_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
 
@@ -334,17 +335,22 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
-def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_runs_review_policy():
-    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+def test_ci_dispatch_tests_exact_pr_head_and_trusted_policy_runs_on_pr_events():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
+    maintenance_workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "pull_request_number:" in workflow
-    assert "pull_request_head_sha:" in workflow
-    assert "inputs.pull_request_head_sha" in workflow
-    assert "inputs.pull_request_number" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "EXPECTED_PR_HEAD_SHA" in workflow
-    assert "current PR head SHA does not match the dispatched commit" in workflow
-
+    assert "pull_request_number:" not in ci_workflow
+    assert "pull_request_head_sha:" in ci_workflow
+    assert "inputs.pull_request_head_sha" in ci_workflow
+    assert "workflow_dispatch" in ci_workflow
+    assert "pull_request_target:" in policy_workflow
+    assert "pull_request_review:" in policy_workflow
+    assert "github.event.pull_request.number" in policy_workflow
+    assert "steps.current-pr.outputs.head_sha" in policy_workflow
+    assert "gh workflow run ci.yml --ref" in maintenance_workflow
+    assert "pull_request_head_sha" in maintenance_workflow
+    assert "--field pull_request_number" not in maintenance_workflow
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
     workflow = WORKFLOW.read_text(encoding="utf-8")
