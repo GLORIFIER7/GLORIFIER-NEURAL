@@ -28,11 +28,19 @@ def _job_section(name: str, workflow: str) -> str:
     return jobs[name]
 
 
-def _assert_no_write_permissions(scope: str) -> None:
+def _assert_no_write_permissions(
+    scope: str, *, allowed_write_permissions: set[str] | None = None
+) -> None:
     assert not re.search(
-        r"(?mi)^\s*(?:[a-z0-9_-]+:\s*write|write-all\s*$)",
+        r"(?mi)^\s*permissions:\s*write-all\s*$",
         scope,
-    ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
+    ), "permissions: write-all is not permitted in this workflow scope"
+    writes = set(re.findall(r"(?mi)^\s*([a-z0-9_-]+):\s*write\s*$", scope))
+    allowed = allowed_write_permissions or set()
+    assert writes <= allowed, (
+        "Unexpected write-scoped GitHub permissions are not permitted: "
+        + ", ".join(sorted(writes - allowed))
+    )
 
 
 def _assert_all_permission_scopes_are_read_only(workflow: str) -> None:
@@ -42,13 +50,44 @@ def _assert_all_permission_scopes_are_read_only(workflow: str) -> None:
     )
     if top_level:
         _assert_no_write_permissions(top_level.group(1))
-    for section in _job_sections(workflow).values():
+
+    jobs = _job_sections(workflow)
+    packages_write_jobs = []
+    for job_name, section in jobs.items():
         job_permissions = re.search(
             r"(?ms)^    permissions:\n((?:^      [^\n]+\n)+)",
             section,
         )
-        if job_permissions:
-            _assert_no_write_permissions(job_permissions.group(1))
+        if not job_permissions:
+            continue
+
+        permissions = job_permissions.group(1)
+        allowed = {"packages"} if job_name == "publish-container" else set()
+        _assert_no_write_permissions(
+            permissions,
+            allowed_write_permissions=allowed,
+        )
+
+        if "packages: write" in permissions:
+            packages_write_jobs.append(job_name)
+            assert job_name == "publish-container"
+            assert {
+                line.strip()
+                for line in permissions.splitlines()
+                if line.strip()
+            } == {"contents: read", "packages: write"}
+            assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in section
+            assert "needs: [test]" in section
+
+    if "publish-container" in jobs:
+        assert packages_write_jobs == ["publish-container"], (
+            "Only the main-branch image publisher may receive packages: write, "
+            "and only after the test job succeeds"
+        )
+    else:
+        assert not packages_write_jobs, (
+            "The trusted policy workflow must not grant package-write permissions"
+        )
 
 
 def _event_types(workflow: str, event: str) -> set[str]:
