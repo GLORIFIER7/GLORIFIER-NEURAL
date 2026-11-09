@@ -15,7 +15,7 @@ TRUSTED_POLICY_WORKFLOW = (
 
 def _job_section(workflow: str, name: str) -> str:
     match = re.search(
-        rf"(?ms)^  {re.escape(name)}:\\n(.*?)(?=^  [a-z0-9_-]+:\\n|\\Z)",
+        rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z0-9_-]+:\n|\Z)",
         workflow,
     )
     assert match, f"CI job {name!r} must exist"
@@ -24,7 +24,7 @@ def _job_section(workflow: str, name: str) -> str:
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     top_level_permissions = re.search(
-        r"(?ms)^permissions:\\n((?:^  [^\\n]+\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
         CI_WORKFLOW,
     )
     assert top_level_permissions, "Workflow-level permissions must be explicit"
@@ -35,7 +35,7 @@ def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
 
 def test_trusted_policy_permissions_are_read_only_and_minimal():
     permissions = re.search(
-        r"(?ms)^permissions:\\n((?:^  [^\\n]+\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
         TRUSTED_POLICY_WORKFLOW,
     )
     assert permissions, "Trusted policy permissions must be explicit"
@@ -52,7 +52,7 @@ def test_untrusted_test_job_does_not_persist_github_token():
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
     assert "inputs.pull_request_head_sha" in test_job
-    assert "ref: \${{ github.event_name == 'workflow_dispatch'" in test_job
+    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
     assert "pull-requests: write" not in test_job
 
 
@@ -82,6 +82,6 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert "id: current-pr" in policy_job
     assert "pulls/{pull_number}" in policy_job
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
-    assert "PR_HEAD_SHA: \${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
     assert "github.event.pull_request.base.sha" in policy_job
