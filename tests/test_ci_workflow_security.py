@@ -42,7 +42,7 @@ def _assert_all_permission_scopes_are_read_only(workflow: str) -> None:
     )
     if top_level:
         _assert_no_write_permissions(top_level.group(1))
-    for job_name, section in _job_sections(workflow).items():
+    for section in _job_sections(workflow).values():
         job_permissions = re.search(
             r"(?ms)^    permissions:\n((?:^      [^\n]+\n)+)",
             section,
