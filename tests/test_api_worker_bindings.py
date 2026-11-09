@@ -1,12 +1,15 @@
 """Cloudflare Worker API binding and authentication tests."""
+import asyncio
 import secrets
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.api import _request_environment_value, app
+from app.api import _request_environment_value, app, verify_internal_task
 from app.orchestrator import Orchestrator
 from app.rate_limit import FixedWindowRateLimiter
 
@@ -172,3 +175,43 @@ def test_internal_task_verification_rejects_missing_or_invalid_service_identity(
 def test_internal_task_verification_fails_closed_without_worker_bindings():
     response = TestClient(app).post("/__internal/verify-task")
     assert response.status_code == 404
+
+
+
+def test_internal_task_verification_rejects_non_ascii_access_identity_headers():
+    client_id = "expected-id"
+    client_secret = secrets.token_urlsafe(32)
+    worker_token = secrets.token_urlsafe(32)
+
+    invalid_headers = (
+        [
+            (b"cf-access-client-id", b"unexpected-\xe9"),
+            (b"cf-access-client-secret", client_secret.encode("utf-8")),
+        ],
+        [
+            (b"cf-access-client-id", client_id.encode("utf-8")),
+            (b"cf-access-client-secret", b"unexpected-\xe9"),
+        ],
+    )
+    for headers in invalid_headers:
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/__internal/verify-task",
+                "raw_path": b"/__internal/verify-task",
+                "query_string": b"",
+                "headers": headers,
+                "server": ("glorifier-neural.example", 443),
+                "client": ("127.0.0.1", 12345),
+                "env": {
+                    "GLORIFIER_API_TOKEN": worker_token,
+                    "GLORIFIER_INTERNAL_SERVICE_CLIENT_ID": client_id,
+                    "GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET": client_secret,
+                },
+            }
+        )
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(verify_internal_task(request))
+        assert raised.value.status_code == 401
