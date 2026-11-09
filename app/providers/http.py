@@ -487,7 +487,18 @@ class _DeadlineConnectionMixin:
         super().__init__(*args, **kwargs)
 
     def connect(self) -> None:
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("provider request exceeded its absolute deadline")
+        if self.timeout is None or self.timeout > remaining:
+            self.timeout = remaining
         super().connect()
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0:
+            if self.sock is not None:
+                self.sock.close()
+                self.sock = None
+            raise TimeoutError("provider request exceeded its absolute deadline")
         if self.sock is not None:
             self.sock = _DeadlineSocket(self.sock, self._request_deadline)
 
