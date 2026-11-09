@@ -104,10 +104,11 @@ def test_internal_task_verification_uses_worker_secret_and_never_runs_inference(
             await app(scope, receive, send)
 
     monkeypatch.delenv("GLORIFIER_AUDIT_ENABLED", raising=False)
-    monkeypatch.setattr(
-        "app.api._load_task_persistence",
-        lambda *_args: (_ for _ in ()).throw(AssertionError("diagnostic must not write persistence")),
-    )
+
+    def _must_not_persist(*_args):
+        raise AssertionError("diagnostic must not write persistence")
+
+    monkeypatch.setattr("app.api._load_task_persistence", _must_not_persist)
 
     correlation_id = "8f2c4a1e-7b6d-4a90-9c31-1d2e3f4a5b6c"
     response = TestClient(CloudflareEnvironment()).post(
@@ -140,6 +141,10 @@ def test_internal_task_verification_uses_worker_secret_and_never_runs_inference(
 def test_internal_task_verification_rejects_missing_or_invalid_service_identity():
     token = secrets.token_urlsafe(32)
 
+    class AllowRateLimitBinding:
+        async def limit(self, _options):
+            return SimpleNamespace(success=True)
+
     class CloudflareEnvironment:
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
             if scope["type"] == "http":
@@ -147,6 +152,7 @@ def test_internal_task_verification_rejects_missing_or_invalid_service_identity(
                     GLORIFIER_API_TOKEN=token,
                     GLORIFIER_INTERNAL_SERVICE_CLIENT_ID="expected-id",
                     GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET="expected-secret",
+                    GLORIFIER_RATE_LIMITER=AllowRateLimitBinding(),
                 )
             await app(scope, receive, send)
 
