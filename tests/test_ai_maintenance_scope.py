@@ -341,7 +341,7 @@ def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_s
     assert "pull_request_head_sha:" in workflow
     assert "inputs.pull_request_head_sha" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "ref: \${{ github.event_name == 'workflow_dispatch'" in workflow
+    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in workflow
     assert "persist-credentials: false" in workflow
     assert "EXPECTED_PR_HEAD_SHA" not in workflow
     assert "current PR head SHA does not match the dispatched commit" not in workflow
@@ -352,7 +352,7 @@ def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_s
     assert "name: Trusted AI Review Policy" in trusted_policy
     assert "pull_request_target:" in trusted_policy
     assert "pull_request_review:" in trusted_policy
-    assert "PR_HEAD_SHA: \${{ steps.current-pr.outputs.head_sha }}" in trusted_policy
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in trusted_policy
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
