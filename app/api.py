@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
+import secrets
 import uuid
 from collections.abc import Mapping
 
@@ -600,9 +601,7 @@ async def _process_authenticated_task(
 
     worker_env = request.scope.get("env")
     worker_request = worker_env is not None
-    await _enforce_task_rate_limit(request, api_token)
     await _enforce_task_rate_limit(request, authenticated_token)
-    audit_sink, repository = _load_task_persistence(worker_env, worker_request)
     request_id = request.state.request_id
     correlation_id = request.state.correlation_id
 
