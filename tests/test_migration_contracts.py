@@ -20,7 +20,7 @@ def test_neon_task_run_migration_keeps_explicit_retention_bounds():
     sql = _sql(NEON_SQL)
     assert "create table glorifier.task_runs" in sql
     assert "expires_at > created_at" in sql
-    assert "expires_at <= created_at + interval '30 days'" in sql
+    assert "expires_at <= created_at + interval '720 hours'" in sql
     assert "jsonb_typeof(evidence) = 'array'" in sql
     assert "jsonb_array_length(evidence) <= 20" in sql
     assert "create index task_runs_expires_at_idx" in sql

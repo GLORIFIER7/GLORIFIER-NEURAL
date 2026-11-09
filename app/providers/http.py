@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from contextlib import suppress
+import functools
+import http.client
+import io
 import math
+import threading
 import time
 from typing import Any, NoReturn
+import urllib.request
 
 
 CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.05
@@ -16,6 +21,71 @@ CANCELLATION_CLEANUP_BUDGET_SECONDS = 0.05
 class ResponseBodyTooLargeError(ValueError):
     """Raised when a streamed provider response exceeds its configured byte limit."""
 
+
+def read_bounded_response_bytes(
+    response: Any,
+    *,
+    max_bytes: int,
+    timeout_seconds: float,
+    deadline: float | None = None,
+) -> bytes:
+    """Read urllib bytes under a hard size cap and absolute deadline.
+
+    Socket timeouts are inactivity timeouts. Resetting the timeout to the
+    remaining wall-clock budget before each read1 call prevents a slow-drip
+    response from extending the total operation indefinitely.
+    """
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+        raise ValueError("max_bytes must be a positive integer")
+    if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool):
+        raise TypeError("timeout_seconds must be a finite positive number")
+    timeout_value = float(timeout_seconds)
+    if not math.isfinite(timeout_value) or timeout_value <= 0:
+        raise ValueError("timeout_seconds must be a finite positive number")
+
+    reader = None
+    response_socket = None
+    current = response
+    for _depth in range(3):
+        if current is None:
+            break
+        if reader is None:
+            candidate_reader = getattr(current, "read1", None)
+            if callable(candidate_reader):
+                reader = candidate_reader
+        raw = getattr(current, "raw", None)
+        candidate_socket = getattr(raw, "_sock", None)
+        if callable(getattr(candidate_socket, "settimeout", None)):
+            response_socket = candidate_socket
+        if reader is not None and response_socket is not None:
+            break
+        current = getattr(current, "fp", None)
+
+    if reader is None or response_socket is None:
+        raise RuntimeError(
+            "provider response does not support deadline-bounded socket reads"
+        )
+
+    if deadline is None:
+        deadline_value = time.monotonic() + timeout_value
+    else:
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+            raise TypeError("deadline must be a finite monotonic timestamp")
+        deadline_value = float(deadline)
+        if not math.isfinite(deadline_value):
+            raise ValueError("deadline must be a finite monotonic timestamp")
+    collected = bytearray()
+    while True:
+        remaining = deadline_value - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("provider response body exceeded its absolute read deadline")
+        response_socket.settimeout(remaining)
+        chunk = reader(min(65_536, max_bytes + 1 - len(collected)))
+        if not chunk:
+            return bytes(collected)
+        collected.extend(chunk)
+        if len(collected) > max_bytes:
+            return bytes(collected)
 
 def _header(headers: Any, name: str) -> str | None:
     if headers is None:
@@ -337,3 +407,221 @@ async def read_bounded_response_text(
     finally:
         if not release_deferred:
             _release_reader(reader)
+
+
+
+class _DeadlineSocketReader(io.RawIOBase):
+    """Socket file reader that refreshes the timeout against one wall-clock deadline."""
+
+    def __init__(self, sock: Any, deadline: float) -> None:
+        super().__init__()
+        self._sock = sock
+        self._deadline = deadline
+        self._file = sock.makefile("rb", buffering=0)
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int | None:
+        if self.closed:
+            raise ValueError("I/O operation on closed response stream")
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("provider response exceeded its absolute request deadline")
+        self._sock.settimeout(remaining)
+        try:
+            return self._file.readinto(buffer)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                "provider response exceeded its absolute request deadline"
+            ) from exc
+
+    def close(self) -> None:
+        if not self.closed:
+            self._file.close()
+            self._sock.close()
+        super().close()
+
+
+class _DeadlineSocket:
+    """Socket facade whose writes and HTTP response reads share one deadline."""
+
+    def __init__(self, sock: Any, deadline: float) -> None:
+        self._sock = sock
+        self._deadline = deadline
+        self._reader_created = False
+
+    def _remaining(self) -> float:
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("provider request exceeded its absolute deadline")
+        return remaining
+
+    def sendall(self, data: bytes) -> None:
+        self._sock.settimeout(self._remaining())
+        self._sock.sendall(data)
+
+    def makefile(self, mode: str = "r", buffering: int | None = None):
+        if mode == "rb":
+            raw = _DeadlineSocketReader(self._sock, self._deadline)
+            self._reader_created = True
+            return io.BufferedReader(raw, buffer_size=buffering or io.DEFAULT_BUFFER_SIZE)
+        return self._sock.makefile(mode, buffering=buffering)
+
+    def close(self) -> None:
+        # urllib closes the HTTPConnection after constructing HTTPResponse.
+        # Keep the socket alive for its file wrapper; that wrapper closes it
+        # when the response body is closed.
+        if not self._reader_created:
+            self._sock.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sock, name)
+
+
+class _DeadlineConnectionMixin:
+    """Bound DNS, TCP, TLS, and proxy-tunnel setup by the request deadline."""
+
+    def __init__(self, *args: Any, deadline: float, **kwargs: Any) -> None:
+        self._request_deadline = deadline
+        super().__init__(*args, **kwargs)
+
+    def connect(self) -> None:
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("provider request exceeded its absolute deadline")
+        configured_timeout = self.timeout
+        if (
+            not isinstance(configured_timeout, (int, float))
+            or isinstance(configured_timeout, bool)
+            or not math.isfinite(float(configured_timeout))
+            or configured_timeout > remaining
+        ):
+            self.timeout = remaining
+
+        finished = threading.Event()
+        state_lock = threading.Lock()
+        state = {"timed_out": False, "error": None}
+
+        def establish_connection() -> None:
+            try:
+                super(_DeadlineConnectionMixin, self).connect()
+            except (OSError, http.client.HTTPException) as exc:  # propagate transport failures
+                state["error"] = exc
+            finally:
+                late_socket = None
+                with state_lock:
+                    if (
+                        state["timed_out"]
+                        or time.monotonic() >= self._request_deadline
+                    ):
+                        state["timed_out"] = True
+                        late_socket = self.sock
+                        self.sock = None
+                    finished.set()
+                if late_socket is not None:
+                    with suppress(OSError):
+                        late_socket.close()
+
+        worker = threading.Thread(
+            target=establish_connection,
+            name="provider-deadline-connect",
+            daemon=True,
+        )
+        worker.start()
+
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0 or not finished.wait(timeout=remaining):
+            with state_lock:
+                state["timed_out"] = True
+                late_socket = self.sock
+                self.sock = None
+            if late_socket is not None:
+                with suppress(OSError):
+                    late_socket.close()
+            raise TimeoutError("provider request exceeded its absolute deadline")
+
+        with state_lock:
+            expired = (
+                state["timed_out"]
+                or time.monotonic() >= self._request_deadline
+            )
+            if expired:
+                state["timed_out"] = True
+                late_socket = self.sock
+                self.sock = None
+            else:
+                late_socket = None
+        if late_socket is not None:
+            with suppress(OSError):
+                late_socket.close()
+        if expired:
+            raise TimeoutError("provider request exceeded its absolute deadline")
+        if state["error"] is not None:
+            raise state["error"]
+        if self.sock is not None:
+            self.sock = _DeadlineSocket(self.sock, self._request_deadline)
+
+
+class _DeadlineHTTPConnection(_DeadlineConnectionMixin, http.client.HTTPConnection):
+    pass
+
+
+class _DeadlineHTTPSConnection(_DeadlineConnectionMixin, http.client.HTTPSConnection):
+    pass
+
+
+class _DeadlineHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, deadline: float) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def http_open(self, request: Any):
+        connection = functools.partial(
+            _DeadlineHTTPConnection, deadline=self._deadline
+        )
+        return self.do_open(connection, request)
+
+
+class _DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, deadline: float) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def https_open(self, request: Any):
+        connection = functools.partial(
+            _DeadlineHTTPSConnection, deadline=self._deadline
+        )
+        return self.do_open(connection, request, context=self._context)
+
+
+def open_urllib_request_with_deadline(
+    request: Any,
+    *,
+    timeout_seconds: float,
+    deadline: float,
+    handlers: tuple[Any, ...] = (),
+):
+    """Open an urllib request with one deadline for request, headers, and body."""
+    if (
+        isinstance(deadline, bool)
+        or not isinstance(deadline, (int, float))
+        or not math.isfinite(float(deadline))
+    ):
+        raise ValueError("deadline must be a finite monotonic timestamp")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(float(timeout_seconds))
+        or float(timeout_seconds) <= 0
+    ):
+        raise ValueError("timeout_seconds must be a finite positive number")
+    remaining = float(deadline) - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("provider request exceeded its absolute deadline")
+    opener = urllib.request.build_opener(
+        *handlers,
+        _DeadlineHTTPHandler(float(deadline)),
+        _DeadlineHTTPSHandler(float(deadline)),
+    )
+    return opener.open(request, timeout=min(float(timeout_seconds), remaining))
