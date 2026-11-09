@@ -25,6 +25,14 @@ def _job_section(workflow: str, name: str) -> str:
     return match.group(1)
 
 
+def _assert_no_write_permissions(scope: str) -> None:
+    for permission in ("contents", "pull-requests", "actions", "id-token"):
+        assert not re.search(
+            rf"(?m)^\\s*{re.escape(permission)}:\\s*write\\s*$",
+            scope,
+        ), f"{permission}: write is not permitted in this workflow scope"
+
+
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
     top_level_permissions = re.search(
@@ -33,8 +41,8 @@ def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     )
     assert top_level_permissions, "Workflow-level permissions must be explicit"
     assert "contents: read" in top_level_permissions.group(1)
+    _assert_no_write_permissions(top_level_permissions.group(1))
     assert "pull-requests:" not in top_level_permissions.group(1)
-    assert "contents: write" not in top_level_permissions.group(1)
 
 
 def test_trusted_policy_permissions_are_read_only_and_minimal():
@@ -46,20 +54,23 @@ def test_trusted_policy_permissions_are_read_only_and_minimal():
     assert permissions, "Trusted policy permissions must be explicit"
     assert "contents: read" in permissions.group(1)
     assert "pull-requests: read" in permissions.group(1)
-    assert "contents: write" not in permissions.group(1)
-    assert "pull-requests: write" not in permissions.group(1)
+    _assert_no_write_permissions(permissions.group(1))
+
+    policy_job = _job_section(workflow, "ai-review-policy")
+    _assert_no_write_permissions(policy_job)
 
 
 def test_untrusted_test_job_does_not_persist_github_token():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
     test_job = _job_section(workflow, "test")
+    assert "contents: read" in test_job
+    _assert_no_write_permissions(test_job)
     assert "persist-credentials: false" in test_job, (
         "The test job executes pull-request-controlled code; "
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
     assert "inputs.pull_request_head_sha" in test_job
     assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
-    assert "pull-requests: write" not in test_job
 
 
 def test_review_events_use_the_separate_trusted_workflow_context():
@@ -91,6 +102,8 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     policy_job = _job_section(workflow, "ai-review-policy")
     assert "id: current-pr" in policy_job
     assert "pulls/{pull_number}" in policy_job
+    assert 'head_sha = (payload.get("head") or {}).get("sha", "")' in policy_job
+    assert 'head_sha = (payload.get("base") or {}).get("sha", "")' not in policy_job
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
