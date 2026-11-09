@@ -439,6 +439,7 @@ class _DeadlineSocketReader(io.RawIOBase):
     def close(self) -> None:
         if not self.closed:
             self._file.close()
+            self._sock.close()
         super().close()
 
 
@@ -448,6 +449,7 @@ class _DeadlineSocket:
     def __init__(self, sock: Any, deadline: float) -> None:
         self._sock = sock
         self._deadline = deadline
+        self._reader_created = False
 
     def _remaining(self) -> float:
         remaining = self._deadline - time.monotonic()
@@ -462,11 +464,16 @@ class _DeadlineSocket:
     def makefile(self, mode: str = "r", buffering: int | None = None):
         if mode == "rb":
             raw = _DeadlineSocketReader(self._sock, self._deadline)
+            self._reader_created = True
             return io.BufferedReader(raw, buffer_size=buffering or io.DEFAULT_BUFFER_SIZE)
         return self._sock.makefile(mode, buffering=buffering)
 
     def close(self) -> None:
-        self._sock.close()
+        # urllib closes the HTTPConnection after constructing HTTPResponse.
+        # Keep the socket alive for its file wrapper; that wrapper closes it
+        # when the response body is closed.
+        if not self._reader_created:
+            self._sock.close()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._sock, name)
