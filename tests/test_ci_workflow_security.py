@@ -29,10 +29,13 @@ def _job_section(workflow: str, name: str) -> str:
 
 def _assert_no_write_permissions(scope: str) -> None:
     assert not re.search(
+        r"(?mi)^\s*permissions:\s*write-all\s*$",
+        scope,
+    ), "permissions: write-all is not permitted in this workflow scope"
+    assert not re.search(
         r"(?m)^\s*[a-z0-9_-]+:\s*write\s*$",
         scope,
     ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
-
 
 def test_permission_guard_rejects_write_all_job_overrides():
     with pytest.raises(AssertionError, match="write-all"):
