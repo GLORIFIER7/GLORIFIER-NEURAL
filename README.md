@@ -157,3 +157,17 @@ Use `FULLY VERIFIED`, `VERIFIED`, `PARTIALLY VERIFIED`, `NOT VERIFIED`, `DEGRADE
 - `tests/`: policy and API regression tests.
 - `.github/workflows/ci.yml`: lint, tests, and Docker build on Python 3.11/3.12.
 - `.github/dependabot.yml`: weekly dependency update proposals.
+## Protected no-inference task-path diagnostic
+
+The Worker includes a private `POST /__internal/verify-task` diagnostic route. It is intentionally excluded from the public OpenAPI schema and accepts no request body or caller-supplied task content. Keep it behind a dedicated Cloudflare Access self-hosted application scoped to the exact path:
+
+`glorifier-neural.glorifier.workers.dev/__internal/verify-task`
+
+The Access policy must allow only the dedicated Cloudflare Access service token; do not add a bypass or broaden the existing `All Workers` policy. The Worker also verifies `CF-Access-Client-Id` and `CF-Access-Client-Secret` against server-side secret bindings:
+
+- `GLORIFIER_INTERNAL_SERVICE_CLIENT_ID`
+- `GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET`
+
+The handler reads the existing `GLORIFIER_API_TOKEN` binding inside the Worker and passes it through the same constant-time task-authentication and rate-limit path used by `POST /v1/tasks`. It submits one fixed `read_only` diagnostic request with `require_approval=true`. The policy therefore returns `policy:approval-required` before inference; no model request is made. This diagnostic skips optional audit and task-run persistence, does not write to Neon or Supabase, and never returns or logs secret values.
+
+The response reports a diagnostic `task_id` equal to its unique `X-Request-ID`, the separate `X-Correlation-ID`, the policy response, and explicit evidence that inference and persistence were not performed. This proves the Worker-held task credential was accepted and the task policy path was reached; it does **not** prove provider inference, factual model output, or the public GLORIFIER proxy path. Treat the endpoint as a one-off operational probe. Provision the two Access identity bindings and Access application only for an authorized test, and remove the temporary service token and bindings after verification unless a separate long-lived operational use is approved.
