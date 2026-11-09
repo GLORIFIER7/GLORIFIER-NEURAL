@@ -180,7 +180,7 @@ def test_internal_task_verification_fails_closed_without_worker_bindings():
 
 def test_internal_task_verification_rejects_non_ascii_access_identity_headers():
     client_id = "expected-id"
-    client_secret = "expected-secret"
+    client_secret = secrets.token_urlsafe(32)
     worker_token = secrets.token_urlsafe(32)
 
     invalid_headers = (
