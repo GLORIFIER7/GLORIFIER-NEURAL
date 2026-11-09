@@ -335,7 +335,7 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
-def test_ci_dispatch_tests_exact_pr_head_and_trusted_policy_runs_on_pr_events():
+def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_pr_events():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
     maintenance_workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -348,9 +348,27 @@ def test_ci_dispatch_tests_exact_pr_head_and_trusted_policy_runs_on_pr_events():
     assert "pull_request_review:" in policy_workflow
     assert "github.event.pull_request.number" in policy_workflow
     assert "steps.current-pr.outputs.head_sha" in policy_workflow
-    assert "gh workflow run ci.yml --ref" in maintenance_workflow
-    assert "pull_request_head_sha" in maintenance_workflow
-    assert "--field pull_request_number" not in maintenance_workflow
+
+    dispatch_start = maintenance_workflow.index(
+        "- name: Dispatch trusted CI and AI review for the exact PR head"
+    )
+    dispatch_end = maintenance_workflow.find("\n      - name:", dispatch_start + 1)
+    dispatch_step = (
+        maintenance_workflow[dispatch_start:]
+        if dispatch_end < 0
+        else maintenance_workflow[dispatch_start:dispatch_end]
+    )
+    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq \'.headRefOid\')"' in dispatch_step
+    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
+    assert (
+        'gh workflow run ci.yml --ref "$PR_BRANCH" \\\n'
+        '            --field pull_request_head_sha="$pr_head_sha"'
+    ) in dispatch_step
+    assert "--field pull_request_number" not in dispatch_step
+    assert "--field pull_request_head_sha=" not in dispatch_step.replace(
+        '--field pull_request_head_sha="$pr_head_sha"', ""
+    )
+
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
     workflow = WORKFLOW.read_text(encoding="utf-8")
