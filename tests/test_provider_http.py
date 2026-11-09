@@ -551,7 +551,7 @@ def test_urllib_open_enforces_absolute_deadline_during_slow_drip_headers():
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     host, port = listener.getsockname()
-    response = b"HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n"
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 
     def drip_headers():
         try:
