@@ -654,8 +654,12 @@ async def verify_internal_task(request: Request) -> JSONResponse:
             status_code=503, detail="Internal service verification is not configured"
         )
     if (
-        not secrets.compare_digest(provided_client_id, expected_client_id)
-        or not secrets.compare_digest(provided_client_secret, expected_client_secret)
+        not secrets.compare_digest(
+            provided_client_id.encode("utf-8"), expected_client_id.encode("utf-8")
+        )
+        or not secrets.compare_digest(
+            provided_client_secret.encode("utf-8"), expected_client_secret.encode("utf-8")
+        )
     ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
