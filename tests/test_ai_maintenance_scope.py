@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TRUSTED_POLICY_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
 
@@ -148,7 +149,7 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
     assert "gh pr create --draft --base main" in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_number" not in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
@@ -202,7 +203,7 @@ def test_generated_pr_is_draft_and_never_auto_merges():
     assert "gh pr create --draft --base main" in publish_section
     assert "gh pr create --base main" not in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_number" not in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
@@ -334,16 +335,34 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
-def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_runs_review_policy():
-    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_pr_events():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
+    maintenance_workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "pull_request_number:" in workflow
-    assert "pull_request_head_sha:" in workflow
-    assert "inputs.pull_request_head_sha" in workflow
-    assert "inputs.pull_request_number" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "EXPECTED_PR_HEAD_SHA" in workflow
-    assert "current PR head SHA does not match the dispatched commit" in workflow
+    assert "pull_request_number:" not in ci_workflow
+    assert "pull_request_head_sha:" in ci_workflow
+    assert "inputs.pull_request_head_sha" in ci_workflow
+    assert "workflow_dispatch" in ci_workflow
+    assert "pull_request_target:" in policy_workflow
+    assert "pull_request_review:" in policy_workflow
+    assert "github.event.pull_request.number" in policy_workflow
+    assert "steps.current-pr.outputs.head_sha" in policy_workflow
+
+    dispatch_start = maintenance_workflow.index(
+        "- name: Dispatch trusted CI and AI review for the exact PR head"
+    )
+    dispatch_end = maintenance_workflow.find("\n      - name:", dispatch_start + 1)
+    dispatch_step = (
+        maintenance_workflow[dispatch_start:]
+        if dispatch_end < 0
+        else maintenance_workflow[dispatch_start:dispatch_end]
+    )
+    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq \'.headRefOid\')"' in dispatch_step
+    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
+    assert 'gh workflow run ci.yml --ref "$PR_BRANCH" \\' in dispatch_step
+    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 1
+    assert "--field pull_request_number" not in dispatch_step
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
