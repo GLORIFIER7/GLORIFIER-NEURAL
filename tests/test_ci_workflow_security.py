@@ -83,7 +83,7 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     _assert_all_permission_scopes_are_read_only(trusted_workflow)
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
-    assert "ref: \${{ github.event.pull_request.base.sha }}" in policy_job
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
     assert "persist-credentials: false" in policy_job
 
 
@@ -95,7 +95,7 @@ def test_untrusted_test_job_does_not_persist_github_token():
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
     assert "inputs.pull_request_head_sha" in test_job
-    assert "ref: \${{ github.event_name == 'workflow_dispatch'" in test_job
+    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
     assert "pull-requests:" not in test_job
 
 
@@ -110,8 +110,8 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
     )
     assert "github.event.review.pull_request" not in policy_job
     assert "github.event.pull_request.base.sha" in policy_job
-    assert "PR_NUMBER: \${{ github.event.pull_request.number }}" in policy_job
-    assert "PR_HEAD_SHA: \${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in policy_job
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
 
 
 def test_trusted_policy_module_has_a_preflight_before_execution():
@@ -136,5 +136,5 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert 'head_sha = (payload.get("head") or {}).get("sha", "")' in policy_job
     assert 'head_sha = (payload.get("base") or {}).get("sha", "")' not in policy_job
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
-    assert "PR_HEAD_SHA: \${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
