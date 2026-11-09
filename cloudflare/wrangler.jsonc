@@ -44,6 +44,11 @@
       "enabled": true
     }
   },
+  "secrets": {
+    "required": [
+      "GLORIFIER_INTERNAL_SERVICE_TOKEN"
+    ]
+  },
   "vars": {
     "GLORIFIER_NEON_CONNECTIVITY_ENABLED": "true",
     "GLORIFIER_PROVIDER": "openai",
