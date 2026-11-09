@@ -6,11 +6,20 @@ import shutil
 import subprocess
 import sys
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TRUSTED_POLICY_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
+
+
+@pytest.fixture(scope="module")
+def trusted_policy_workflow() -> str:
+    assert TRUSTED_POLICY_WORKFLOW_PATH.is_file(), "Trusted policy workflow must exist"
+    return TRUSTED_POLICY_WORKFLOW_PATH.read_text(encoding="utf-8")
 
 
 def _git(repository: Path, *args: str) -> None:
@@ -334,7 +343,7 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
-def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_separate():
+def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_separate(trusted_policy_workflow: str):
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert "pull_request_number:" in workflow
@@ -346,13 +355,10 @@ def test_ci_workflow_dispatch_tests_the_exact_pr_head_and_keeps_trusted_policy_s
     assert "EXPECTED_PR_HEAD_SHA" not in workflow
     assert "current PR head SHA does not match the dispatched commit" not in workflow
 
-    trusted_policy = (
-        ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
-    ).read_text(encoding="utf-8")
-    assert "name: Trusted AI Review Policy" in trusted_policy
-    assert "pull_request_target:" in trusted_policy
-    assert "pull_request_review:" in trusted_policy
-    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in trusted_policy
+    assert "name: Trusted AI Review Policy" in trusted_policy_workflow
+    assert "pull_request_target:" in trusted_policy_workflow
+    assert "pull_request_review:" in trusted_policy_workflow
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in trusted_policy_workflow
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
