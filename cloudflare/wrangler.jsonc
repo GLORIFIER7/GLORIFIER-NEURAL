@@ -46,6 +46,7 @@
   },
   "secrets": {
     "required": [
+      "GLORIFIER_API_TOKEN",
       "GLORIFIER_INTERNAL_SERVICE_TOKEN"
     ]
   },
