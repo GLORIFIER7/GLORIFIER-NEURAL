@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
-import secrets
 import uuid
 from collections.abc import Mapping
 
@@ -93,7 +92,7 @@ async def _enforce_task_rate_limit(request: Request, api_token: str) -> None:
             Cloudflare rate-limit binding is missing, invalid, or unavailable.
     """
     credential_key = hmac.new(
-        api_token.encode("utf-8"), b"glorifier-rate-limit-v1", hashlib.sha256
+        api_token.encode(), b"glorifier-rate-limit-v1", hashlib.sha256
     ).hexdigest()
     worker_env = request.scope.get("env")
     if worker_env is None:
@@ -585,11 +584,28 @@ async def run_task(
             status_code=503,
             detail="API token is not configured; execution endpoint is disabled",
         )
-    if not secrets.compare_digest(authorization or "", f"Bearer {api_token}"):
+
+    # The dedicated internal credential is additive: existing API clients keep
+    # using GLORIFIER_API_TOKEN, while GLORIFIER's Worker authenticates with its
+    # separately managed service token. Byte comparison rejects malformed
+    # non-ASCII header values without raising TypeError.
+    internal_service_token = _request_environment_value(
+        request, "GLORIFIER_INTERNAL_SERVICE_TOKEN"
+    )
+    supplied_authorization = (authorization or "").encode()
+    authenticated_token = None
+    for candidate in (api_token, internal_service_token):
+        if candidate and hmac.compare_digest(
+            supplied_authorization, f"Bearer {candidate}".encode()
+        ):
+            authenticated_token = candidate
+            break
+    if authenticated_token is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
     worker_env = request.scope.get("env")
     worker_request = worker_env is not None
-    await _enforce_task_rate_limit(request, api_token)
+    await _enforce_task_rate_limit(request, authenticated_token)
     audit_sink, repository = _load_task_persistence(worker_env, worker_request)
     request_id = request.state.request_id
     correlation_id = request.state.correlation_id
