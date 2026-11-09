@@ -123,12 +123,12 @@ def test_worker_scope_internal_service_token_is_read_from_cloudflare_bindings(mo
     with pytest.raises(HTTPException) as raised:
         asyncio.run(
             run_task(
-                request,
                 TaskRequest(
                     task="Worker binding authentication check",
                     require_approval=True,
                     action_class="read_only",
                 ),
+                request,
                 authorization="Bearer worker-internal-service-token",
             )
         )
