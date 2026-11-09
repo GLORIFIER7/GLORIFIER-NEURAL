@@ -117,7 +117,8 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     assert re.search(r"(?m)^  pull-requests: read$", policy_permissions.group(1))
 
     # Job-level permissions override workflow-level grants in GitHub Actions.
-    # Inspect every permission scope in both workflows, not just the top level.
+    # Job-level grants override workflow-level permissions; inspect both workflows.
+    _assert_all_permission_scopes_are_read_only(ci_workflow)
     _assert_all_permission_scopes_are_read_only(trusted_workflow)
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
