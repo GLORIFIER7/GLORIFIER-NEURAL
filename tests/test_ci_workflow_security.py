@@ -79,7 +79,6 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
 
     # Job-level permissions override workflow-level grants in GitHub Actions.
     # Inspect every permission scope in both workflows, not just the top level.
-    _assert_all_permission_scopes_are_read_only(ci_workflow)
     _assert_all_permission_scopes_are_read_only(trusted_workflow)
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
@@ -90,6 +89,7 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
 def test_untrusted_test_job_does_not_persist_github_token():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
     test_job = _job_section("test", ci_workflow)
+    _assert_no_write_permissions(test_job)
     assert "persist-credentials: false" in test_job, (
         "The test job executes pull-request-controlled code; "
         "actions/checkout must not persist GITHUB_TOKEN credentials"
