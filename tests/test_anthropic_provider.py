@@ -50,7 +50,9 @@ def test_anthropic_sync_request_shares_one_deadline_across_open_and_body_read(mo
 
     class FakeResponse:
         status = 200
-        headers = {}
+
+        def __init__(self):
+            self.headers = {}
 
         def __enter__(self):
             return self
