@@ -3,6 +3,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException, Request
+from fastapi.testclient import TestClient
 
 from app.api import app, run_task
 from app.orchestrator import Orchestrator
