@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TRUSTED_REVIEW_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 TRUSTED_POLICY_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
@@ -335,6 +336,22 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
+def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_driven():
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    trusted_review = TRUSTED_REVIEW_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "pull_request_head_sha:" in workflow
+    assert "inputs.pull_request_head_sha" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in workflow
+
+    # Draft PR creation emits pull_request_target(opened); review events re-run
+    # the trusted policy. No untrusted CI workflow should execute reviewer policy.
+    assert "pull_request_target:" in trusted_review
+    assert "pull_request_review:" in trusted_review
+    assert "ai-review-policy:" in trusted_review
+    assert "github.event.pull_request.base.sha" in trusted_review
+    assert "Enforce both AI reviewer findings on the exact current PR head" in trusted_review
 def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_pr_events():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
