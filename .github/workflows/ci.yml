@@ -13,6 +13,10 @@ on:
         description: "Exact immutable PR head SHA to test when dispatching for a generated PR."
         required: false
         type: string
+      pull_request_number:
+        description: "Open PR number to validate during generated-PR dispatch."
+        required: false
+        type: string
   schedule:
     - cron: "23 2 * * *"
 
@@ -35,6 +39,21 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
+      - name: Validate manual dispatch PR identity
+        if: github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '')
+        env:
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+          PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::A pull request number is required with a dispatched PR head SHA."
+            exit 1
+          }
+          [[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || {
+            echo "::error::An exact PR head SHA is required with a dispatched pull request number."
+            exit 1
+          }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}
@@ -101,6 +120,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
           EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
         run: |
@@ -108,6 +128,7 @@ jobs:
           import json
           import os
           import re
+          import urllib.error
           from urllib.request import Request, urlopen
 
           repository = os.environ["GITHUB_REPOSITORY"]
@@ -119,12 +140,23 @@ jobs:
               "Authorization": f"Bearer {token}",
               "X-GitHub-Api-Version": "2022-11-28",
           })
-          with urlopen(request, timeout=20) as response:
-              payload = json.loads(response.read().decode("utf-8"))
+          expected_head_sha = os.environ.get("EXPECTED_PR_HEAD_SHA", "")
+          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+              if (
+                  not re.fullmatch(r"[1-9][0-9]*", pull_number)
+                  or not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha)
+              ):
+                  raise SystemExit("An exact PR head SHA is required for a dispatched policy run.")
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(f"GitHub PR identity lookup failed (HTTP {exc.code}).") from None
+          except urllib.error.URLError:
+              raise SystemExit("GitHub PR identity lookup is unavailable.") from None
           head_sha = (payload.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
-          expected_head_sha = os.environ.get("EXPECTED_PR_HEAD_SHA", "")
           if expected_head_sha and (
               not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha)
               or expected_head_sha.casefold() != head_sha.casefold()
