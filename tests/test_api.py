@@ -78,6 +78,16 @@ def test_task_endpoint_accepts_internal_service_token_without_replacing_primary_
     assert body["status"] == "NOT VERIFIED"
     assert body["evidence"] == ["policy:approval-required"]
 
+    # The pre-existing primary credential remains valid after the additive
+    # internal-service credential is configured.
+    primary = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer existing-primary-token"},
+        json={"task": "primary credential compatibility check", "require_approval": True, "action_class": "read_only"},
+    )
+    assert primary.status_code == 200
+    assert primary.json()["evidence"] == ["policy:approval-required"]
+
 
 def test_task_endpoint_rejects_incorrect_internal_service_token(monkeypatch):
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "existing-primary-token")
