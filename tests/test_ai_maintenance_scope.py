@@ -150,7 +150,7 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
     assert "gh pr create --draft --base main" in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" not in publish_section
+    assert '--field pull_request_number="$pr_number"' in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
@@ -204,7 +204,7 @@ def test_generated_pr_is_draft_and_never_auto_merges():
     assert "gh pr create --draft --base main" in publish_section
     assert "gh pr create --base main" not in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" not in publish_section
+    assert '--field pull_request_number="$pr_number"' in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
@@ -357,9 +357,10 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
     policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
     maintenance_workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "pull_request_number:" not in ci_workflow
+    assert "pull_request_number:" in ci_workflow
     assert "pull_request_head_sha:" in ci_workflow
     assert "inputs.pull_request_head_sha" in ci_workflow
+    assert "inputs.pull_request_number" in ci_workflow
     assert "workflow_dispatch" in ci_workflow
     assert "pull_request_target:" in policy_workflow
     assert "pull_request_review:" in policy_workflow
@@ -379,7 +380,8 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH" \\' in dispatch_step
     assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 1
-    assert "--field pull_request_number" not in dispatch_step
+    assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
+    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 1
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
@@ -533,3 +535,16 @@ def test_workflow_top_level_permissions_are_minimal():
 
     assert "contents: read" in top_level_permissions
     assert "pull-requests:" not in top_level_permissions
+
+
+
+def test_manual_ci_dispatch_requires_pr_number_and_exact_current_head_sha():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    policy_start = ci_workflow.index("  ai-review-policy:")
+    policy_section = ci_workflow[policy_start:]
+
+    assert "pull_request_number:" in ci_workflow
+    assert "inputs.pull_request_number" in policy_section
+    assert "inputs.pull_request_head_sha" in policy_section
+    assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
+    assert "The current PR head SHA does not match the dispatched commit." in policy_section
