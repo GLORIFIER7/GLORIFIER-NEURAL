@@ -5,12 +5,15 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CI_WORKFLOW = (
-    ROOT / ".github" / "workflows" / "ci.yml"
-).read_text(encoding="utf-8")
-TRUSTED_POLICY_WORKFLOW = (
+CI_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
+TRUSTED_POLICY_WORKFLOW_PATH = (
     ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
-).read_text(encoding="utf-8")
+)
+
+
+def _read_workflow(path: Path) -> str:
+    assert path.is_file(), f"Required workflow file is missing: {path.name}"
+    return path.read_text(encoding="utf-8")
 
 
 def _job_section(workflow: str, name: str) -> str:
@@ -23,9 +26,10 @@ def _job_section(workflow: str, name: str) -> str:
 
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
+    workflow = _read_workflow(CI_WORKFLOW_PATH)
     top_level_permissions = re.search(
         r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
-        CI_WORKFLOW,
+        workflow,
     )
     assert top_level_permissions, "Workflow-level permissions must be explicit"
     assert "contents: read" in top_level_permissions.group(1)
@@ -34,9 +38,10 @@ def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
 
 
 def test_trusted_policy_permissions_are_read_only_and_minimal():
+    workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     permissions = re.search(
         r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
-        TRUSTED_POLICY_WORKFLOW,
+        workflow,
     )
     assert permissions, "Trusted policy permissions must be explicit"
     assert "contents: read" in permissions.group(1)
@@ -46,7 +51,8 @@ def test_trusted_policy_permissions_are_read_only_and_minimal():
 
 
 def test_untrusted_test_job_does_not_persist_github_token():
-    test_job = _job_section(CI_WORKFLOW, "test")
+    workflow = _read_workflow(CI_WORKFLOW_PATH)
+    test_job = _job_section(workflow, "test")
     assert "persist-credentials: false" in test_job, (
         "The test job executes pull-request-controlled code; "
         "actions/checkout must not persist GITHUB_TOKEN credentials"
@@ -57,28 +63,32 @@ def test_untrusted_test_job_does_not_persist_github_token():
 
 
 def test_review_events_use_the_separate_trusted_workflow_context():
-    assert "pull_request_target:" in TRUSTED_POLICY_WORKFLOW
-    assert "pull_request_review:" in TRUSTED_POLICY_WORKFLOW
-    assert "github.event.review.pull_request" not in TRUSTED_POLICY_WORKFLOW
-    assert "github.event.pull_request.base.sha" in TRUSTED_POLICY_WORKFLOW
-    assert "github.event_name == 'workflow_dispatch'" not in TRUSTED_POLICY_WORKFLOW
-    assert "inputs.pull_request_number" not in TRUSTED_POLICY_WORKFLOW
+    workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    assert "pull_request_target:" in workflow
+    assert "pull_request_review:" in workflow
+    assert "github.event.review.pull_request" not in workflow
+    assert "github.event.pull_request.base.sha" in workflow
+    assert "github.event_name == 'workflow_dispatch'" not in workflow
+    assert "inputs.pull_request_number" not in workflow
 
 
 def test_trusted_policy_module_has_a_preflight_before_execution():
-    policy_job = _job_section(TRUSTED_POLICY_WORKFLOW, "ai-review-policy")
+    workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section(workflow, "ai-review-policy")
     preflight = policy_job.find("- name: Verify trusted policy runner")
     runner = policy_job.find(
         "- name: Enforce both AI reviewer findings on the exact current PR head"
     )
     assert preflight >= 0, "The trusted module import preflight must be present"
+    assert runner >= 0, "The enforce-findings step must be present"
     assert runner > preflight, "The import preflight must run before the policy module"
     assert 'run: python -c "import app.ai_review_policy;' in policy_job
     assert policy_job.count("- name: Verify trusted policy runner") == 1
 
 
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
-    policy_job = _job_section(TRUSTED_POLICY_WORKFLOW, "ai-review-policy")
+    workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section(workflow, "ai-review-policy")
     assert "id: current-pr" in policy_job
     assert "pulls/{pull_number}" in policy_job
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
