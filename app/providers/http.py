@@ -9,7 +9,6 @@ import functools
 import http.client
 import io
 import math
-import socket
 import time
 from typing import Any, NoReturn
 import urllib.request
@@ -431,7 +430,7 @@ class _DeadlineSocketReader(io.RawIOBase):
         self._sock.settimeout(remaining)
         try:
             return self._file.readinto(buffer)
-        except socket.timeout as exc:
+        except TimeoutError as exc:
             raise TimeoutError(
                 "provider response exceeded its absolute request deadline"
             ) from exc
