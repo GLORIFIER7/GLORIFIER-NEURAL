@@ -1,12 +1,15 @@
 """Cloudflare Worker API binding and authentication tests."""
+import asyncio
 import secrets
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.api import _request_environment_value, app
+from app.api import _request_environment_value, app, verify_internal_task
 from app.orchestrator import Orchestrator
 from app.rate_limit import FixedWindowRateLimiter
 
@@ -176,32 +179,39 @@ def test_internal_task_verification_fails_closed_without_worker_bindings():
 
 
 def test_internal_task_verification_rejects_non_ascii_access_identity_headers():
-    token = secrets.token_urlsafe(32)
     client_id = "expected-id"
     client_secret = "expected-secret"
+    worker_token = secrets.token_urlsafe(32)
 
-    class CloudflareEnvironment:
-        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "http":
-                scope["env"] = SimpleNamespace(
-                    GLORIFIER_API_TOKEN=token,
-                    GLORIFIER_INTERNAL_SERVICE_CLIENT_ID=client_id,
-                    GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET=client_secret,
-                )
-            await app(scope, receive, send)
-
-    client = TestClient(CloudflareEnvironment())
     invalid_headers = (
-        {
-            "CF-Access-Client-Id": "unexpected-\u00e9",
-            "CF-Access-Client-Secret": client_secret,
-        },
-        {
-            "CF-Access-Client-Id": client_id,
-            "CF-Access-Client-Secret": "unexpected-\u00e9",
-        },
+        [
+            (b"cf-access-client-id", b"unexpected-\\xe9"),
+            (b"cf-access-client-secret", client_secret.encode("utf-8")),
+        ],
+        [
+            (b"cf-access-client-id", client_id.encode("utf-8")),
+            (b"cf-access-client-secret", b"unexpected-\\xe9"),
+        ],
     )
-
     for headers in invalid_headers:
-        response = client.post("/__internal/verify-task", headers=headers)
-        assert response.status_code == 401
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/__internal/verify-task",
+                "raw_path": b"/__internal/verify-task",
+                "query_string": b"",
+                "headers": headers,
+                "server": ("glorifier-neural.example", 443),
+                "client": ("127.0.0.1", 12345),
+                "env": {
+                    "GLORIFIER_API_TOKEN": worker_token,
+                    "GLORIFIER_INTERNAL_SERVICE_CLIENT_ID": client_id,
+                    "GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET": client_secret,
+                },
+            }
+        )
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(verify_internal_task(request))
+        assert raised.value.status_code == 401
