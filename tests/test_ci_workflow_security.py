@@ -8,13 +8,6 @@ WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 CI_WORKFLOW_PATH = WORKFLOWS / "ci.yml"
 TRUSTED_POLICY_WORKFLOW_PATH = WORKFLOWS / "trusted-ai-review-policy.yml"
 
-TRUSTED_WORKFLOW = (
-    Path(__file__).resolve().parents[1]
-    / ".github"
-    / "workflows"
-    / "trusted-ai-review-policy.yml"
-).read_text(encoding="utf-8")
-
 
 def _read_workflow(path: Path) -> str:
     assert path.is_file(), f"Required workflow file is missing: {path.name}"
@@ -50,24 +43,11 @@ def _assert_no_write_permissions(
     )
 
 
-def _trusted_job_section(name: str) -> str:
-    match = re.search(
-        rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z0-9_-]+:\n|\Z)",
-        TRUSTED_WORKFLOW,
-    )
-    assert match, f"Trusted policy job {name!r} must exist"
-    return match.group(1)
-
-
-def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
-    ci_permissions = re.search(
 def _assert_all_permission_scopes_are_read_only(workflow: str) -> None:
     top_level = re.search(
         r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
         workflow,
     )
-    assert ci_permissions, "CI workflow permissions must be explicit"
-    assert "pull-requests:" not in ci_permissions.group(1)
     if top_level:
         _assert_no_write_permissions(top_level.group(1))
 
@@ -145,13 +125,6 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
     assert "persist-credentials: false" in policy_job
 
-    trusted_permissions = re.search(
-        r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
-        TRUSTED_WORKFLOW,
-    )
-    assert trusted_permissions, "Trusted policy permissions must be explicit"
-    assert "pull-requests: read" in trusted_permissions.group(1)
-    _trusted_job_section("ai-review-policy")
 
 def test_untrusted_test_job_does_not_persist_github_token():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
@@ -166,13 +139,6 @@ def test_untrusted_test_job_does_not_persist_github_token():
     assert "pull-requests:" not in test_job
 
 
-def test_review_event_uses_trusted_base_and_current_pull_request_context():
-    policy_job = _trusted_job_section("ai-review-policy")
-    assert "pull_request_target:" in TRUSTED_WORKFLOW
-    assert "pull_request_review:" in TRUSTED_WORKFLOW
-    assert "github.event.review.pull_request" not in policy_job
-    assert "github.event.pull_request.base.sha" in policy_job
-    assert "github.event_name == 'workflow_dispatch'" not in policy_job
 def test_review_events_use_trusted_base_context_and_documented_payload():
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     policy_job = _job_section("ai-review-policy", trusted_workflow)
@@ -189,9 +155,6 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
 
 
 def test_trusted_policy_module_has_a_preflight_before_execution():
-    policy_job = _trusted_job_section("ai-review-policy")
-    preflight = policy_job.find("- name: Verify trusted policy runner")
-    runner = policy_job.find("- name: Enforce both AI reviewer findings on the exact current PR head")
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     policy_job = _job_section("ai-review-policy", trusted_workflow)
     preflight = policy_job.find("- name: Verify trusted policy runner")
@@ -203,9 +166,6 @@ def test_trusted_policy_module_has_a_preflight_before_execution():
     assert runner > preflight, "The import preflight must run before the policy module"
     assert 'run: python -c "import app.ai_review_policy;' in policy_job
     assert policy_job.count("- name: Verify trusted policy runner") == 1
-
-def test_policy_job_uses_canonical_pull_request_head_from_github_api():
-    policy_job = _trusted_job_section("ai-review-policy")
 
 
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
