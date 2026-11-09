@@ -64,6 +64,32 @@ def test_task_endpoint_rejects_invalid_token(monkeypatch):
     assert response.status_code == 401
 
 
+def test_task_endpoint_accepts_internal_service_token_without_replacing_primary_token(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "existing-primary-token")
+    monkeypatch.setenv("GLORIFIER_INTERNAL_SERVICE_TOKEN", "separate-internal-service-token")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer separate-internal-service-token"},
+        json={"task": "internal connectivity diagnostic", "require_approval": True, "action_class": "read_only"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "NOT VERIFIED"
+    assert body["evidence"] == ["policy:approval-required"]
+
+
+def test_task_endpoint_rejects_incorrect_internal_service_token(monkeypatch):
+    monkeypatch.setenv("GLORIFIER_API_TOKEN", "existing-primary-token")
+    monkeypatch.setenv("GLORIFIER_INTERNAL_SERVICE_TOKEN", "separate-internal-service-token")
+    response = client.post(
+        "/v1/tasks",
+        headers={"Authorization": "Bearer incorrect-internal-token"},
+        json={"task": "internal connectivity diagnostic", "require_approval": True, "action_class": "read_only"},
+    )
+    assert response.status_code == 401
+
+
 def test_task_endpoint_never_claims_inference_without_provider(monkeypatch):
     monkeypatch.setenv("GLORIFIER_API_TOKEN", "test-secret")
     response = client.post(
