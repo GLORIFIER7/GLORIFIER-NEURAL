@@ -149,7 +149,7 @@ def test_publish_job_holds_all_publication_until_after_0831_laos_time():
     assert "steps.time_window.outputs.allowed == 'true'" in branch_step
     assert "gh pr create --draft --base main" in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_number" not in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
@@ -203,7 +203,7 @@ def test_generated_pr_is_draft_and_never_auto_merges():
     assert "gh pr create --draft --base main" in publish_section
     assert "gh pr create --base main" not in publish_section
     assert 'gh workflow run ci.yml --ref "$PR_BRANCH"' in publish_section
-    assert "--field pull_request_number" in publish_section
+    assert "--field pull_request_number" not in publish_section
     assert "--field pull_request_head_sha" in publish_section
     assert "gh pr merge" not in publish_section
     assert "--auto" not in publish_section
