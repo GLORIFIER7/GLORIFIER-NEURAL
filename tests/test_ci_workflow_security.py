@@ -39,7 +39,7 @@ def _assert_no_write_permissions(scope: str) -> None:
 
 def test_permission_guard_rejects_write_all_job_overrides():
     with pytest.raises(AssertionError, match="write-all"):
-        _assert_no_write_permissions("permissions: write-all\\n")
+        _assert_no_write_permissions("permissions: write-all\n")
 
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
