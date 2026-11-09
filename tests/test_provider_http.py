@@ -446,7 +446,7 @@ def test_reader_lock_release_is_deferred_until_cancelled_read_settles():
 def test_sync_response_reader_uses_a_decreasing_absolute_socket_deadline(monkeypatch):
     import app.providers.http as provider_http
 
-    readings = iter((0.0, 0.6, 1.2))
+    readings = iter((0.0, 0.0, 0.6, 1.2))
 
     class FakeSocket:
         def __init__(self):
