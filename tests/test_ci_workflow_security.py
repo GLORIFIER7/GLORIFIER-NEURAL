@@ -39,14 +39,14 @@ def _trusted_job_section(name: str) -> str:
 
 def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     ci_permissions = re.search(
-        r"(?ms)^permissions:\\n((?:^  [^\\n]+\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
         WORKFLOW,
     )
     assert ci_permissions, "CI workflow permissions must be explicit"
     assert "pull-requests:" not in ci_permissions.group(1)
 
     trusted_permissions = re.search(
-        r"(?ms)^permissions:\\n((?:^  [^\\n]+\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [^\n]+\n)+)",
         TRUSTED_WORKFLOW,
     )
     assert trusted_permissions, "Trusted policy permissions must be explicit"
