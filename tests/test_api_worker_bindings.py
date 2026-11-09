@@ -172,3 +172,36 @@ def test_internal_task_verification_rejects_missing_or_invalid_service_identity(
 def test_internal_task_verification_fails_closed_without_worker_bindings():
     response = TestClient(app).post("/__internal/verify-task")
     assert response.status_code == 404
+
+
+
+def test_internal_task_verification_rejects_non_ascii_access_identity_headers():
+    token = secrets.token_urlsafe(32)
+    client_id = "expected-id"
+    client_secret = "expected-secret"
+
+    class CloudflareEnvironment:
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] == "http":
+                scope["env"] = SimpleNamespace(
+                    GLORIFIER_API_TOKEN=token,
+                    GLORIFIER_INTERNAL_SERVICE_CLIENT_ID=client_id,
+                    GLORIFIER_INTERNAL_SERVICE_CLIENT_SECRET=client_secret,
+                )
+            await app(scope, receive, send)
+
+    client = TestClient(CloudflareEnvironment())
+    invalid_headers = (
+        {
+            "CF-Access-Client-Id": "unexpected-\u00e9",
+            "CF-Access-Client-Secret": client_secret,
+        },
+        {
+            "CF-Access-Client-Id": client_id,
+            "CF-Access-Client-Secret": "unexpected-\u00e9",
+        },
+    )
+
+    for headers in invalid_headers:
+        response = client.post("/__internal/verify-task", headers=headers)
+        assert response.status_code == 401
