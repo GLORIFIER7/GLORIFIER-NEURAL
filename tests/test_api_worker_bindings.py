@@ -44,7 +44,10 @@ def test_cloudflare_worker_secret_authenticates_task_endpoint(monkeypatch):
 
     accepted = TestClient(CloudflareEnvironment(app, worker_token)).post(
         "/v1/tasks",
-        headers={"Authorization": f"Bearer {worker_token}"},
+        headers={
+            "Authorization": f"Bearer {worker_token}",
+            "CF-Connecting-IP": "198.51.100.27",
+        },
         json={"task": "safe read-only task", "require_approval": False},
     )
 
