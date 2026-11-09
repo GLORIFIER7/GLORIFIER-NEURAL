@@ -127,7 +127,10 @@ def test_worker_task_endpoint_fails_closed_when_rate_limit_binding_is_missing():
 
     response = worker_client.post(
         "/v1/tasks",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "CF-Connecting-IP": "198.51.100.25",
+        },
         json={"task": "worker request", "require_approval": False},
     )
 
@@ -204,7 +207,10 @@ def test_worker_task_endpoint_persists_minimal_neon_task_run_metadata(monkeypatc
 
     response = TestClient(WorkerEnvironment(app)).post(
         "/v1/tasks",
-        headers={"Authorization": f"Bearer {worker_token}"},
+        headers={
+            "Authorization": f"Bearer {worker_token}",
+            "CF-Connecting-IP": "198.51.100.26",
+        },
         json={"task": "safe metadata test", "require_approval": False},
     )
 
