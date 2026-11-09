@@ -3,6 +3,8 @@
 from pathlib import Path
 import re
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
@@ -30,6 +32,12 @@ def _assert_no_write_permissions(scope: str) -> None:
         r"(?m)^\s*[a-z0-9_-]+:\s*write\s*$",
         scope,
     ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
+
+
+def test_permission_guard_rejects_write_all_job_overrides():
+    with pytest.raises(AssertionError, match="write-all"):
+        _assert_no_write_permissions("permissions: write-all\\n")
+
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
