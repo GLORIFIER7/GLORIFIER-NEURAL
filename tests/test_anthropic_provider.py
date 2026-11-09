@@ -86,7 +86,8 @@ def test_anthropic_async_readiness_and_inference_use_messages_api():
     assert calls[0]["body"] is None
     assert calls[1]["method"] == "POST"
     assert calls[1]["url"] == AnthropicMessagesAdapter.endpoint
-    assert calls[1]["headers"]["x-api-key"] == "request-scoped-secret"
+    assert calls[1]["headers"]["Authorization"] == "Bearer request-scoped-secret"
+    assert "x-api-key" not in calls[1]["headers"]
     assert calls[1]["headers"]["anthropic-version"] == AnthropicMessagesAdapter.api_version
     assert calls[1]["body"]["model"] == "claude-sonnet-5"
     assert calls[1]["body"]["messages"] == [{"role": "user", "content": "controlled prompt"}]
