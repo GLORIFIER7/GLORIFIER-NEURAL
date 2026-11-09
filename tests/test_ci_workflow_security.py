@@ -52,6 +52,7 @@ def _assert_no_write_permissions(scope: str) -> None:
         scope,
     ), "Write-scoped GitHub permissions are not permitted in this workflow scope"
 
+
 def test_permission_guard_rejects_write_all_job_overrides():
     with pytest.raises(AssertionError, match="write-all"):
         _assert_no_write_permissions("permissions: write-all" + chr(10))
@@ -69,6 +70,7 @@ def test_every_workflow_job_rejects_write_all_permission_overrides():
     publish_container = _job_section(ci_workflow, "publish-container")
     assert "packages: write" in publish_container
     _assert_no_write_all_permissions(publish_container)
+
 
 def test_untrusted_ci_workflow_has_only_read_only_repository_permissions():
     workflow = _read_workflow(CI_WORKFLOW_PATH)
