@@ -12,7 +12,9 @@ from typing import Any
 
 from app.orchestrator import Orchestrator
 from app.providers import NvidiaNimAdapter
+from app.providers.anthropic import AnthropicMessagesAdapter
 from app.providers.dynamo import NvidiaDynamoAdapter
+from app.providers.gemini import GeminiInteractionsAdapter
 from app.providers.openai import OpenAIResponsesAdapter
 from app.providers.registry import ProviderRegistry
 
@@ -82,6 +84,22 @@ def build_orchestrator_from_environment(
                 fetch_fn=fetch_fn,
             )
         )
+    elif external_egress_allowed and provider_name == GeminiInteractionsAdapter.name:
+        adapter = GeminiInteractionsAdapter(
+            api_key=_environment_value(environment, "GEMINI_API_KEY"),
+            model=_environment_value(environment, "GEMINI_MODEL"),
+            fetch_fn=fetch_fn,
+        )
+        if adapter.is_configured():
+            registry.register(adapter)
+    elif external_egress_allowed and provider_name == AnthropicMessagesAdapter.name:
+        adapter = AnthropicMessagesAdapter(
+            api_key=_environment_value(environment, "ANTHROPIC_API_KEY"),
+            model=_environment_value(environment, "ANTHROPIC_MODEL"),
+            fetch_fn=fetch_fn,
+        )
+        if adapter.is_configured():
+            registry.register(adapter)
     elif external_egress_allowed and provider_name == OpenAIResponsesAdapter.name:
         registry.register(
             OpenAIResponsesAdapter(
