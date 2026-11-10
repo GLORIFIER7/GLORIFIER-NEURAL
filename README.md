@@ -91,13 +91,20 @@ response explicitly reported `inference_performed=false`; no prompt was
 submitted, no inference was run, and no optional persistence writes were tested.
 `/health` reports process liveness, not dependency readiness.
 
-Pull requests build and validate the Worker bundle in GitHub Actions dry-run mode.
-Cloudflare Workers Builds also has an automatic `main`-branch production deployment
-path configured under `/cloudflare` with `bash ./worker-build.sh deploy`. A separate
-manual GitHub Actions `workflow_dispatch` deployment path is available, gated by
-`deploy=true` on `main` and the `CLOUDFLARE_API_TOKEN` secret plus
-`CLOUDFLARE_ACCOUNT_ID` variable in the
-`glorifier-neural-cloudflare-production` GitHub Environment.
+Pull requests and ordinary pushes validate the Worker bundle without
+publishing a production version. The Cloudflare Workers Builds trigger on
+`main` is configured to run `bash ./worker-build.sh --prepare-only` under
+`/cloudflare`; this prepares and validates the package, then exits before
+invoking Wrangler, so it does not upload or promote a Worker version.
+
+Production promotion is performed only through the protected GitHub Actions
+`workflow_dispatch` path from `main` with `deploy=true`. That workflow uses
+the `CLOUDFLARE_API_TOKEN` secret and `CLOUDFLARE_ACCOUNT_ID` variable in the
+`glorifier-neural-cloudflare-production` GitHub Environment, and preflights
+the required Worker-side API and internal-service secret bindings before
+publishing. Ordinary pushes never count as production-deployment confirmation;
+the post-deployment health/readiness smoke runs only after that protected manual
+deployment succeeds.
 
 The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
 #40 are corrected to run from `/cloudflare`, prepare the Worker package with
