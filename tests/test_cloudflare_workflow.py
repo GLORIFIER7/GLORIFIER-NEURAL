@@ -237,6 +237,7 @@ def test_readme_describes_workers_builds_as_validation_only():
     assert "workflow_dispatch" in readme
     assert "automatic `main`-branch production deployment" not in readme
     assert "A separate manual GitHub Actions" not in readme
+    assert "main-branch production deployment configuration remains unchanged" not in readme
 
 
 def test_cloudflare_worker_disables_provider_egress_and_inference_by_default():
