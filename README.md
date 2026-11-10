@@ -112,7 +112,7 @@ The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, an
 `npx wrangler deploy --dry-run`. All three corrected Cloudflare builds completed
 successfully and stopped at `--dry-run`; no Preview or production version was
 published. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`.
-The main-branch production deployment configuration remains unchanged.
+The main-branch Workers Builds trigger remains enabled for validation-only package preparation; production promotion is restricted to the protected manual workflow described above.
 ## API access
 
 The task endpoint is disabled unless `GLORIFIER_API_TOKEN` is configured. Set a strong, unique token in the deployment secret manager; never commit it to Git or paste it into chat. Send it as a bearer token in the Authorization header. The legacy `GLORIFIER_REQUIRE_API_TOKEN` flag cannot enable access when the token is missing.
