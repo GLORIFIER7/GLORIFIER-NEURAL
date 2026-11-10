@@ -11,11 +11,15 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 - Task-run writes: a separately provisioned `NEON_WRITE` binding or a writer `NEON_DATABASE_URL` secret
 - Currently selected production provider: OpenAI Responses API. The adapter defaults to model `gpt-6-luna` unless `OPENAI_MODEL` overrides it. NVIDIA NIM remains an optional alternative provider, not the current production selection.
 
-The Cloudflare deployment has two production paths. Cloudflare Workers Builds
-automatically builds and deploys commits on `main`, using the `/cloudflare` root
-and `bash ./worker-build.sh deploy`. The repository's
-`.github/workflows/cloudflare-neural-worker.yml` also provides a separate manual
-`workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
+The Cloudflare deployment has one repository-managed production-promotion
+path. As of 2026-11-10, the Cloudflare Workers Builds trigger remains attached to
+`main` for package preparation, but its production command is
+`bash ./worker-build.sh --prepare-only`. That mode prepares the Worker package
+and exits before invoking Wrangler; it does not upload or promote a Worker version.
+The repository's `.github/workflows/cloudflare-neural-worker.yml` is the
+production-promotion path and requires a manual `workflow_dispatch`, gated by
+`deploy=true` on `main` and the protected
+`glorifier-neural-cloudflare-production` environment. Pull-request and ordinary
 push runs in GitHub Actions validate or dry-run only; they do not deploy production.
 
 The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
@@ -25,7 +29,11 @@ The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, an
 `npx wrangler deploy --dry-run`. All three corrected builds completed successfully
 and stopped at `--dry-run`; they published neither a Preview nor a production
 version. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`. The
-main-branch production build configuration remains unchanged.
+main-branch Workers Builds trigger remains enabled for validation-only package
+preparation; its deploy command was read back as
+`bash ./worker-build.sh --prepare-only` on 2026-11-10. The preview command
+remains `npx wrangler preview` and was not changed. This is configuration
+evidence, not production-deployment evidence.
 
 ## GitHub deployment environment
 
