@@ -252,3 +252,4 @@ def test_cloudflare_worker_disables_provider_egress_and_inference_by_default():
     assert variables.get("GLORIFIER_PROVIDER") == "openai"
     assert variables.get("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS") == "false"
     assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "false"
+    assert variables.get("GLORIFIER_PAID_INFERENCE_AUTHORIZED", "false").casefold() == "false"
