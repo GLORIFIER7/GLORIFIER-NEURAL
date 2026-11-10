@@ -11,6 +11,7 @@ from app.schemas import TaskRequest, TaskResponse
 
 
 _READINESS_CACHE_TTL_SECONDS = 30.0
+_MAX_RESULT_CHARS = 20_000
 _STATUS_NOT_VERIFIED = "NOT VERIFIED"
 _STATUS_DEGRADED = "DEGRADED"
 _STATUS_VERIFIED = "VERIFIED"
@@ -124,6 +125,44 @@ class Orchestrator:
 
         return await asyncio.to_thread(self.check_readiness)
 
+    def _rejected_inference_result(
+        self, provider_name: str, result: object
+    ) -> TaskResponse | None:
+        """Return a rejection response, or None when the result is acceptable."""
+        if not isinstance(result, InferenceResult):
+            return TaskResponse(
+                status=_STATUS_DEGRADED,
+                provider=provider_name,
+                message="Provider returned an invalid result object.",
+                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
+            )
+        if (
+            not isinstance(result.provider, str)
+            or result.provider.strip().casefold() != provider_name.strip().casefold()
+            or not isinstance(result.text, str)
+            or not result.text.strip()
+            or len(result.text) > _MAX_RESULT_CHARS
+        ):
+            return TaskResponse(
+                status=_STATUS_DEGRADED,
+                provider=provider_name,
+                message="Provider returned an empty, oversized, or mismatched result.",
+                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
+            )
+        return None
+
+    def _accepted_inference_result(
+        self, provider: ProviderAdapter, result: InferenceResult
+    ) -> TaskResponse:
+        """Build the success response after the shared rejection check has passed."""
+        return TaskResponse(
+            status=_STATUS_VERIFIED,
+            provider=provider.name,
+            result=result.text,
+            message="Provider returned a result; this verifies response receipt, not factual correctness.",
+            evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
+        )
+
     def _async_preflight(
         self, request: TaskRequest
     ) -> tuple[ProviderAdapter | None, TaskResponse | None]:
@@ -166,33 +205,10 @@ class Orchestrator:
     ) -> TaskResponse:
         """Accept only a bounded result from the selected provider."""
         provider_name = self._provider_name or provider.name
-        if not isinstance(result, InferenceResult):
-            return TaskResponse(
-                status=_STATUS_DEGRADED,
-                provider=provider_name,
-                message="Provider returned an invalid result object.",
-                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
-            )
-        if (
-            not isinstance(result.provider, str)
-            or result.provider.strip().casefold() != provider_name.strip().casefold()
-            or not isinstance(result.text, str)
-            or not result.text.strip()
-            or len(result.text) > 20_000
-        ):
-            return TaskResponse(
-                status=_STATUS_DEGRADED,
-                provider=provider_name,
-                message="Provider returned an empty, oversized, or mismatched result.",
-                evidence=[f"provider:{provider_name}:invalid-result", "execution:rejected"],
-            )
-        return TaskResponse(
-            status=_STATUS_VERIFIED,
-            provider=provider.name,
-            result=result.text,
-            message="Provider returned a result; this verifies response receipt, not factual correctness.",
-            evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
-        )
+        rejected = self._rejected_inference_result(provider_name, result)
+        if rejected is not None:
+            return rejected
+        return self._accepted_inference_result(provider, result)
 
     async def arun(self, request: TaskRequest) -> TaskResponse:
         """Execute a governed task using an explicitly configured async provider."""
@@ -275,30 +291,7 @@ class Orchestrator:
                 evidence=[f"provider:{self._provider_name}:error", "execution:failed"],
             )
 
-        if not isinstance(result, InferenceResult):
-            return TaskResponse(
-                status=_STATUS_DEGRADED,
-                provider=self._provider_name,
-                message="Provider returned an invalid result object.",
-                evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
-            )
-        if (
-            not isinstance(result.provider, str)
-            or result.provider.strip().casefold() != self._provider_name.strip().casefold()
-            or not isinstance(result.text, str)
-            or not result.text.strip()
-            or len(result.text) > 20_000
-        ):
-            return TaskResponse(
-                status=_STATUS_DEGRADED,
-                provider=self._provider_name,
-                message="Provider returned an empty, oversized, or mismatched result.",
-                evidence=[f"provider:{self._provider_name}:invalid-result", "execution:rejected"],
-            )
-        return TaskResponse(
-            status=_STATUS_VERIFIED,
-            provider=provider.name,
-            result=result.text,
-            message="Provider returned a result; this verifies response receipt, not factual correctness.",
-            evidence=[f"provider:{result.provider}:response-received", "execution:inference"],
-        )
+        rejected = self._rejected_inference_result(self._provider_name, result)
+        if rejected is not None:
+            return rejected
+        return self._accepted_inference_result(provider, result)
