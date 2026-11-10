@@ -11,11 +11,15 @@ This runbook describes the controls required before declaring the Cloudflare Wor
 - Task-run writes: a separately provisioned `NEON_WRITE` binding or a writer `NEON_DATABASE_URL` secret
 - Currently selected production provider: OpenAI Responses API. The adapter defaults to model `gpt-6-luna` unless `OPENAI_MODEL` overrides it. NVIDIA NIM remains an optional alternative provider, not the current production selection.
 
-The Cloudflare deployment has two production paths. Cloudflare Workers Builds
-automatically builds and deploys commits on `main`, using the `/cloudflare` root
-and `bash ./worker-build.sh deploy`. The repository's
-`.github/workflows/cloudflare-neural-worker.yml` also provides a separate manual
-`workflow_dispatch` path, gated by `deploy=true` on `main`. Pull-request and
+The Cloudflare deployment has one repository-managed production-promotion
+path. As of 2026-11-10, the Cloudflare Workers Builds trigger remains attached to
+`main` for package preparation, but its production command is
+`bash ./worker-build.sh --prepare-only`. That mode prepares the Worker package
+and exits before invoking Wrangler; it does not upload or promote a Worker version.
+The repository's `.github/workflows/cloudflare-neural-worker.yml` is the
+production-promotion path and requires a manual `workflow_dispatch`, gated by
+`deploy=true` on `main` and the protected
+`glorifier-neural-cloudflare-production` environment. Pull-request and ordinary
 push runs in GitHub Actions validate or dry-run only; they do not deploy production.
 
 The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, and
@@ -25,7 +29,11 @@ The branch-specific Workers Builds triggers used for Dependabot PRs #38, #39, an
 `npx wrangler deploy --dry-run`. All three corrected builds completed successfully
 and stopped at `--dry-run`; they published neither a Preview nor a production
 version. Worker preview URLs remain disabled in `cloudflare/wrangler.jsonc`. The
-main-branch production build configuration remains unchanged.
+main-branch Workers Builds trigger remains enabled for validation-only package
+preparation; its deploy command was read back as
+`bash ./worker-build.sh --prepare-only` on 2026-11-10. The preview command
+remains `npx wrangler preview` and was not changed. This is configuration
+evidence, not production-deployment evidence.
 
 ## GitHub deployment environment
 
@@ -171,7 +179,7 @@ Conclusion: Cloudflare deployment and the configured read-only production readin
 
 1. Make code changes on a branch and open a pull request. The active repository ruleset targets `~DEFAULT_BRANCH`, requires the exact `AI Review Policy` status check with strict latest-commit enforcement, retains CodeQL/code-quality constraints, prohibits deletion and non-fast-forward updates, has zero required human approvals, and has no bypass actors. The AI policy workflow itself still has a PR-controlled workflow-definition trust limitation; see `docs/AI_REVIEW_POLICY.md`.
 2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
-3. After an approved merge to `main`, verify the automatic Cloudflare Workers Builds production build and active deployment. The separate GitHub Actions path can be manually dispatched with `deploy=true` using the configured GitHub Environment credentials. Verify the deployment job and intended Worker version/traffic before announcing release.
+3. After an approved merge to `main`, verify the Cloudflare Workers Builds validation-only package-preparation run; it must not upload or promote a Worker version. For production promotion, manually dispatch `.github/workflows/cloudflare-neural-worker.yml` from `main` with `deploy=true` through the protected `glorifier-neural-cloudflare-production` environment. Verify the protected deployment job, exact deployed Worker version, and intended traffic before announcing release. Do not wait for an automatic Workers Builds production deployment.
 4. Require live `/health` and `/ready` checks. Expect `/ready` HTTP 200 when the selected provider, database, authentication, and rate-limit checks are verified. Accept HTTP 503 only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
 5. The production inference flag is currently configured `true`, but do not treat that as proof of live execution. Perform a controlled authenticated inference request only after confirming the selected provider credential is valid, approving transmission of task content, and accepting any applicable API usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
 
