@@ -158,9 +158,16 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
     assert {"submitted", "edited", "dismissed"} <= _event_types(
         trusted_workflow, "pull_request_review"
     )
-    assert "github.event.review.pull_request" not in policy_job
+    assert "github.event.review.pull_request.number" in policy_job
     assert "github.event.pull_request.base.sha" in policy_job
-    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}" in policy_job
+    pr_number_expression = (
+        "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
+        "|| (github.event_name == 'pull_request_review' && "
+        "github.event.review.pull_request.number) "
+        "|| github.event.pull_request.number"
+    )
+    assert policy_job.count(pr_number_expression) == 2
+    assert pr_number_expression in trusted_workflow.split("\\nconcurrency:", 1)[1]
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in policy_job
     assert "workflow_dispatch:" in trusted_workflow
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
