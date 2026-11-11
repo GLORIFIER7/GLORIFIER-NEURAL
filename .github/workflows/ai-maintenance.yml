@@ -344,4 +344,7 @@ jobs:
           gh workflow run ci.yml --ref main \
             --field pull_request_number="$pr_number" \
             --field pull_request_head_sha="$pr_head_sha"
+          gh workflow run trusted-ai-review-policy.yml --ref main \
+            --field pull_request_number="$pr_number" \
+            --field pull_request_head_sha="$pr_head_sha"
 
