@@ -570,3 +570,21 @@ def test_copy_back_protects_trusted_policy_authority_regression_test():
     protected_path = "tests/test_trusted_policy_is_single_authority.py"
     assert protected_path in copy_back
     assert copy_back.index(protected_path) < copy_back.index("rsync -rlptD --delete")
+
+def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    test_start = ci_workflow.index("  test:")
+    publish_start = ci_workflow.index(chr(10) + "  publish-container:", test_start)
+    test_section = ci_workflow[test_start:publish_start]
+    identity = test_section.index("Verify dispatched PR head against GitHub")
+    checkout = test_section.index("uses: actions/checkout")
+
+    assert identity < checkout
+    assert "pull-requests: read" in test_section
+    assert "id: current-pr" in test_section
+    assert "GH_TOKEN: ${{ github.token }}" in test_section
+    assert "GITHUB_REPOSITORY: ${{ github.repository }}" in test_section
+    assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
+    assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
+    assert "https://api.github.com/repos/{repository}/pulls/{pull_number}" in test_section
+    assert "expected_head_sha.casefold() != head_sha.casefold()" in test_section
