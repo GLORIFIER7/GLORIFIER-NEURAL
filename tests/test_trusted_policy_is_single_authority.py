@@ -95,7 +95,37 @@ def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
 
     assert "pull_request_target" in events
     assert "pull_request_review" in events
+    assert "workflow_dispatch" in events
     assert "pull_request" not in events
-    assert "ref: ${{ github.event.pull_request.base.sha }}" in trusted
+    assert "pull_request_number:" in trusted
+    assert "pull_request_head_sha:" in trusted
+    assert "inputs.pull_request_number" in trusted
+    assert "inputs.pull_request_head_sha" in trusted
+    assert "EXPECTED_PR_HEAD_SHA:" in trusted
+    assert "expected_head_sha.casefold() != head_sha.casefold()" in trusted
+    assert "github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha" in trusted
     assert "persist-credentials: false" in trusted
     assert "python -m app.ai_review_policy" in trusted
+
+
+def test_ai_maintenance_dispatches_trusted_policy_for_the_exact_generated_pr_head():
+    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
+    dispatch_start = maintenance.index(
+        "- name: Dispatch trusted CI and AI review for the exact PR head"
+    )
+    dispatch_end = maintenance.find("\\n      - name:", dispatch_start + 1)
+    dispatch_step = (
+        maintenance[dispatch_start:]
+        if dispatch_end < 0
+        else maintenance[dispatch_start:dispatch_end]
+    )
+
+    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq \' .headRefOid\')"' not in dispatch_step
+    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
+    assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
+    assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
+    assert 'gh workflow run trusted-ai-review-policy.yml --ref main \\' in dispatch_step
+    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 2
+    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
+    assert "gh pr merge" not in dispatch_step
+    assert "--auto" not in dispatch_step
