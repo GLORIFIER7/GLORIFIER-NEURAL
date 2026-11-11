@@ -1,26 +1,36 @@
 """Regression test: trusted PR policy must not be duplicated in PR-editable CI."""
 
 from pathlib import Path
-import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-def _top_level_block(workflow: str, section: str) -> str:
-    match = re.search(
-        rf"(?ms)^{re.escape(section)}:[ \\t]*\\n"
-        r"(?P<body>(?:[ \\t]+[^\\n]*\\n|[ \\t]*\\n)*)",
-        workflow,
+def _top_level_block(workflow: str, section: str) -> list[str]:
+    lines = workflow.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line.rstrip() == f"{section}:"),
+        None,
     )
-    assert match, f"Workflow is missing its top-level {section!r} block"
-    return match.group("body")
+    assert start is not None, f"Workflow is missing its top-level {section!r} block"
+
+    block = []
+    for line in lines[start + 1 :]:
+        if line and not line[0].isspace():
+            break
+        block.append(line)
+    return block
 
 
 def _section_keys(workflow: str, section: str) -> set[str]:
-    block = _top_level_block(workflow, section)
-    return set(re.findall(r"(?m)^  ([a-z0-9_-]+):[ \\t]*$", block))
+    return {
+        line.strip()[:-1]
+        for line in _top_level_block(workflow, section)
+        if line.startswith("  ")
+        and not line.startswith("    ")
+        and line.strip().endswith(":")
+    }
 
 
 def test_ci_does_not_define_a_pr_editable_ai_review_gate():
