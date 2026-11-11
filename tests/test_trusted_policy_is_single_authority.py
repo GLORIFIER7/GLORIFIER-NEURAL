@@ -35,6 +35,22 @@ def _section_keys(workflow: str, section: str) -> set[str]:
     }
 
 
+
+def test_section_keys_recognizes_quoted_yaml_mapping_keys():
+    workflow = (
+        "on:\\n"
+        "  \"pull_request_review\":\\n"
+        "    types: [submitted]\\n"
+        "  'pull_request_target':\\n"
+        "    types: [opened]\\n"
+        "jobs:\\n"
+    )
+
+    assert _section_keys(workflow, "on") == {
+        "pull_request_review",
+        "pull_request_target",
+    }
+
 def _workflow_files() -> list[Path]:
     return sorted(
         path
