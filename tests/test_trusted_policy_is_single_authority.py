@@ -12,7 +12,7 @@ TRUSTED_WORKFLOW = "trusted-ai-review-policy.yml"
 def _top_level_block(workflow: str, section: str) -> list[str]:
     """Return a top-level YAML block without assuming a particular indent width."""
     lines = workflow.splitlines()
-    header = re.compile(rf"^( *)(?:['"]?){re.escape(section)}(?:['"]?)\s*:\s*(?:#.*)?$")
+    header = re.compile(rf"^( *){re.escape(section)}\s*:\s*(?:#.*)?$")
     start = next(
         (index for index, line in enumerate(lines) if header.fullmatch(line)),
         None,
