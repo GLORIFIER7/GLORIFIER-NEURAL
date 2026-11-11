@@ -120,7 +120,7 @@ jobs:
 
   publish-dispatch-result:
     name: Publish trusted policy result on PR head
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
     needs: [ai-review-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -132,8 +132,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pull_request_number }}
-          EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
           POLICY_HEAD_SHA: ${{ needs.ai-review-policy.outputs.pr_head_sha }}
           POLICY_RESULT: ${{ needs.ai-review-policy.result }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
@@ -186,7 +186,7 @@ jobs:
           current_head_sha = (pr.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
-          if current_head_sha.casefold() != expected_head_sha.casefold():
+          if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():
               stale_summary = (
                   f"The evaluation was dispatched for head {expected_head_sha} but "
                   f"the pull request has since advanced to {current_head_sha}. "
@@ -213,8 +213,12 @@ jobs:
               try:
                   with urlopen(stale_request, timeout=20) as stale_response:
                       stale_response.read()
-              except Exception:
-                  pass
+              except urllib.error.HTTPError as exc:
+                  raise SystemExit(
+                      f"GitHub check publication failed (HTTP {exc.code})."
+                  ) from None
+              except (urllib.error.URLError, TimeoutError, OSError):
+                  raise SystemExit("GitHub check publication is unavailable.") from None
               raise SystemExit(
                   f"Stale dispatch: head advanced from {expected_head_sha} to "
                   f"{current_head_sha}; published failure check on latest head."
