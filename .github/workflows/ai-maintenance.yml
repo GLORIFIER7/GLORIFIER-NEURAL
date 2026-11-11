@@ -151,7 +151,8 @@ jobs:
             app/ai_review_policy.py \
             tests/test_ai_maintenance_scope.py \
             tests/test_ai_review_policy.py \
-            tests/test_ci_workflow_security.py; do
+            tests/test_ci_workflow_security.py \
+            tests/test_trusted_policy_is_single_authority.py; do
             if [ -f "$GITHUB_WORKSPACE/$protected" ]; then
               if [ ! -f "$AGENT_WORKSPACE/$protected" ] || ! cmp -s "$GITHUB_WORKSPACE/$protected" "$AGENT_WORKSPACE/$protected"; then
                 echo "::error::Codex changed a protected governance file: $protected"
