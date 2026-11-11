@@ -23,6 +23,9 @@ def test_ci_does_not_define_a_pr_editable_ai_review_gate():
         "workflow, never in the PR-editable CI workflow."
     )
     assert "name: AI Review Policy" not in ci
+    assert re.search(r"(?m)^  pull_request_review:", ci) is None, (
+        "PR review events must be handled only by the trusted policy workflow."
+    )
 
 
 def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
