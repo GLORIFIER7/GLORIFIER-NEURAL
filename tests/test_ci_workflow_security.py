@@ -146,7 +146,8 @@ def test_untrusted_test_job_does_not_persist_github_token():
     )
     assert "inputs.pull_request_head_sha" in test_job
     assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in test_job
-    assert "pull-requests:" not in test_job
+    assert "pull-requests: read" in test_job
+    assert "pull-requests: write" not in test_job
 
 
 def test_review_events_use_trusted_base_context_and_documented_payload():
