@@ -217,12 +217,13 @@ def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
     assert '"head_sha": head_sha' in publish_job
     assert '"conclusion": conclusion' in publish_job
 
+
 def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
     test_job = _job_section("test", ci_workflow)
     validation_step = test_job.split(
         "- name: Validate manual dispatch PR identity", 1
-    )[1].split("\\n      - name:", 1)[0]
+    )[1].split("\n      - name:", 1)[0]
 
     # Either input activates validation; both are then mandatory. This keeps
     # normal no-input dispatch available while rejecting a partial PR request.
