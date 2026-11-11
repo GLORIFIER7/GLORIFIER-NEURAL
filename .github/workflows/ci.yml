@@ -29,6 +29,7 @@ jobs:
   test:
     permissions:
       contents: read
+      pull-requests: read
     timeout-minutes: 15
     runs-on: ubuntu-latest
     strategy:
@@ -51,9 +52,64 @@ jobs:
             echo "::error::An exact PR head SHA is required with a dispatched pull request number."
             exit 1
           }
+      - name: Verify dispatched PR head against GitHub
+        id: current-pr
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+          EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          pull_number = os.environ["PR_NUMBER"]
+          expected_head_sha = os.environ["EXPECTED_PR_HEAD_SHA"]
+          token = os.environ["GH_TOKEN"]
+          if not re.fullmatch(r"[1-9][0-9]*", pull_number):
+              raise SystemExit("A valid pull request number is required.")
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha):
+              raise SystemExit("An exact 40-character PR head SHA is required.")
+          url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}"
+          request = Request(url, headers={
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(
+                  f"GitHub PR identity lookup failed (HTTP {exc.code})."
+              ) from None
+          except (urllib.error.URLError, TimeoutError, OSError):
+              raise SystemExit("GitHub PR identity lookup is unavailable.") from None
+          except (json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit(
+                  "GitHub PR identity lookup returned invalid JSON."
+              ) from None
+          if not isinstance(payload, dict):
+              raise SystemExit("GitHub PR identity lookup returned an invalid response.")
+          current_head_sha = (payload.get("head") or {}).get("sha", "")
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
+              raise SystemExit("GitHub returned an invalid pull request head SHA.")
+          if expected_head_sha.casefold() != current_head_sha.casefold():
+              raise SystemExit(
+                  "The dispatched PR head SHA does not match the pull request's current head."
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("head_sha=" + current_head_sha + chr(10))
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}
+          ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # immutable commit pin
         with:
