@@ -1,6 +1,6 @@
 # GLORIFIER Neural Orchestration
 
-A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest successful production smoke on 2026-11-05 returned HTTP 200 from `/health` and `/ready`; provider access, read-only Neon connectivity, authentication, and rate limiting were VERIFIED. A direct Cloudflare settings read-back later that day confirmed `GLORIFIER_PROVIDER=openai`, external data egress enabled, Neon connectivity enabled, and `GLORIFIER_ENABLE_INFERENCE=true`. Optional audit and task-run persistence remain unconfigured. The smoke test did not submit a prompt or perform inference, so end-to-end model execution remains NOT VERIFIED.
+A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest production deployment was run #42938988897 on 2026-11-11 from main commit `042c50d5d570122eeb12036c7a68865330630da7`; Cloudflare reported Worker version `f1a26f39-e46f-4d9d-b982-f66f21f2e115`. Its deployment and smoke jobs succeeded. The smoke returned HTTP 200 from `/health`; `/ready` returned HTTP 503 in the configured safe-mode path with `providers: NOT VERIFIED`, `database: VERIFIED`, `authentication: VERIFIED`, `rate_limit: VERIFIED`, optional audit/task-run persistence not configured, and `inference_performed=false`. This is a deployed safe-mode state, not provider-ready task execution. No prompt or model inference was submitted.
 
 ## License
 
@@ -71,8 +71,8 @@ The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
 Worker; its value is not read or stored in this repository or Wrangler configuration.
 The endpoint remains protected by Cloudflare Access and bearer-token validation.
 
-The current production Worker settings, read back directly from Cloudflare on
-2026-11-05 at approximately 16:28 (UTC+07:00), are
+The following production configuration is a historical Cloudflare read-back from
+2026-11-05 at approximately 16:28 (UTC+07:00), superseded as a readiness observation by run #42938988897:
 `GLORIFIER_PROVIDER=openai`,
 `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
 `GLORIFIER_ENABLE_INFERENCE=true`, and
@@ -81,14 +81,7 @@ The current production Worker settings, read back directly from Cloudflare on
 are present by name; secret values are never read from the binding inventory.
 The `NVIDIA_NIM_API_KEY` binding is also present for the optional NVIDIA adapter,
 but NVIDIA is not the selected production provider. External egress is enabled
-for the read-only provider readiness request. The production inference flag is
-now `true`, but the latest successful production smoke (GitHub Actions run
-[#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798),
-2026-11-05T07:30Z) reported HTTP 200 from `/health` and `/ready`, with provider,
-read-only database connectivity, authentication, and rate limiting `VERIFIED`.
-Audit and task-run persistence remain `NOT CONFIGURED (OPTIONAL)`. The smoke
-response explicitly reported `inference_performed=false`; no prompt was
-submitted, no inference was run, and no optional persistence writes were tested.
+for the read-only provider readiness request. This historical November 5 configuration must not be treated as the current provider-readiness state. The current November 11 deployment smoke is recorded under **Latest production state** below; it reported provider readiness `NOT VERIFIED` and `inference_performed=false`.
 `/health` reports process liveness, not dependency readiness.
 
 Pull requests and ordinary pushes validate the Worker bundle without
@@ -122,7 +115,7 @@ Do not expose the service publicly without TLS, monitoring, secret rotation, and
 ## Explicit inference configuration
 
 Inference is disabled by default for local development and newly provisioned deployments. The existing production Worker was directly read back from Cloudflare on 2026-11-05 at approximately 16:28 (UTC+07:00): `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`. The `OPENAI_API_KEY` and `GLORIFIER_API_TOKEN` secret binding names are present; their values were not read. The readiness smoke check is read-only and did not call the Responses API completion endpoint. Live inference, output quality, latency, task execution, and usage-cost behavior therefore remain **NOT VERIFIED**. Authenticated task requests may send task content to OpenAI and incur separate API usage charges. A controlled live inference request must be treated as a separate operational test and must not be inferred from a successful `/ready` response. ChatGPT subscriptions and API billing are separate.
-## Current deployed state — observed 2026-11-05 (UTC+07:00)
+## Historical deployed state — observed 2026-11-05 (UTC+07:00; superseded)
 
 Direct Cloudflare configuration inventory was read at approximately 16:28 local time. The latest deployment inventory returned:
 
@@ -130,7 +123,7 @@ Direct Cloudflare configuration inventory was read at approximately 16:28 local 
 - Latest deployment: `77cace04-8c1b-4a26-82b6-b4504f920625`, created `2026-11-05T07:30:11.656407Z`; 100% traffic assigned to version `ecf822d5-745e-4c33-8fc2-5c10ca83baf7`.
 - Current non-secret Worker variables: `GLORIFIER_PROVIDER=openai`, `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`, `GLORIFIER_ENABLE_INFERENCE=true`, and `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`.
 - Secret-binding inventory includes `OPENAI_API_KEY`, `GLORIFIER_API_TOKEN`, and `NVIDIA_NIM_API_KEY`. Only binding names were inspected; secret values were not read.
-- The latest successful production smoke was GitHub Actions run [#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798), around `2026-11-05T07:30Z`. It confirmed `/health` HTTP 200 and `/ready` HTTP 200 with `status: READY`; provider, database connectivity, authentication, and rate limiting were `VERIFIED`.
+- The November 5 production smoke was GitHub Actions run [#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798), around `2026-11-05T07:30Z`. It confirmed `/health` HTTP 200 and `/ready` HTTP 200 with `status: READY`; this is historical evidence and was superseded by the November 11 safe-mode smoke.
 - That smoke response reported `inference_performed=false`. No prompt was submitted and no model inference was executed.
 - Audit and task-run persistence remain `NOT CONFIGURED (OPTIONAL)`; no optional persistence write was tested.
 
