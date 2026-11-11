@@ -26,13 +26,20 @@ def _top_level_block(workflow: str, section: str) -> list[str]:
 
 
 def _section_keys(workflow: str, section: str) -> set[str]:
-    return {
-        line.strip()[:-1]
-        for line in _top_level_block(workflow, section)
-        if line.startswith("  ")
-        and not line.startswith("    ")
-        and line.strip().endswith(":")
-    }
+    keys = set()
+    for line in _top_level_block(workflow, section):
+        stripped = line.strip()
+        if (
+            not line.startswith("  ")
+            or line.startswith("    ")
+            or not stripped.endswith(":")
+        ):
+            continue
+        key = stripped[:-1].strip()
+        if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
+            key = key[1:-1]
+        keys.add(key)
+    return keys
 
 
 
@@ -50,6 +57,8 @@ def test_section_keys_recognizes_quoted_yaml_mapping_keys():
         "pull_request_review",
         "pull_request_target",
     }
+
+
 
 def _workflow_files() -> list[Path]:
     return sorted(
