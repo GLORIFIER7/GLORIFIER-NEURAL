@@ -64,6 +64,7 @@ jobs:
           import json
           import os
           import re
+          import urllib.error
           from urllib.request import Request, urlopen
 
           repository = os.environ["GITHUB_REPOSITORY"]
@@ -82,8 +83,21 @@ jobs:
               "Authorization": f"Bearer {token}",
               "X-GitHub-Api-Version": "2022-11-28",
           })
-          with urlopen(request, timeout=20) as response:
-              payload = json.loads(response.read().decode("utf-8"))
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(
+                  f"GitHub PR identity lookup failed (HTTP {exc.code})."
+              ) from None
+          except (urllib.error.URLError, TimeoutError, OSError):
+              raise SystemExit("GitHub PR identity lookup is unavailable.") from None
+          except (json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit(
+                  "GitHub PR identity lookup returned invalid JSON."
+              ) from None
+          if not isinstance(payload, dict):
+              raise SystemExit("GitHub PR identity lookup returned an invalid response.")
           head_sha = (payload.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
@@ -125,6 +139,7 @@ jobs:
           import json
           import os
           import re
+          import urllib.error
           from urllib.request import Request, urlopen
 
           repository = os.environ["GITHUB_REPOSITORY"]
@@ -164,8 +179,21 @@ jobs:
               },
               method="POST",
           )
-          with urlopen(request, timeout=20) as response:
-              check = json.loads(response.read().decode("utf-8"))
+          try:
+              with urlopen(request, timeout=20) as response:
+                  check = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(
+                  f"GitHub check publication failed (HTTP {exc.code})."
+              ) from None
+          except (urllib.error.URLError, TimeoutError, OSError):
+              raise SystemExit("GitHub check publication is unavailable.") from None
+          except (json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit(
+                  "GitHub check publication returned invalid JSON."
+              ) from None
+          if not isinstance(check, dict):
+              raise SystemExit("GitHub check publication returned an invalid response.")
           if check.get("head_sha", "").casefold() != head_sha.casefold():
               raise SystemExit("GitHub created the policy check on an unexpected commit.")
           if check.get("name") != "Trusted AI Review Policy":
