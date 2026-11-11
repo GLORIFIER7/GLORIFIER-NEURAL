@@ -73,6 +73,8 @@ def test_section_keys_is_independent_of_indentation_width():
         "                required: true
         "jobs:
     )
+    # Regression: verify the fixture is valid Python-parseable before using it.
+    compile(workflow_4space, "<fixture>", "eval")
     keys = _section_keys(workflow_4space, "on")
     assert keys == {"pull_request_target", "workflow_dispatch"}, (
         f"Expected only direct children with 4-space indent, got {keys!r}"
@@ -223,15 +225,14 @@ def test_dispatch_check_publication_fails_closed_on_github_api_errors():
 
 def test_review_event_resolves_pull_request_number_from_review_payload():
     trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    expression = (
+    assert trusted.count(expression) == 3
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
         "github.event.review.pull_request.number) "
         "|| github.event.pull_request.number"
     )
 
-
-
+    dispatch_end = maintenance.find("
 def test_ai_maintenance_dispatch_emits_error_annotation_for_invalid_pr_head_sha():
     maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
     dispatch_start = maintenance.index(
