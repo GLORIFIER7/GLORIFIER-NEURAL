@@ -542,7 +542,7 @@ def test_workflow_top_level_permissions_are_minimal():
 def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     test_start = ci_workflow.index("  test:")
-    publish_start = ci_workflow.index("\\n  publish-container:", test_start)
+    publish_start = ci_workflow.index(chr(10) + "  publish-container:", test_start)
     test_section = ci_workflow[test_start:publish_start]
     validation = test_section.index("Validate manual dispatch PR identity")
     checkout = test_section.index("uses: actions/checkout")
