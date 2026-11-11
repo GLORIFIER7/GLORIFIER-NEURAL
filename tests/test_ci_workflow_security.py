@@ -180,3 +180,20 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
+
+
+def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section("ai-review-policy", trusted_workflow)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+
+    assert "outputs:" in policy_job
+    assert "pr_head_sha: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "checks: write" in publish_job
+    assert "github.event_name == 'workflow_dispatch'" in publish_job
+    assert "needs.ai-review-policy.outputs.pr_head_sha" in publish_job
+    assert "needs.ai-review-policy.result" in publish_job
+    assert 'https://api.github.com/repos/{repository}/check-runs' in publish_job
+    assert '"name": "Trusted AI Review Policy"' in publish_job
+    assert '"head_sha": head_sha' in publish_job
+    assert '"conclusion": conclusion' in publish_job
