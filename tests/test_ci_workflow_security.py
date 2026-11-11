@@ -218,7 +218,7 @@ def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
     assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in publish_job
     assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in publish_job
     assert 'current_head_sha = (pr.get("head") or {}).get("sha", "")' in publish_job
-    assert "expected_head_sha.casefold() != current_head_sha.casefold()" in publish_job
+    assert "current_head_sha.casefold() != expected_head_sha.casefold()" in publish_job
     assert "policy_head_matches" in publish_job
     assert 'https://api.github.com/repos/{repository}/check-runs' in publish_job
     assert '"name": "Trusted AI Review Policy"' in publish_job
