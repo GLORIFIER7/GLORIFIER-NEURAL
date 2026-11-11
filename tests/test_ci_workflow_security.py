@@ -190,6 +190,77 @@ def test_trusted_policy_module_has_a_preflight_before_execution():
     assert policy_job.count("- name: Verify trusted policy runner") == 1
 
 
+def test_policy_enforcement_step_requires_resolver_success():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section("ai-review-policy", trusted_workflow)
+    enforce_start = policy_job.find(
+        "- name: Enforce both AI reviewer findings on the exact current PR head"
+    )
+    assert enforce_start >= 0, "Enforcement step must be present"
+    # The if: guard must appear in this step before the env: block
+    env_start = policy_job.find("env:", enforce_start)
+    guard_start = policy_job.find(
+        "if: steps.current-pr.outcome == 'success'", enforce_start
+    )
+    assert guard_start >= 0, (
+        "The enforcement step must carry 'if: steps.current-pr.outcome == \"success\"' "
+        "so a failed resolver cannot invoke the evaluator."
+    )
+    assert guard_start < env_start, (
+        "The if: guard must appear before the env: block of the enforcement step."
+    )
+    # Confirm the resolver step has the id that the guard references
+    resolver_start = policy_job.find("- name: Resolve canonical PR head SHA from GitHub")
+    assert resolver_start >= 0
+    assert "id: current-pr" in policy_job[resolver_start:enforce_start]
+
+
+def test_stale_head_publishes_failure_check_on_latest_head():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+    # The stale path must publish a failure check; it must NOT silently exit
+    assert "stale_summary" in publish_job, (
+        "The stale-head path must build a stale_summary for the failure check."
+    )
+    assert "stale_payload" in publish_job, (
+        "The stale-head path must construct a stale_payload dict."
+    )
+    assert "stale_request" in publish_job, (
+        "The stale-head path must POST a check-runs stale_request."
+    )
+    assert "latest head must be re-evaluated" in publish_job, (
+        "The stale summary must state the latest head must be re-evaluated."
+    )
+    # Failure check must be bound to current_head_sha (the latest head), not the dispatched SHA
+    stale_block_start = publish_job.index("stale_payload")
+    stale_block_end = publish_job.index("stale_request")
+    stale_block = publish_job[stale_block_start:stale_block_end]
+    assert '"head_sha": current_head_sha' in stale_block, (
+        "The stale failure check must be published on the canonical latest head SHA."
+    )
+    assert '"conclusion": "failure"' in stale_block, (
+        "The stale path must always publish conclusion=failure."
+    )
+    assert '"name": "Trusted AI Review Policy"' in stale_block, (
+        "The stale check must use the exact name 'Trusted AI Review Policy'."
+    )
+
+
+def test_matching_head_publishes_check_with_policy_result():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+    assert "policy_head_matches" in publish_job
+    assert (
+        'if policy_result == "success" and policy_head_matches'
+        in publish_job
+    ), "Success can only be published when policy result is success and heads match."
+    assert '"name": "Trusted AI Review Policy"' in publish_job
+    assert "checks: write" in publish_job
+    # Checks:write is the only write permission
+    assert publish_job.count(": write") == 1, (
+        "Only checks:write is permitted in the publish-dispatch-result job."
+    )
+
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     policy_job = _job_section("ai-review-policy", trusted_workflow)

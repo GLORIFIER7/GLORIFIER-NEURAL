@@ -26,20 +26,60 @@ def _top_level_block(workflow: str, section: str) -> list[str]:
 
 
 def _section_keys(workflow: str, section: str) -> set[str]:
+    """Return the set of direct-child mapping keys in *section*.
+
+    The indentation width is detected from the first non-blank, indented line
+    of the block so the function works with any consistent indent width.
+    Only lines indented by exactly that detected width are considered direct
+    children; deeper lines are nested values and are ignored.
+    """
+    block = _top_level_block(workflow, section)
+    # Detect the indentation width from the first non-blank indented line.
+    indent_width: int | None = None
+    for line in block:
+        if not line.strip():
+            continue
+        leading = len(line) - len(line.lstrip(" "))
+        if leading > 0:
+            indent_width = leading
+            break
+    if indent_width is None:
+        return set()
     keys = set()
-    for line in _top_level_block(workflow, section):
+    for line in block:
         stripped = line.strip()
-        if (
-            not line.startswith("  ")
-            or line.startswith("    ")
-            or not stripped.endswith(":")
-        ):
+        if not stripped.endswith(":"):
+            continue
+        leading = len(line) - len(line.lstrip(" "))
+        if leading != indent_width:
             continue
         key = stripped[:-1].strip()
         if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
             key = key[1:-1]
         keys.add(key)
     return keys
+
+
+def test_section_keys_is_independent_of_indentation_width():
+    """_section_keys must work for any consistent indentation, not only 2 spaces."""
+    # 4-space-indented block: direct children only
+    workflow_4space = (
+        "on:
+        "    pull_request_target:
+        "        types: [opened]
+        "    workflow_dispatch:
+        "        inputs:
+        "            sha:
+        "                required: true
+        "jobs:
+    )
+    keys = _section_keys(workflow_4space, "on")
+    assert keys == {"pull_request_target", "workflow_dispatch"}, (
+        f"Expected only direct children with 4-space indent, got {keys!r}"
+    )
+    # Nested keys must NOT appear as direct children
+    assert "inputs" not in keys
+    assert "sha" not in keys
 
 
 
@@ -190,4 +230,33 @@ def test_review_event_resolves_pull_request_number_from_review_payload():
         "|| github.event.pull_request.number"
     )
 
+
+
+def test_ai_maintenance_dispatch_emits_error_annotation_for_invalid_pr_head_sha():
+    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
+    dispatch_start = maintenance.index(
+        "- name: Dispatch trusted CI and AI review for the exact PR head"
+    )
+    dispatch_end = maintenance.find("
     assert trusted.count(expression) == 3
+    dispatch_step = (
+        maintenance[dispatch_start:]
+        if dispatch_end < 0
+        else maintenance[dispatch_start:dispatch_end]
+    )
+    # Both invalid-sha and invalid-number checks must emit ::error:: before exit 1
+    assert "::error::" in dispatch_step, (
+        "The dispatch step must emit ::error:: annotations instead of silently failing."
+    )
+    sha_check = '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]'
+    nr_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
+    sha_pos = dispatch_step.index(sha_check)
+    nr_pos = dispatch_step.index(nr_check)
+    # ::error:: must appear between the sha check and the pr_number check (for sha failure)
+    assert "::error::" in dispatch_step[sha_pos:nr_pos], (
+        "An ::error:: annotation must precede the exit for an invalid pr_head_sha."
+    )
+    # ::error:: must appear after the pr_number check (for pr_number failure)
+    assert "::error::" in dispatch_step[nr_pos:], (
+        "An ::error:: annotation must precede the exit for an invalid pr_number."
+    )
