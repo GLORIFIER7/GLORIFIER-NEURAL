@@ -39,6 +39,7 @@ jobs:
     steps:
       # Run when either identifier is supplied so a partial PR identity fails closed; with neither input, run ordinary CI.
       - name: Validate manual dispatch PR identity
+        id: validate-pr-identity
         if: github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '')
         env:
           PR_NUMBER: ${{ inputs.pull_request_number }}
@@ -55,7 +56,7 @@ jobs:
           }
       - name: Verify dispatched PR head against GitHub
         id: current-pr
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '') && steps.validate-pr-identity.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

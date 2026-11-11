@@ -349,7 +349,7 @@ def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_drive
     assert "pull_request_target:" in trusted_review
     assert "pull_request_review:" in trusted_review
     assert "ai-review-policy:" in trusted_review
-    assert "github.event.pull_request.base.sha" in trusted_review
+    assert "ref: main" in trusted_review
     assert "Enforce both AI reviewer findings on the exact current PR head" in trusted_review
 
 
@@ -586,5 +586,7 @@ def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
     assert "GITHUB_REPOSITORY: ${{ github.repository }}" in test_section
     assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
     assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
+    assert "id: validate-pr-identity" in test_section
+    assert "steps.validate-pr-identity.outcome == 'success'" in test_section
     assert "https://api.github.com/repos/{repository}/pulls/{pull_number}" in test_section
     assert "expected_head_sha.casefold() != current_head_sha.casefold()" in test_section

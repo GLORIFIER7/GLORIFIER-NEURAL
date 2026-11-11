@@ -132,7 +132,7 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     )
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || (github.event_name == 'pull_request_review' && github.event.review.pull_request.base.sha) || github.event.pull_request.base.sha || 'main' }}" in policy_job
+    assert "ref: main" in policy_job
     assert "persist-credentials: false" in policy_job
 
 
@@ -160,8 +160,9 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
         trusted_workflow, "pull_request_review"
     )
     assert "github.event.review.pull_request.number" in policy_job
-    assert "github.event.review.pull_request.base.sha" in policy_job
-    assert "github.event.pull_request.base.sha" in policy_job
+    assert "ref: main" in policy_job
+    assert "github.event.review.pull_request.base.sha" not in policy_job
+    assert "github.event.pull_request.base.sha" not in policy_job
     pr_number_expression = (
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
@@ -212,9 +213,16 @@ def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
     assert "github.event_name == 'workflow_dispatch'" in publish_job
     assert "needs.ai-review-policy.outputs.pr_head_sha" in publish_job
     assert "needs.ai-review-policy.result" in publish_job
+    assert "github.ref == 'refs/heads/main'" in publish_job
+    assert "needs.ai-review-policy.outputs.pr_head_sha != ''" not in publish_job
+    assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in publish_job
+    assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in publish_job
+    assert 'current_head_sha = (pr.get("head") or {}).get("sha", "")' in publish_job
+    assert "expected_head_sha.casefold() != current_head_sha.casefold()" in publish_job
+    assert "policy_head_matches" in publish_job
     assert 'https://api.github.com/repos/{repository}/check-runs' in publish_job
     assert '"name": "Trusted AI Review Policy"' in publish_job
-    assert '"head_sha": head_sha' in publish_job
+    assert '"head_sha": current_head_sha' in publish_job
     assert '"conclusion": conclusion' in publish_job
 
 
@@ -233,3 +241,8 @@ def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
     )
     assert '[[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]' in validation_step
     assert '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]' in validation_step
+    assert "id: validate-pr-identity" in validation_step
+    verification_step = test_job.split(
+        "- name: Verify dispatched PR head against GitHub", 1
+    )[1].split("\n      - uses: actions/checkout", 1)[0]
+    assert "steps.validate-pr-identity.outcome == 'success'" in verification_step
