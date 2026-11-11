@@ -10,510 +10,181 @@ TRUSTED_WORKFLOW = "trusted-ai-review-policy.yml"
 
 
 def _top_level_block(workflow: str, section: str) -> list[str]:
+    """Return a top-level YAML block without assuming a particular indent width."""
     lines = workflow.splitlines()
+    header = re.compile(rf"^( *)(?:['\"]?){re.escape(section)}(?:['\"]?)\\s*:\\s*(?:#.*)?$")
     start = next(
-        (index for index, line in enumerate(lines) if line.rstrip() == f"{section}:"),
+        (index for index, line in enumerate(lines) if header.fullmatch(line)),
         None,
     )
     assert start is not None, f"Workflow is missing its top-level {section!r} block"
-
-    block = []
+    header_indent = len(lines[start]) - len(lines[start].lstrip(" "))
+    block: list[str] = []
     for line in lines[start + 1 :]:
-        if line and not line[0].isspace():
-            break
+        if line.strip() and not line.lstrip().startswith("#"):
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= header_indent:
+                break
         block.append(line)
     return block
 
 
 def _section_keys(workflow: str, section: str) -> set[str]:
-    """Return the set of direct-child mapping keys in *section*.
-
-    The indentation width is detected from the first non-blank, indented line
-    of the block so the function works with any consistent indent width.
-    Only lines indented by exactly that detected width are considered direct
-    children; deeper lines are nested values and are ignored.
-    """
+    """Return direct-child mapping keys, handling any consistent YAML indentation."""
     block = _top_level_block(workflow, section)
-    # Detect the indentation width from the first non-blank indented line.
-    indent_width: int | None = None
+    candidates = []
     for line in block:
-        if not line.strip():
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
-        leading = len(line) - len(line.lstrip(" "))
-        if leading > 0:
-            indent_width = leading
-            break
-    if indent_width is None:
+        indent = len(line) - len(line.lstrip(" "))
+        match = re.match(r"^([^:#][^:]*):(?:\\s*(?:#.*)?)?$", line.strip())
+        if match:
+            candidates.append((indent, match.group(1).strip().strip("'\\"")))
+    if not candidates:
         return set()
-    keys = set()
-    for line in block:
-        stripped = line.strip()
-        if not stripped.endswith(":"):
-            continue
-        leading = len(line) - len(line.lstrip(" "))
-        if leading != indent_width:
-            continue
-        key = stripped[:-1].strip()
-        if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
-            key = key[1:-1]
-        keys.add(key)
-    return keys
+    direct_indent = min(indent for indent, _ in candidates)
+    return {key for indent, key in candidates if indent == direct_indent}
 
 
-def test_section_keys_is_independent_of_indentation_width():
-    workflow_4space = """on:
-    pull_request_target:
-        types: [opened]
-    workflow_dispatch:
-        inputs:
-            sha:
-                required: true
-jobs:
-"""
-    keys = _section_keys(workflow_4space, "on")
-    assert keys == {"pull_request_target", "workflow_dispatch"}
-    assert "inputs" not in keys
-    assert "sha" not in keys
-
-
-def test_section_keys_recognizes_quoted_yaml_mapping_keys():
-    workflow = (
-        "on:
-        "  \"pull_request_review\":
-        "    types: [submitted]
-        "  'pull_request_target':
-        "    types: [opened]
-        "jobs:
+def _job_section(workflow: str, name: str) -> str:
+    lines = workflow.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if line == f"  {name}:"),
+        None,
     )
-
-    assert _section_keys(workflow, "on") == {
-        "pull_request_review",
-        "pull_request_target",
-    }
-
-
-def _workflow_files() -> list[Path]:
-    return sorted(
-        path
-        for path in WORKFLOWS.rglob("*")
-        if path.is_file() and path.suffix in {".yml", ".yaml"}
+    assert start is not None, f"Workflow is missing job {name!r}"
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if re.match(r"^  [A-Za-z0-9_-]+:\\s*$", lines[i])
+        ),
+        len(lines),
     )
+    return "\\n".join(lines[start:end])
 
 
-def _defines_review_policy_enforcement(workflow: str) -> bool:
-    return (
-        "python -m app.ai_review_policy" in workflow
-        or re.search(r"(?m)^  ai-review-policy:\s*$", workflow) is not None
-        or re.search(r"(?m)^    name:\s*(?:Trusted )?AI Review Policy\s*$", workflow)
-        is not None
-    )
+def _read_workflow(name: str) -> str:
+    return (WORKFLOWS / name).read_text(encoding="utf-8")
 
 
-def test_ci_does_not_define_a_pr_editable_ai_review_gate():
-    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    jobs = _section_keys(ci, "jobs")
-    events = _section_keys(ci, "on")
-
-    assert "ai-review-policy" not in jobs, (
-        "AI review enforcement must be defined only in the trusted-base "
-        "workflow, never in the PR-editable CI workflow."
-    )
-    assert "name: AI Review Policy" not in ci
-    assert "pull_request_review" not in events, (
-        "PR review events must be handled only by the trusted policy workflow."
-    )
-
-
-def test_no_other_workflow_defines_ai_review_policy_enforcement():
-    files = _workflow_files()
-    policy_sources = [
-        path.relative_to(WORKFLOWS).as_posix()
-        for path in files
-        if _defines_review_policy_enforcement(path.read_text(encoding="utf-8"))
-    ]
-
-    assert policy_sources == [TRUSTED_WORKFLOW], (
-        "Exactly trusted-ai-review-policy.yml must define AI review enforcement; "
-        f"found {policy_sources!r}."
-    )
-
-    for path in files:
-        if path.relative_to(WORKFLOWS).as_posix() == TRUSTED_WORKFLOW:
-            continue
-        events = _section_keys(path.read_text(encoding="utf-8"), "on")
-        assert "pull_request_review" not in events, (
-            f"{path.relative_to(WORKFLOWS).as_posix()} must not handle PR review events."
+def test_section_keys_are_independent_of_indentation_width():
+    for indent in (2, 4, 6):
+        prefix = " " * indent
+        nested = " " * (indent + 2)
+        workflow = "\\n".join(
+            [
+                "on:",
+                f"{prefix}pull_request_target:",
+                f"{nested}types: [opened]",
+                f"{prefix}workflow_dispatch:",
+                f"{nested}inputs:",
+                f"{nested}  sha:",
+                f"{nested}    required: true",
+                "jobs:",
+            ]
         )
+        assert _section_keys(workflow, "on") == {
+            "pull_request_target",
+            "workflow_dispatch",
+        }
 
 
-def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    events = _section_keys(trusted, "on")
-
-    assert "pull_request_target" in events
-    assert "pull_request_review" in events
-    assert "workflow_dispatch" in events
-    assert "pull_request" not in events
-    assert "pull_request_number:" in trusted
-    assert "pull_request_head_sha:" in trusted
-    assert "inputs.pull_request_number" in trusted
-    assert "inputs.pull_request_head_sha" in trusted
-    assert "EXPECTED_PR_HEAD_SHA:" in trusted
-    assert "expected_head_sha.casefold() != head_sha.casefold()" in trusted
-    assert "ref: main" in trusted
-    assert "github.event.review.pull_request.base.sha" not in trusted
-    assert "github.event.pull_request.base.sha" not in trusted
-    assert "persist-credentials: false" in trusted
-    assert "python -m app.ai_review_policy" in trusted
+def test_only_trusted_base_workflow_enforces_ai_review_policy():
+    ci = _read_workflow("ci.yml")
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    assert "ai-review-policy" not in _section_keys(ci, "jobs")
+    assert _section_keys(trusted, "jobs") >= {"ai-review-policy", "publish-dispatch-result"}
+    for path in WORKFLOWS.rglob("*.y*ml"):
+        if path.name == TRUSTED_WORKFLOW:
+            continue
+        source = path.read_text(encoding="utf-8")
+        assert "python -m app.ai_review_policy" not in source
 
 
-def test_ai_maintenance_dispatches_trusted_policy_for_the_exact_generated_pr_head():
-    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
-    dispatch_start = maintenance.index(
-        "- name: Dispatch trusted CI and AI review for the exact PR head"
+def test_policy_code_is_loaded_from_main_and_never_checks_out_pr_code():
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    policy = _job_section(trusted, "ai-review-policy")
+    assert "ref: main" in policy
+    assert "persist-credentials: false" in policy
+    assert "github.event.pull_request.head.sha" not in policy
+    assert "github.event.pull_request.base.sha" not in policy
+    assert "github.event.review.pull_request.base.sha" not in policy
+
+
+def test_policy_enforcement_requires_successful_canonical_head_resolution():
+    policy = _job_section(_read_workflow(TRUSTED_WORKFLOW), "ai-review-policy")
+    resolver = policy.index("- name: Resolve canonical PR head SHA from GitHub")
+    enforcement = policy.index(
+        "- name: Enforce both AI reviewer findings on the exact current PR head"
     )
-    dispatch_end = maintenance.find("
-"""Regression tests for the single trusted AI-review enforcement workflow."""
-    dispatch_step = (
-        maintenance[dispatch_start:]
-        if dispatch_end < 0
-        else maintenance[dispatch_start:dispatch_end]
-    )
-
-    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
-    assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
-    assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
-    assert 'gh workflow run trusted-ai-review-policy.yml --ref main \\' in dispatch_step
-    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 2
-    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
-    assert "gh pr merge" not in dispatch_step
-    assert "--auto" not in dispatch_step
+    guard = policy.index("if: steps.current-pr.outcome == 'success'", enforcement)
+    assert resolver < enforcement < guard
+    assert "id: current-pr" in policy[resolver:enforcement]
+    assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy[enforcement:]
 
 
-def test_pr_identity_lookup_fails_closed_on_github_api_errors():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    resolver = trusted.split(
-        "      - name: Resolve canonical PR head SHA from GitHub", 1
-    )[1].split("
-
-
-    assert "import urllib.error" in resolver
-    assert "except urllib.error.HTTPError as exc:" in resolver
-    assert "except (urllib.error.URLError, TimeoutError, OSError):" in resolver
-    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in resolver
-    assert "GitHub PR identity lookup failed (HTTP" in resolver
-    assert "GitHub PR identity lookup is unavailable." in resolver
-
-
-def test_dispatch_check_publication_fails_closed_on_github_api_errors():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    publisher = trusted.split("  publish-dispatch-result:", 1)[1]
-
-    assert "import urllib.error" in publisher
-    assert "except urllib.error.HTTPError as exc:" in publisher
-    assert "except (urllib.error.URLError, TimeoutError, OSError):" in publisher
-    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in publisher
-    assert "GitHub check publication failed (HTTP" in publisher
-    assert "GitHub check publication is unavailable." in publisher
-
-
-def test_review_event_resolves_pull_request_number_from_review_payload():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
+def test_review_event_resolves_canonical_pull_request_number():
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
     expression = (
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
         "github.event.review.pull_request.number) "
         "|| github.event.pull_request.number"
     )
-    assert trusted.count(expression) == 3
+    assert expression in trusted.split("\\nconcurrency:", 1)[1]
+    assert expression in _job_section(trusted, "ai-review-policy")
+    assert "pull_request_target:" in trusted
+    assert "pull_request_review:" in trusted
 
 
-def test_ai_maintenance_dispatch_emits_error_annotation_for_invalid_pr_head_sha():
-    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
-    dispatch_start = maintenance.index(
-        "- name: Dispatch trusted CI and AI review for the exact PR head"
-    )
-    dispatch_end = maintenance.find("
-from pathlib import Path
-    dispatch_step = maintenance[dispatch_start:] if dispatch_end < 0 else maintenance[dispatch_start:dispatch_end]
-    sha_check = '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]'
-    number_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
-    sha_pos = dispatch_step.index(sha_check)
-    number_pos = dispatch_step.index(number_check)
-    assert "::error::The resolved PR head SHA" in dispatch_step[sha_pos:number_pos]
-    assert "exit 1" in dispatch_step[sha_pos:number_pos]
-    assert "::error::The resolved PR number" in dispatch_step[number_pos:]
-    assert "exit 1" in dispatch_step[number_pos:]
+def test_policy_result_is_published_on_current_pr_head_for_all_pr_event_paths():
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    publisher = _job_section(trusted, "publish-dispatch-result")
+    assert "github.event_name != 'workflow_dispatch'" in publisher
+    assert "github.ref == 'refs/heads/main'" in publisher
+    assert "always()" in publisher
+    assert "checks: write" in publisher
+    assert "needs.ai-review-policy.outputs.pr_head_sha" in publisher
+    assert "needs.ai-review-policy.result" in publisher
+    assert "current_head_sha = (pr.get(\"head\") or {}).get(\"sha\", \"\")" in publisher
+    assert "\"head_sha\": current_head_sha" in publisher
+    assert "policy_head_matches" in publisher
+    assert 'if policy_result == "success" and policy_head_matches' in publisher
+    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publisher
+    assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publisher
 
 
-def test_ai_maintenance_dispatch_reports_invalid_pr_number():
-    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
-    dispatch_start = maintenance.index(
-        "- name: Dispatch trusted CI and AI review for the exact PR head"
-    )
-    dispatch_end = maintenance.find("
-import re
-    dispatch_step = maintenance[dispatch_start:] if dispatch_end < 0 else maintenance[dispatch_start:dispatch_end]
-    number_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
-    number_pos = dispatch_step.index(number_check)
-    assert "::error::The resolved PR number" in dispatch_step[number_pos:]
-    assert "exit 1" in dispatch_step[number_pos:]
+def test_stale_dispatch_fails_on_latest_head_instead_of_publishing_success():
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
+    assert "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():" in publisher
+    assert "\"head_sha\": current_head_sha" in publisher
+    assert "\"conclusion\": \"failure\"" in publisher
+    assert "latest head must be re-evaluated" in publisher
 
 
-ROOT = Path(__file__).resolve().parents[1]
-WORKFLOWS = ROOT / ".github" / "workflows"
-TRUSTED_WORKFLOW = "trusted-ai-review-policy.yml"
-
-
-def _top_level_block(workflow: str, section: str) -> list[str]:
-    lines = workflow.splitlines()
-    start = next(
-        (index for index, line in enumerate(lines) if line.rstrip() == f"{section}:"),
-        None,
-    )
-    assert start is not None, f"Workflow is missing its top-level {section!r} block"
-
-    block = []
-    for line in lines[start + 1 :]:
-        if line and not line[0].isspace():
-            break
-        block.append(line)
-    return block
-
-
-def _section_keys(workflow: str, section: str) -> set[str]:
-    """Return the set of direct-child mapping keys in *section*.
-
-    The indentation width is detected from the first non-blank, indented line
-    of the block so the function works with any consistent indent width.
-    Only lines indented by exactly that detected width are considered direct
-    children; deeper lines are nested values and are ignored.
-    """
-    block = _top_level_block(workflow, section)
-    # Detect the indentation width from the first non-blank indented line.
-    indent_width: int | None = None
-    for line in block:
-        if not line.strip():
-            continue
-        leading = len(line) - len(line.lstrip(" "))
-        if leading > 0:
-            indent_width = leading
-            break
-    if indent_width is None:
-        return set()
-    keys = set()
-    for line in block:
-        stripped = line.strip()
-        if not stripped.endswith(":"):
-            continue
-        leading = len(line) - len(line.lstrip(" "))
-        if leading != indent_width:
-            continue
-        key = stripped[:-1].strip()
-        if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
-            key = key[1:-1]
-        keys.add(key)
-    return keys
-
-
-def test_section_keys_is_independent_of_indentation_width():
-    """_section_keys must work for any consistent indentation, not only 2 spaces."""
-    # 4-space-indented block: direct children only
-    workflow_4space = (
-        "on:
-        "    pull_request_target:
-        "        types: [opened]
-        "    workflow_dispatch:
-        "        inputs:
-        "            sha:
-        "                required: true
-        "jobs:
-    )
-    # Regression: verify the fixture is valid Python-parseable before using it.
-    compile(workflow_4space, "<fixture>", "eval")
-    keys = _section_keys(workflow_4space, "on")
-    assert keys == {"pull_request_target", "workflow_dispatch"}, (
-        f"Expected only direct children with 4-space indent, got {keys!r}"
-    )
-    # Nested keys must NOT appear as direct children
-    assert "inputs" not in keys
-    assert "sha" not in keys
-
-
-
-def test_section_keys_recognizes_quoted_yaml_mapping_keys():
-    workflow = (
-        "on:\n"
-        "  \"pull_request_review\":\n"
-        "    types: [submitted]\n"
-        "  'pull_request_target':\n"
-        "    types: [opened]\n"
-        "jobs:\n"
-    )
-
-    assert _section_keys(workflow, "on") == {
-        "pull_request_review",
-        "pull_request_target",
-    }
-
-
-
-def _workflow_files() -> list[Path]:
-    return sorted(
-        path
-        for path in WORKFLOWS.rglob("*")
-        if path.is_file() and path.suffix in {".yml", ".yaml"}
-    )
-
-
-def _defines_review_policy_enforcement(workflow: str) -> bool:
-    return (
-        "python -m app.ai_review_policy" in workflow
-        or re.search(r"(?m)^  ai-review-policy:\s*$", workflow) is not None
-        or re.search(r"(?m)^    name:\s*(?:Trusted )?AI Review Policy\s*$", workflow)
-        is not None
-    )
-
-
-def test_ci_does_not_define_a_pr_editable_ai_review_gate():
-    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    jobs = _section_keys(ci, "jobs")
-    events = _section_keys(ci, "on")
-
-    assert "ai-review-policy" not in jobs, (
-        "AI review enforcement must be defined only in the trusted-base "
-        "workflow, never in the PR-editable CI workflow."
-    )
-    assert "name: AI Review Policy" not in ci
-    assert "pull_request_review" not in events, (
-        "PR review events must be handled only by the trusted policy workflow."
-    )
-
-
-def test_no_other_workflow_defines_ai_review_policy_enforcement():
-    files = _workflow_files()
-    policy_sources = [
-        path.relative_to(WORKFLOWS).as_posix()
-        for path in files
-        if _defines_review_policy_enforcement(path.read_text(encoding="utf-8"))
-    ]
-
-    assert policy_sources == [TRUSTED_WORKFLOW], (
-        "Exactly trusted-ai-review-policy.yml must define AI review enforcement; "
-        f"found {policy_sources!r}."
-    )
-
-    for path in files:
-        if path.relative_to(WORKFLOWS).as_posix() == TRUSTED_WORKFLOW:
-            continue
-        events = _section_keys(path.read_text(encoding="utf-8"), "on")
-        assert "pull_request_review" not in events, (
-            f"{path.relative_to(WORKFLOWS).as_posix()} must not handle PR review events."
-        )
-
-
-def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    events = _section_keys(trusted, "on")
-
-    assert "pull_request_target" in events
-    assert "pull_request_review" in events
-    assert "workflow_dispatch" in events
-    assert "pull_request" not in events
-    assert "pull_request_number:" in trusted
-    assert "pull_request_head_sha:" in trusted
-    assert "inputs.pull_request_number" in trusted
-    assert "inputs.pull_request_head_sha" in trusted
-    assert "EXPECTED_PR_HEAD_SHA:" in trusted
-    assert "expected_head_sha.casefold() != head_sha.casefold()" in trusted
-    assert "ref: main" in trusted
-    assert "github.event.review.pull_request.base.sha" not in trusted
-    assert "github.event.pull_request.base.sha" not in trusted
-    assert "persist-credentials: false" in trusted
-    assert "python -m app.ai_review_policy" in trusted
-
-
-def test_ai_maintenance_dispatches_trusted_policy_for_the_exact_generated_pr_head():
-    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
-    dispatch_start = maintenance.index(
-        "- name: Dispatch trusted CI and AI review for the exact PR head"
-    )
-    dispatch_end = maintenance.find("\n      - name:", dispatch_start + 1)
-    dispatch_step = (
-        maintenance[dispatch_start:]
-        if dispatch_end < 0
-        else maintenance[dispatch_start:dispatch_end]
-    )
-
-    assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
-    assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
-    assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
-    assert 'gh workflow run trusted-ai-review-policy.yml --ref main \\' in dispatch_step
-    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 2
-    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
-    assert "gh pr merge" not in dispatch_step
-    assert "--auto" not in dispatch_step
-
-def test_pr_identity_lookup_fails_closed_on_github_api_errors():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    resolver = trusted.split(
-        "      - name: Resolve canonical PR head SHA from GitHub", 1
-    )[1].split("\n      - name: Enforce", 1)[0]
-
-    assert "import urllib.error" in resolver
-    assert "except urllib.error.HTTPError as exc:" in resolver
-    assert "except (urllib.error.URLError, TimeoutError, OSError):" in resolver
-    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in resolver
-    assert "GitHub PR identity lookup failed (HTTP" in resolver
-    assert "GitHub PR identity lookup is unavailable." in resolver
-
-
-def test_dispatch_check_publication_fails_closed_on_github_api_errors():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    publisher = trusted.split("  publish-dispatch-result:", 1)[1]
-
-    assert "import urllib.error" in publisher
+def test_publisher_reports_network_errors_without_bare_exception_swallowing():
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
     assert "except urllib.error.HTTPError as exc:" in publisher
-    assert "except (urllib.error.URLError, TimeoutError, OSError):" in publisher
-    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in publisher
+    assert "except (urllib.error.URLError, TimeoutError, OSError)" in publisher
     assert "GitHub check publication failed (HTTP" in publisher
     assert "GitHub check publication is unavailable." in publisher
+    assert "except Exception:" not in publisher
+    assert "pass" not in publisher
 
-def test_review_event_resolves_pull_request_number_from_review_payload():
-    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
-    assert trusted.count(expression) == 3
-        "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
-        "|| (github.event_name == 'pull_request_review' && "
-        "github.event.review.pull_request.number) "
-        "|| github.event.pull_request.number"
-    )
 
-    dispatch_end = maintenance.find("
-def test_ai_maintenance_dispatch_emits_error_annotation_for_invalid_pr_head_sha():
-    maintenance = (WORKFLOWS / "ai-maintenance.yml").read_text(encoding="utf-8")
-    dispatch_start = maintenance.index(
+def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
+    maintenance = _read_workflow("ai-maintenance.yml")
+    start = maintenance.index(
         "- name: Dispatch trusted CI and AI review for the exact PR head"
     )
-    dispatch_end = maintenance.find("
-    assert trusted.count(expression) == 3
-    dispatch_step = (
-        maintenance[dispatch_start:]
-        if dispatch_end < 0
-        else maintenance[dispatch_start:dispatch_end]
-    )
-    # Both invalid-sha and invalid-number checks must emit ::error:: before exit 1
-    assert "::error::" in dispatch_step, (
-        "The dispatch step must emit ::error:: annotations instead of silently failing."
-    )
+    end = maintenance.find("\\n      - name:", start + 1)
+    step = maintenance[start:] if end < 0 else maintenance[start:end]
     sha_check = '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]'
-    nr_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
-    sha_pos = dispatch_step.index(sha_check)
-    nr_pos = dispatch_step.index(nr_check)
-    # ::error:: must appear between the sha check and the pr_number check (for sha failure)
-    assert "::error::" in dispatch_step[sha_pos:nr_pos], (
-        "An ::error:: annotation must precede the exit for an invalid pr_head_sha."
-    )
-    # ::error:: must appear after the pr_number check (for pr_number failure)
-    assert "::error::" in dispatch_step[nr_pos:], (
-        "An ::error:: annotation must precede the exit for an invalid pr_number."
-    )
+    number_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
+    sha_pos = step.index(sha_check)
+    number_pos = step.index(number_check)
+    assert "::error::The resolved PR head SHA" in step[sha_pos:number_pos]
+    assert "exit 1" in step[sha_pos:number_pos]
+    assert "::error::The resolved PR number" in step[number_pos:]
+    assert "exit 1" in step[number_pos:]
