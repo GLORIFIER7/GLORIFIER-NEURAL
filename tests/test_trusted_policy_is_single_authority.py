@@ -12,7 +12,7 @@ TRUSTED_WORKFLOW = "trusted-ai-review-policy.yml"
 def _top_level_block(workflow: str, section: str) -> list[str]:
     """Return a top-level YAML block without assuming a particular indent width."""
     lines = workflow.splitlines()
-    header = re.compile(rf"^( *)(?:['\"]?){re.escape(section)}(?:['\"]?)\\s*:\\s*(?:#.*)?$")
+    header = re.compile(rf"^( *)(?:['"]?){re.escape(section)}(?:['"]?)\s*:\s*(?:#.*)?$")
     start = next(
         (index for index, line in enumerate(lines) if header.fullmatch(line)),
         None,
@@ -37,9 +37,9 @@ def _section_keys(workflow: str, section: str) -> set[str]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip(" "))
-        match = re.match(r"^([^:#][^:]*):(?:\\s*(?:#.*)?)?$", line.strip())
+        match = re.match(r"^([^:#][^:]*):(?:\s*(?:#.*)?)?$", line.strip())
         if match:
-            candidates.append((indent, match.group(1).strip().strip("'\\"")))
+            candidates.append((indent, match.group(1).strip().strip("'\"")))
     if not candidates:
         return set()
     direct_indent = min(indent for indent, _ in candidates)
@@ -57,11 +57,11 @@ def _job_section(workflow: str, name: str) -> str:
         (
             i
             for i in range(start + 1, len(lines))
-            if re.match(r"^  [A-Za-z0-9_-]+:\\s*$", lines[i])
+            if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i])
         ),
         len(lines),
     )
-    return "\\n".join(lines[start:end])
+    return "\n".join(lines[start:end])
 
 
 def _read_workflow(name: str) -> str:
@@ -72,7 +72,7 @@ def test_section_keys_are_independent_of_indentation_width():
     for indent in (2, 4, 6):
         prefix = " " * indent
         nested = " " * (indent + 2)
-        workflow = "\\n".join(
+        workflow = "\n".join(
             [
                 "on:",
                 f"{prefix}pull_request_target:",
@@ -132,7 +132,7 @@ def test_review_event_resolves_canonical_pull_request_number():
         "github.event.review.pull_request.number) "
         "|| github.event.pull_request.number"
     )
-    assert expression in trusted.split("\\nconcurrency:", 1)[1]
+    assert expression in trusted.split("\nconcurrency:", 1)[1]
     assert expression in _job_section(trusted, "ai-review-policy")
     assert "pull_request_target:" in trusted
     assert "pull_request_review:" in trusted
@@ -147,8 +147,8 @@ def test_policy_result_is_published_on_current_pr_head_for_all_pr_event_paths():
     assert "checks: write" in publisher
     assert "needs.ai-review-policy.outputs.pr_head_sha" in publisher
     assert "needs.ai-review-policy.result" in publisher
-    assert "current_head_sha = (pr.get(\"head\") or {}).get(\"sha\", \"\")" in publisher
-    assert "\"head_sha\": current_head_sha" in publisher
+    assert 'current_head_sha = (pr.get("head") or {}).get("sha", "")' in publisher
+    assert '"head_sha": current_head_sha' in publisher
     assert "policy_head_matches" in publisher
     assert 'if policy_result == "success" and policy_head_matches' in publisher
     assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publisher
@@ -158,8 +158,8 @@ def test_policy_result_is_published_on_current_pr_head_for_all_pr_event_paths():
 def test_stale_dispatch_fails_on_latest_head_instead_of_publishing_success():
     publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
     assert "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():" in publisher
-    assert "\"head_sha\": current_head_sha" in publisher
-    assert "\"conclusion\": \"failure\"" in publisher
+    assert '"head_sha": current_head_sha' in publisher
+    assert '"conclusion": "failure"' in publisher
     assert "latest head must be re-evaluated" in publisher
 
 
@@ -178,7 +178,7 @@ def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
     start = maintenance.index(
         "- name: Dispatch trusted CI and AI review for the exact PR head"
     )
-    end = maintenance.find("\\n      - name:", start + 1)
+    end = maintenance.find("\n      - name:", start + 1)
     step = maintenance[start:] if end < 0 else maintenance[start:end]
     sha_check = '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]'
     number_check = '[[ "$pr_number" =~ ^[1-9][0-9]*$ ]]'
