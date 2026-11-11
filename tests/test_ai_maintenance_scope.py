@@ -380,9 +380,10 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
     assert '--ref "$PR_BRANCH"' not in dispatch_step
-    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 1
+    assert 'gh workflow run trusted-ai-review-policy.yml --ref main \\' in dispatch_step
+    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
     assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
-    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 1
+    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 2
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
