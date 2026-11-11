@@ -153,3 +153,14 @@ def test_dispatch_check_publication_fails_closed_on_github_api_errors():
     assert "except (json.JSONDecodeError, UnicodeDecodeError):" in publisher
     assert "GitHub check publication failed (HTTP" in publisher
     assert "GitHub check publication is unavailable." in publisher
+
+def test_review_event_resolves_pull_request_number_from_review_payload():
+    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
+    expression = (
+        "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
+        "|| (github.event_name == 'pull_request_review' && "
+        "github.event.review.pull_request.number) "
+        "|| github.event.pull_request.number"
+    )
+
+    assert trusted.count(expression) == 3
