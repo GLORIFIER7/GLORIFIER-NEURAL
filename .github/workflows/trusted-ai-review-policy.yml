@@ -17,7 +17,7 @@ on:
         type: string
 
 concurrency:
-  group: trusted-ai-review-policy-${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
+  group: trusted-ai-review-policy-${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
   cancel-in-progress: true
 
 # This workflow intentionally runs with read-only permissions and never checks out
@@ -56,7 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
           EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -110,7 +110,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}
           PYTHONPATH: ${{ github.workspace }}/trusted-policy
           AI_REVIEW_WAIT_SECONDS: "900"
