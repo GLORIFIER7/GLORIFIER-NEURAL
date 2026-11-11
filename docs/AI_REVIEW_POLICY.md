@@ -32,6 +32,8 @@ This repository is public and the trusted workflow uses `pull_request_target`. G
 
 The allowlist is an account/repository settings control, not a repository file. After an administrator changes it, verify a new PR event and a review event both create the expected `Trusted AI Review Policy` check. Until that read-back and test are completed, public-repository event availability is not fully verified.
 
+References: [GitHub changelog announcement](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) and [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target).
+
 ## Active repository ruleset — read-back on 2026-11-11
 
 The active ruleset is **`GLORIFIER-NEURAL main protection`**, ID **`27011361`**, scoped to `~DEFAULT_BRANCH`.
