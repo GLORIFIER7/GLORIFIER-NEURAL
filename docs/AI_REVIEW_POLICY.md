@@ -17,7 +17,7 @@ The evaluator fails closed on malformed GitHub API responses, invalid SHAs, inco
 
 - `pull_request_target` handles pull request opened, reopened, synchronized, and ready-for-review events.
 - `pull_request_review` re-evaluates submitted, edited, and dismissed reviews.
-- The workflow definition is loaded from the trusted base branch. It checks out only `github.event.pull_request.base.sha`, with persisted credentials disabled.
+- The workflow definition is loaded from a trusted revision: `pull_request_target` checks out `github.event.pull_request.base.sha`, `pull_request_review` checks out `github.event.review.pull_request.base.sha`, and `workflow_dispatch` checks out `main`. All checkouts disable persisted credentials.
 - It does not check out, import, or execute pull-request head code.
 - It obtains the canonical current PR head SHA from the GitHub API, then evaluates formal reviews and review threads against that exact SHA.
 - The job has only `contents: read` and `pull-requests: read` permissions.
