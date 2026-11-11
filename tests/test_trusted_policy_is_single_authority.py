@@ -128,7 +128,7 @@ def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
     assert "inputs.pull_request_head_sha" in trusted
     assert "EXPECTED_PR_HEAD_SHA:" in trusted
     assert "expected_head_sha.casefold() != head_sha.casefold()" in trusted
-    assert "github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha || 'main'" in trusted
+    assert "github.event_name == 'workflow_dispatch' && 'main' || (github.event_name == 'pull_request_review' && github.event.review.pull_request.base.sha) || github.event.pull_request.base.sha || 'main'" in trusted
     assert "persist-credentials: false" in trusted
     assert "python -m app.ai_review_policy" in trusted
 
