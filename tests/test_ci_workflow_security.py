@@ -132,7 +132,7 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     )
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha || 'main' }}" in policy_job
+    assert "ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || (github.event_name == 'pull_request_review' && github.event.review.pull_request.base.sha) || github.event.pull_request.base.sha || 'main' }}" in policy_job
     assert "persist-credentials: false" in policy_job
 
 
@@ -160,6 +160,7 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
         trusted_workflow, "pull_request_review"
     )
     assert "github.event.review.pull_request.number" in policy_job
+    assert "github.event.review.pull_request.base.sha" in policy_job
     assert "github.event.pull_request.base.sha" in policy_job
     pr_number_expression = (
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
