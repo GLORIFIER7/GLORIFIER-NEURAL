@@ -145,7 +145,7 @@ def test_untrusted_test_job_does_not_persist_github_token():
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
     assert "inputs.pull_request_head_sha" in test_job
-    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in test_job
     assert "pull-requests:" not in test_job
 
 
@@ -167,7 +167,7 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
         "|| github.event.pull_request.number"
     )
     assert policy_job.count(pr_number_expression) == 2
-    assert pr_number_expression in trusted_workflow.split("\\nconcurrency:", 1)[1]
+    assert pr_number_expression in trusted_workflow.split("\nconcurrency:", 1)[1]
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in policy_job
     assert "workflow_dispatch:" in trusted_workflow
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
