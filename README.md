@@ -63,7 +63,7 @@ starting the Pyodide runtime.
 The account's Workers subdomain is `glorifier`. The live Worker address is
 `https://glorifier-neural.glorifier.workers.dev`. An earlier Cloudflare deployment inventory at `2026-11-05T03:58:11Z` observed
 version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8`; that inventory has been
-superseded by the newer deployment recorded under **Current deployed state**
+superseded by the newer deployment recorded under **Latest production state**
 below. Deployment success is not itself a readiness result.
 
 The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
