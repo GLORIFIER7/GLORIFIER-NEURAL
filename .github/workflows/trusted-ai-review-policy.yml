@@ -39,7 +39,7 @@ jobs:
       - name: Check out trusted base policy only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha || 'main' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || (github.event_name == 'pull_request_review' && github.event.review.pull_request.base.sha) || github.event.pull_request.base.sha || 'main' }}
           path: trusted-policy
           persist-credentials: false
       - name: Set up Python
