@@ -557,3 +557,14 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
     assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in test_section
     assert "persist-credentials: false" in test_section
     assert "ai-review-policy" not in ci_workflow
+
+
+def test_copy_back_protects_trusted_policy_authority_regression_test():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    copy_back_start = workflow.index("- name: Copy validated app and tests changes back")
+    stage_start = workflow.index("\n      - name: Check changed paths and prepare review patch", copy_back_start)
+    copy_back = workflow[copy_back_start:stage_start]
+
+    protected_path = "tests/test_trusted_policy_is_single_authority.py"
+    assert protected_path in copy_back
+    assert copy_back.index(protected_path) < copy_back.index("rsync -rlptD --delete")
