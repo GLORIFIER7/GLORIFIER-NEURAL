@@ -128,3 +128,28 @@ def test_ai_maintenance_dispatches_trusted_policy_for_the_exact_generated_pr_hea
     assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
     assert "gh pr merge" not in dispatch_step
     assert "--auto" not in dispatch_step
+
+def test_pr_identity_lookup_fails_closed_on_github_api_errors():
+    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
+    resolver = trusted.split(
+        "      - name: Resolve canonical PR head SHA from GitHub", 1
+    )[1].split("\n      - name: Enforce", 1)[0]
+
+    assert "import urllib.error" in resolver
+    assert "except urllib.error.HTTPError as exc:" in resolver
+    assert "except (urllib.error.URLError, TimeoutError, OSError):" in resolver
+    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in resolver
+    assert "GitHub PR identity lookup failed (HTTP" in resolver
+    assert "GitHub PR identity lookup is unavailable." in resolver
+
+
+def test_dispatch_check_publication_fails_closed_on_github_api_errors():
+    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
+    publisher = trusted.split("  publish-dispatch-result:", 1)[1]
+
+    assert "import urllib.error" in publisher
+    assert "except urllib.error.HTTPError as exc:" in publisher
+    assert "except (urllib.error.URLError, TimeoutError, OSError):" in publisher
+    assert "except (json.JSONDecodeError, UnicodeDecodeError):" in publisher
+    assert "GitHub check publication failed (HTTP" in publisher
+    assert "GitHub check publication is unavailable." in publisher
