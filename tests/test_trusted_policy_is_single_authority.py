@@ -47,6 +47,6 @@ def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
     assert "pull_request_target" in events
     assert "pull_request_review" in events
     assert "pull_request" not in events
-    assert "ref: \\${{ github.event.pull_request.base.sha }}" in trusted
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in trusted
     assert "persist-credentials: false" in trusted
     assert "python -m app.ai_review_policy" in trusted
