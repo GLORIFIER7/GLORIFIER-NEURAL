@@ -120,12 +120,12 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     # Job-level grants override workflow-level permissions; inspect both workflows.
     publish_job = _job_section("publish-dispatch-result", trusted_workflow)
     trusted_policy_read_only = trusted_workflow.split(
-        "\\n  publish-dispatch-result:", 1
+        "\n  publish-dispatch-result:", 1
     )[0]
     _assert_all_permission_scopes_are_read_only(ci_workflow)
     _assert_all_permission_scopes_are_read_only(trusted_policy_read_only)
     publish_writes = set(
-        re.findall(r"(?mi)^\\s*([a-z0-9_-]+):\\s*write\\s*$", publish_job)
+        re.findall(r"(?mi)^\s*([a-z0-9_-]+):\s*write\s*$", publish_job)
     )
     assert publish_writes == {"checks"}, (
         "Only the isolated dispatch-result job may write the PR check status."
