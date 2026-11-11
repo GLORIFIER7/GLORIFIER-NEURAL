@@ -342,7 +342,7 @@ def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_drive
     assert "pull_request_head_sha:" in workflow
     assert "inputs.pull_request_head_sha" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in workflow
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in workflow
 
     # Draft PR creation emits pull_request_target(opened); review events re-run
     # the trusted policy. No untrusted CI workflow should execute reviewer policy.
@@ -587,4 +587,4 @@ def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
     assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
     assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
     assert "https://api.github.com/repos/{repository}/pulls/{pull_number}" in test_section
-    assert "expected_head_sha.casefold() != head_sha.casefold()" in test_section
+    assert "expected_head_sha.casefold() != current_head_sha.casefold()" in test_section
