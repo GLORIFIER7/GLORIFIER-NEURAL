@@ -37,7 +37,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-# Run when either identifier is supplied so a partial PR identity fails closed; with neither input, run ordinary CI.
+      # Run when either identifier is supplied so a partial PR identity fails closed; with neither input, run ordinary CI.
       - name: Validate manual dispatch PR identity
         if: github.event_name == 'workflow_dispatch' && (inputs.pull_request_number != '' || inputs.pull_request_head_sha != '')
         env:
