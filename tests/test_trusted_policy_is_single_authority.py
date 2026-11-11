@@ -1,10 +1,12 @@
-"""Regression test: trusted PR policy must not be duplicated in PR-editable CI."""
+"""Regression tests for the single trusted AI-review enforcement workflow."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+TRUSTED_WORKFLOW = "trusted-ai-review-policy.yml"
 
 
 def _top_level_block(workflow: str, section: str) -> list[str]:
@@ -33,6 +35,23 @@ def _section_keys(workflow: str, section: str) -> set[str]:
     }
 
 
+def _workflow_files() -> list[Path]:
+    return sorted(
+        path
+        for path in WORKFLOWS.rglob("*")
+        if path.is_file() and path.suffix in {".yml", ".yaml"}
+    )
+
+
+def _defines_review_policy_enforcement(workflow: str) -> bool:
+    return (
+        "python -m app.ai_review_policy" in workflow
+        or re.search(r"(?m)^  ai-review-policy:\s*$", workflow) is not None
+        or re.search(r"(?m)^    name:\s*(?:Trusted )?AI Review Policy\s*$", workflow)
+        is not None
+    )
+
+
 def test_ci_does_not_define_a_pr_editable_ai_review_gate():
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     jobs = _section_keys(ci, "jobs")
@@ -48,10 +67,30 @@ def test_ci_does_not_define_a_pr_editable_ai_review_gate():
     )
 
 
-def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
-    trusted = (WORKFLOWS / "trusted-ai-review-policy.yml").read_text(
-        encoding="utf-8"
+def test_no_other_workflow_defines_ai_review_policy_enforcement():
+    files = _workflow_files()
+    policy_sources = [
+        path.relative_to(WORKFLOWS).as_posix()
+        for path in files
+        if _defines_review_policy_enforcement(path.read_text(encoding="utf-8"))
+    ]
+
+    assert policy_sources == [TRUSTED_WORKFLOW], (
+        "Exactly trusted-ai-review-policy.yml must define AI review enforcement; "
+        f"found {policy_sources!r}."
     )
+
+    for path in files:
+        if path.relative_to(WORKFLOWS).as_posix() == TRUSTED_WORKFLOW:
+            continue
+        events = _section_keys(path.read_text(encoding="utf-8"), "on")
+        assert "pull_request_review" not in events, (
+            f"{path.relative_to(WORKFLOWS).as_posix()} must not handle PR review events."
+        )
+
+
+def test_trusted_policy_workflow_is_the_only_policy_enforcement_source():
+    trusted = (WORKFLOWS / TRUSTED_WORKFLOW).read_text(encoding="utf-8")
     events = _section_keys(trusted, "on")
 
     assert "pull_request_target" in events
