@@ -132,7 +132,7 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
     )
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha }}" in policy_job
+    assert "ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.base.sha || 'main' }}" in policy_job
     assert "persist-credentials: false" in policy_job
 
 
