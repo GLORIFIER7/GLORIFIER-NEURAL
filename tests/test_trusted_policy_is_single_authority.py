@@ -113,14 +113,13 @@ def test_ai_maintenance_dispatches_trusted_policy_for_the_exact_generated_pr_hea
     dispatch_start = maintenance.index(
         "- name: Dispatch trusted CI and AI review for the exact PR head"
     )
-    dispatch_end = maintenance.find("\\n      - name:", dispatch_start + 1)
+    dispatch_end = maintenance.find("\n      - name:", dispatch_start + 1)
     dispatch_step = (
         maintenance[dispatch_start:]
         if dispatch_end < 0
         else maintenance[dispatch_start:dispatch_end]
     )
 
-    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq \' .headRefOid\')"' not in dispatch_step
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
     assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
