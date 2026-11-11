@@ -541,14 +541,19 @@ def test_workflow_top_level_permissions_are_minimal():
 
 def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    policy_start = ci_workflow.index("  ai-review-policy:")
-    policy_section = ci_workflow[policy_start:]
-    validation = ci_workflow.index("Validate manual dispatch PR identity")
-    checkout = ci_workflow.index("uses: actions/checkout")
+    test_start = ci_workflow.index("  test:")
+    publish_start = ci_workflow.index("\\n  publish-container:", test_start)
+    test_section = ci_workflow[test_start:publish_start]
+    validation = test_section.index("Validate manual dispatch PR identity")
+    checkout = test_section.index("uses: actions/checkout")
 
     assert validation < checkout
     assert "pull_request_number:" in ci_workflow
-    assert "inputs.pull_request_number" in policy_section
-    assert "inputs.pull_request_head_sha" in policy_section
-    assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
-    assert "The current PR head SHA does not match the dispatched commit." in policy_section
+    assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
+    assert "PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
+    assert "[[ \\"$PR_NUMBER\\" =~ ^[1-9][0-9]*$ ]]" in test_section
+    assert "[[ \\"$PR_HEAD_SHA\\" =~ ^[0-9a-fA-F]{40}$ ]]" in test_section
+    assert "An exact PR head SHA is required with a dispatched pull request number." in test_section
+    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in test_section
+    assert "persist-credentials: false" in test_section
+    assert "ai-review-policy" not in ci_workflow
