@@ -556,7 +556,7 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
     assert '[[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]' in test_section
     assert '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]' in test_section
     assert "An exact PR head SHA is required with a dispatched pull request number." in test_section
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in test_section
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in test_section
     assert "persist-credentials: false" in test_section
     assert "ai-review-policy" not in ci_workflow
 
