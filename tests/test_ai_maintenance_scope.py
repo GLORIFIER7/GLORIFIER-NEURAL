@@ -136,6 +136,7 @@ def test_publish_job_only_runs_when_a_validated_patch_artifact_exists():
     upload_end = codex_section.find("\n      - name:", upload_start + 1)
     upload_step = codex_section[upload_start:] if upload_end < 0 else codex_section[upload_start:upload_end]
     assert "steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success'" in upload_step
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" in upload_step
 
 
 def test_publish_job_holds_all_publication_until_after_0831_laos_time():
