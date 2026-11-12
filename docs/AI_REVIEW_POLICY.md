@@ -24,6 +24,21 @@ The evaluator fails closed on malformed GitHub API responses, invalid SHAs, inco
 
 The PR-editable `.github/workflows/ci.yml` is for code tests, dependency auditing, and the main-branch image publishing job. It must not define an AI review policy job or listen for `pull_request_review` events. The exact trusted check name to use in the branch ruleset is **`Trusted AI Review Policy`**.
 
+## Manual re-evaluation fallback
+
+GitHub exposes `pull_request_review_thread` as a webhook event, but it is not a supported GitHub Actions workflow trigger in the workflow-event reference used for this repository. Do **not** add `pull_request_review_thread` to the trusted workflow's `on:` block.
+
+When a blocking review thread has been resolved but no new supported event has re-run the policy, use the existing exact-head manual dispatch:
+
+1. Open the pull request and copy its current 40-character head commit SHA.
+2. In GitHub, open **Actions → Trusted AI Review Policy → Run workflow**.
+3. Select the `main` branch. The policy job is restricted to `refs/heads/main` and loads policy code from trusted `main`; it never checks out or executes PR-head code.
+4. Enter the open pull request number in `pull_request_number` and paste the copied exact head SHA in `pull_request_head_sha`.
+5. Select **Run workflow**. The resolver fetches the canonical PR head from the GitHub API and rejects a mismatched or malformed SHA before evaluation. The publisher binds the outcome to the canonical current head.
+6. If the pull request advances during dispatch, the stale-dispatch path publishes a failure check on the latest head. Copy the new current PR head SHA and repeat the manual dispatch.
+
+This procedure only re-evaluates the existing policy. It does not create formal AI reviews, clear unresolved findings, grant approval, bypass branch protection, or authorize merging. The normal required reviewer evidence and signed-commit rules still apply.
+
 ## Public-repository Actions event policy
 
 This repository is public and the trusted workflow uses `pull_request_target`. GitHub has announced an event-policy restriction for this event in public repositories, with enforcement scheduled for **December 2, 2026**. Before that date, the repository or organization Actions event policy must explicitly allowlist this workflow file:
