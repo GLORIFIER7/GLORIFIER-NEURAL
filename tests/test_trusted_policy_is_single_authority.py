@@ -224,6 +224,7 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
         "os": dispatch_environment,
         "re": re,
         "expected_head_sha": "a" * 40,
+    })
 
 
 def test_workflow_dispatch_provides_manual_reevaluation_fallback():
@@ -293,8 +294,7 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     dispatch_start = maintenance.index(
         "- name: Dispatch trusted CI and AI review for the exact PR head"
     )
-    dispatch_end = maintenance.find("
-    })
+    dispatch_end = maintenance.find("\n      - name:", dispatch_start + 1)
     dispatch_step = (
         maintenance[dispatch_start:]
         if dispatch_end < 0
