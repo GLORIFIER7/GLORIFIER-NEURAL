@@ -172,7 +172,7 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
     assert policy_job.count(pr_number_expression) == 2
     assert pr_number_expression in trusted_workflow.split("\nconcurrency:", 1)[1]
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in policy_job
-    publisher_env = publish_job.split("        env:\\n", 1)[1].split("\\n        run: |", 1)[0]
+    publisher_env = publish_job.split("        env:", 1)[1].split("        run: |", 1)[0]
     assert "GITHUB_EVENT_NAME: ${{ github.event_name }}" in publisher_env
     assert "workflow_dispatch:" in trusted_workflow
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
