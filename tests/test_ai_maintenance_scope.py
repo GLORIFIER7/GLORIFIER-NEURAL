@@ -552,3 +552,16 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
     assert "inputs.pull_request_head_sha" in policy_section
     assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
     assert "The current PR head SHA does not match the dispatched commit." in policy_section
+def test_download_artifact_v8_explicitly_warns_on_digest_mismatch():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+    download_start = publish_section.index("- name: Download validated patch artifact")
+    download_end = publish_section.find("\n      - name:", download_start + 1)
+    download_step = (
+        publish_section[download_start:]
+        if download_end < 0
+        else publish_section[download_start:download_end]
+    )
+
+    assert "actions/download-artifact@" in download_step
+    assert "digest-mismatch: warn" in download_step
