@@ -181,7 +181,6 @@ def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
     assert "::error::The resolved PR number" in step[number_pos:]
     assert "exit 1" in step[number_pos:]
 
-def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
 
 def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
     guard = (
@@ -198,7 +197,6 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
         in publisher_env
     )
 
-def test_workflow_dispatch_provides_manual_reevaluation_fallback():
 
 def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     documented manual re-evaluation fallback when a blocking review thread is
@@ -325,6 +323,8 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
 
 
  
+
+
 def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     """The required context must identify only the canonical publisher check."""
     trusted = _read_workflow(TRUSTED_WORKFLOW)
@@ -335,7 +335,7 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     assert '"name": "Trusted AI Review Policy"' in publisher
     assert "    name: Trusted AI Review Policy" not in evaluator
 
-def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
+
 def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
 
