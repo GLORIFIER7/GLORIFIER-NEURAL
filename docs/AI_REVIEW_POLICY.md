@@ -7,7 +7,7 @@ The policy expects formal reviews from both configured reviewer identities:
 - Amazon Q Developer: `amazon-q-developer[bot]`
 - CodeAnt AI: `codeant-ai[bot]`
 
-For each open pull request targeting `main`, both reviews must be attached to the exact current head SHA. `APPROVED` and `COMMENTED` are accepted completed states. Missing, stale, dismissed, unknown, or `CHANGES_REQUESTED` reviews do not pass. An explicit `:stop_sign:` annotation from either reviewer blocks while its review thread remains unresolved and current to the head SHA. Human reviews and ordinary bot comments do not substitute for the required formal AI reviews.
+For each open pull request targeting `main`, both reviews must be attached to the exact current head SHA. `APPROVED` and `COMMENTED` are accepted completed states. Missing, stale, dismissed, unknown, or `CHANGES_REQUESTED` reviews do not pass. A `:stop_sign:` annotation in the latest formal review body from a configured reviewer blocks that current-head review even when no inline thread exists. A `:stop_sign:` annotation in an inline review comment blocks only while its thread is unresolved and current to the head SHA. Human reviews and ordinary bot comments do not substitute for the required formal AI reviews.
 
 The evaluator fails closed on malformed GitHub API responses, invalid SHAs, incomplete review metadata, invalid timestamps, and unresolved current-head blockers. It waits up to 15 minutes for the expected formal reviews before failing for missing evidence.
 
