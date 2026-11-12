@@ -354,3 +354,16 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     assert "    name: Evaluate AI review evidence" in evaluator
     assert "    name: Trusted AI Review Policy" not in evaluator
     assert '"name": "Trusted AI Review Policy"' in publisher
+def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
+    guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
+
+    assert "Current repository ruleset — read-back on 2026-11-12" in guide
+    assert "`GLORIFIER-NEURAL main protection1`" in guide
+    assert "`27086549`" in guide
+    assert "`test (3.11)`" in guide
+    assert "`test (3.12)`" in guide
+    assert "`Trusted AI Review Policy`" in guide
+    assert "GitHub Actions" in guide
+    assert "15368" in guide
+    assert "shared GitHub Actions identity" in guide
+    assert "zero Actions policies" in guide
