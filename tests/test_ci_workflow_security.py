@@ -230,7 +230,11 @@ def test_stale_head_rejected_without_publishing_a_pr_check():
     assert "check-runs" not in mismatch_branch
     assert "stale_summary" not in mismatch_branch
     assert "stale_payload" not in mismatch_branch
-    assert "urlopen(" not in mismatch_branch
+    assert "commits?per_page=100&page=" in mismatch_branch
+    assert "prior_head_found" in mismatch_branch
+    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
+    assert 'method="POST"' not in mismatch_branch
+    assert "urlopen(stale_request" not in mismatch_branch
 
 
 def test_matching_head_publishes_check_with_policy_result():
