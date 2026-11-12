@@ -327,12 +327,13 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
     workflow = _read_workflow(TRUSTED_WORKFLOW)
     guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
     dispatch = _top_level_block(workflow, "workflow_dispatch")
+    dispatch_text = "\n".join(dispatch)
     policy_job = _job_section(workflow, "ai-review-policy")
     publisher = _job_section(workflow, "publish-dispatch-result")
 
-    assert "pull_request_number:" in dispatch
-    assert "pull_request_head_sha:" in dispatch
-    assert dispatch.count("required: true") >= 2
+    assert "pull_request_number:" in dispatch_text
+    assert "pull_request_head_sha:" in dispatch_text
+    assert dispatch_text.count("required: true") >= 2
     assert "GITHUB_EVENT_NAME" in policy_job
     assert "workflow_dispatch" in policy_job
     assert "github.ref == 'refs/heads/main'" in policy_job
