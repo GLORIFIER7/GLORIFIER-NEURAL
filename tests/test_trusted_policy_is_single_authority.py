@@ -224,4 +224,100 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
         "os": dispatch_environment,
         "re": re,
         "expected_head_sha": "a" * 40,
+
+
+def test_workflow_dispatch_provides_manual_reevaluation_fallback():
+    """Regression: workflow_dispatch on trusted-ai-review-policy.yml is the
+    documented manual re-evaluation fallback when a blocking review thread is
+    resolved.
+
+    Invariants verified:
+    - The trusted workflow accepts workflow_dispatch as a trigger.
+    - Dispatch is restricted to refs/heads/main (untrusted branches cannot
+      dispatch it).
+    - Both pull_request_number and pull_request_head_sha inputs are declared.
+    - The resolver validates the dispatched SHA against the live GitHub API and
+      rejects a stale SHA before the evaluator is invoked.
+    - A stale dispatch (PR advanced after dispatch) publishes a failure check on
+      the latest head rather than silently exiting.
+    - ai-maintenance dispatches the trusted workflow from main with both required
+      fields, completing the generated-PR manual re-evaluation chain.
+    - Policy code is always loaded from main (never from the PR head).
+    """
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    maintenance = _read_workflow("ai-maintenance.yml")
+
+    # 1. workflow_dispatch trigger must be present.
+    events = _section_keys(trusted, "on")
+    assert "workflow_dispatch" in events, (
+        "trusted-ai-review-policy.yml must accept workflow_dispatch so operators "
+        "can manually re-evaluate a PR after a blocking review thread is resolved."
+    )
+
+    # 2. Dispatch is restricted to refs/heads/main.
+    policy_job = _job_section(trusted, "ai-review-policy")
+    assert "github.ref == 'refs/heads/main'" in policy_job, (
+        "The ai-review-policy job must restrict workflow_dispatch runs to main "
+        "so only trusted base code is executed."
+    )
+
+    # 3. Both required inputs are declared in the workflow.
+    assert "pull_request_number:" in trusted, (
+        "pull_request_number input must be declared for manual re-evaluation dispatch."
+    )
+    assert "pull_request_head_sha:" in trusted, (
+        "pull_request_head_sha input must be declared for manual re-evaluation dispatch."
+    )
+
+    # 4. Resolver rejects a dispatched SHA that no longer matches the live PR head.
+    assert "expected_head_sha.casefold() != head_sha.casefold()" in policy_job, (
+        "The resolver must reject a stale dispatched SHA so the evaluator is never "
+        "invoked against a head that has since advanced."
+    )
+
+    # 5. Stale dispatch publishes a failure check on the latest head; never exits silently.
+    publisher = _job_section(trusted, "publish-dispatch-result")
+    assert "latest head must be re-evaluated" in publisher, (
+        "A stale dispatch must publish a failure check naming the latest head and "
+        "stating re-evaluation is required; it must not exit without publishing."
+    )
+    assert '"head_sha": current_head_sha' in publisher, (
+        "The stale failure check must be bound to the canonical latest head SHA."
+    )
+    assert '"conclusion": "failure"' in publisher, (
+        "The stale path must always publish conclusion=failure."
+    )
+
+    # 6. ai-maintenance dispatches the trusted workflow from main with both fields,
+    #    completing the generated-PR manual re-evaluation chain.
+    dispatch_start = maintenance.index(
+        "- name: Dispatch trusted CI and AI review for the exact PR head"
+    )
+    dispatch_end = maintenance.find("
     })
+    dispatch_step = (
+        maintenance[dispatch_start:]
+        if dispatch_end < 0
+        else maintenance[dispatch_start:dispatch_end]
+    )
+    assert "gh workflow run trusted-ai-review-policy.yml --ref main \\" in dispatch_step, (
+        "ai-maintenance must dispatch the trusted policy workflow from main so the "
+        "generated-PR manual re-evaluation path is complete."
+    )
+    assert '--field pull_request_number="$pr_number"' in dispatch_step, (
+        "The trusted policy dispatch must include pull_request_number."
+    )
+    assert '--field pull_request_head_sha="$pr_head_sha"' in dispatch_step, (
+        "The trusted policy dispatch must include pull_request_head_sha."
+    )
+
+    # 7. Policy code is always loaded from main, never from the PR head.
+    assert "ref: main" in policy_job, (
+        "Policy code must always be checked out from main, never from the PR head."
+    )
+    assert "github.event.pull_request.head.sha" not in policy_job, (
+        "The policy job must never check out or reference the PR head code."
+    )
+    assert "github.event.pull_request.base.sha" not in policy_job, (
+        "The policy job must not use the PR base SHA as checkout ref; use 'main'."
+    )
