@@ -571,4 +571,9 @@ def test_download_artifact_v8_is_pinned_and_fails_closed_on_digest_mismatch():
         "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
         in download_step
     )
-    assert "digest-mismatch: error" in download_step
+    with_marker = "\n        with:\n"
+    assert with_marker in download_step, "Download step is missing its explicit with: inputs."
+    with_section = download_step.split(with_marker, 1)[1]
+    assert "\n          digest-mismatch: error\n" in f"\n{with_section}", (
+        "digest-mismatch: error must be an active input under the download step's with: block."
+    )
