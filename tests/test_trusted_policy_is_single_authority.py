@@ -155,14 +155,6 @@ def test_policy_result_is_published_on_current_pr_head_for_all_pr_event_paths():
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publisher
 
 
-def test_stale_dispatch_fails_on_latest_head_instead_of_publishing_success():
-    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
-    assert "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():" in publisher
-    assert '"head_sha": current_head_sha' in publisher
-    assert '"conclusion": "failure"' in publisher
-    assert "latest head must be re-evaluated" in publisher
-
-
 def test_publisher_reports_network_errors_without_bare_exception_swallowing():
     publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
     assert "except urllib.error.HTTPError as exc:" in publisher
@@ -239,8 +231,7 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     - Both pull_request_number and pull_request_head_sha inputs are declared.
     - The resolver validates the dispatched SHA against the live GitHub API and
       rejects a stale SHA before the evaluator is invoked.
-    - A stale dispatch (PR advanced after dispatch) publishes a failure check on
-      the latest head rather than silently exiting.
+    - A mismatched manual-dispatch SHA fails before any check is written, so a typo or unrelated SHA cannot create a false PR merge blocker.
     - ai-maintenance dispatches the trusted workflow from main with both required
       fields, completing the generated-PR manual re-evaluation chain.
     - Policy code is always loaded from main (never from the PR head).
@@ -276,18 +267,18 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
         "invoked against a head that has since advanced."
     )
 
-    # 5. Stale dispatch publishes a failure check on the latest head; never exits silently.
+    # 5. A mismatched dispatch SHA must fail without creating a check on the PR.
     publisher = _job_section(trusted, "publish-dispatch-result")
-    assert "latest head must be re-evaluated" in publisher, (
-        "A stale dispatch must publish a failure check naming the latest head and "
-        "stating re-evaluation is required; it must not exit without publishing."
+    mismatch_start = publisher.index(
+        "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
     )
-    assert '"head_sha": current_head_sha' in publisher, (
-        "The stale failure check must be bound to the canonical latest head SHA."
-    )
-    assert '"conclusion": "failure"' in publisher, (
-        "The stale path must always publish conclusion=failure."
-    )
+    next_step = publisher.index("\n          policy_head_matches =", mismatch_start)
+    mismatch_branch = publisher[mismatch_start:next_step]
+    assert "raise SystemExit(" in mismatch_branch
+    assert "check-runs" not in mismatch_branch
+    assert "stale_payload" not in mismatch_branch
+    assert "urlopen(" not in mismatch_branch
+
 
     # 6. ai-maintenance dispatches the trusted workflow from main with both fields,
     #    completing the generated-PR manual re-evaluation chain.
@@ -363,7 +354,7 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
 
 
 
-def test_unverified_mismatched_dispatch_sha_does_not_publish_pr_check():
+def test_mismatched_dispatch_sha_is_rejected_without_publishing_a_pr_check():
     """A typo or unrelated SHA must not create a false failing PR check."""
     publisher = _job_section(
         _read_workflow(TRUSTED_WORKFLOW),
@@ -378,8 +369,4 @@ def test_unverified_mismatched_dispatch_sha_does_not_publish_pr_check():
     assert "raise SystemExit(" in mismatch_branch
     assert "check-runs" not in mismatch_branch
     assert "stale_payload" not in mismatch_branch
-    assert "commits?per_page=100&page=" in mismatch_branch
-    assert "prior_head_found" in mismatch_branch
-    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
-    assert 'method="POST"' not in mismatch_branch
-    assert "urlopen(stale_request" not in mismatch_branch
+    assert "urlopen(" not in mismatch_branch
