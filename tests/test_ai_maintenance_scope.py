@@ -552,6 +552,8 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
     assert "inputs.pull_request_head_sha" in policy_section
     assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
     assert "The current PR head SHA does not match the dispatched commit." in policy_section
+
+
 def test_download_artifact_v8_fails_closed_on_digest_mismatch():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     publish_section = workflow[workflow.index("  publish:"):]
