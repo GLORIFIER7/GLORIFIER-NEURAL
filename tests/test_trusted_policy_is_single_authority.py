@@ -359,3 +359,23 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     assert "    name: Evaluate AI review evidence" in evaluator
     assert "    name: Trusted AI Review Policy" not in evaluator
     assert '"name": "Trusted AI Review Policy"' in publisher
+
+
+
+
+def test_unverified_mismatched_dispatch_sha_does_not_publish_pr_check():
+    """A typo or unrelated SHA must not create a false failing PR check."""
+    publisher = _job_section(
+        _read_workflow(TRUSTED_WORKFLOW),
+        "publish-dispatch-result",
+    )
+    mismatch_start = publisher.index(
+        "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
+    )
+    next_step = publisher.index("\n          policy_head_matches =", mismatch_start)
+    mismatch_branch = publisher[mismatch_start:next_step]
+
+    assert "raise SystemExit(" in mismatch_branch
+    assert "check-runs" not in mismatch_branch
+    assert "stale_payload" not in mismatch_branch
+    assert "urlopen(" not in mismatch_branch
