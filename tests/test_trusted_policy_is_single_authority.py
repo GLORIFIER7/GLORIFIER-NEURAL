@@ -182,8 +182,8 @@ def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
     assert "exit 1" in step[number_pos:]
 
 def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
+
 def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
-    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
     guard = (
         'if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" '
         'and not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha):'
@@ -199,7 +199,8 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
     )
 
 def test_workflow_dispatch_provides_manual_reevaluation_fallback():
-    """Regression: workflow_dispatch on trusted-ai-review-policy.yml is the
+
+def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     documented manual re-evaluation fallback when a blocking review thread is
     resolved.
 
@@ -321,8 +322,8 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
     # The manual exact-head fallback must be documented for a resolved blocker.
     assert "Manual re-evaluation fallback" in guide
     assert "copy the current PR head SHA" in guide
-    assert "Run workflow" in guide
- 
+
+
  
 def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     """The required context must identify only the canonical publisher check."""
@@ -331,8 +332,8 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     publisher = _job_section(trusted, "publish-dispatch-result")
 
     assert "    name: Evaluate AI review evidence" in evaluator
+    assert '"name": "Trusted AI Review Policy"' in publisher
     assert "    name: Trusted AI Review Policy" not in evaluator
-
 
 def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
 def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
@@ -365,10 +366,20 @@ def test_inline_review_comment_events_trigger_policy_reevaluation():
         "creating, editing, or deleting an inline review comment re-evaluates the policy."
     )
 
-    # The activity types must cover create, edit, and delete.
+    on_block_lines = _top_level_block(trusted, "on")
     on_block = "
-    assert "created" in on_block
-    assert "edited" in on_block
+    prc_idx = on_block.find("pull_request_review_comment")
+    assert prc_idx >= 0, "pull_request_review_comment must appear in the on: block"
+    prc_block = on_block[prc_idx:]
+    assert "created" in prc_block, (
+        "pull_request_review_comment types must include 'created'."
+    )
+    assert "edited" in prc_block, (
+        "pull_request_review_comment types must include 'edited'."
+    )
+    assert "deleted" in prc_block, (
+        "pull_request_review_comment types must include 'deleted'."
+    )
     assert "deleted" in on_block
 
     # PR number resolution must cover this event (pull_request_review_comment
@@ -378,10 +389,10 @@ def test_inline_review_comment_events_trigger_policy_reevaluation():
         "|| (github.event_name == 'pull_request_review' && "
         "github.event.review.pull_request.number) "
         "|| github.event.pull_request.number"
-    )
     assert pr_number_expression in trusted.split("
         "The concurrency group must resolve the PR number for all event types, "
         "including pull_request_review_comment."
+    )
     )
 
     # Publisher must also use the same expression.
@@ -389,5 +400,4 @@ def test_inline_review_comment_events_trigger_policy_reevaluation():
     assert pr_number_expression in publisher, (
         "The publisher PR_NUMBER env var must resolve correctly for "
         "pull_request_review_comment events."
-    )
     assert "zero Actions policies" in guide
