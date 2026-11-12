@@ -49,7 +49,26 @@ The allowlist is an account/repository settings control, not a repository file. 
 
 References: [GitHub changelog announcement](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) and [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target).
 
-## Active repository ruleset — read-back on 2026-11-11
+## Current repository ruleset — read-back on 2026-11-12
+
+The current GitHub repository settings page shows the active ruleset **`GLORIFIER-NEURAL main protection1`**, ID **`27086549`**, targeting the default `main` branch.
+
+Verified controls:
+
+- Required status checks: `test (3.11)`, `test (3.12)`, and `Trusted AI Review Policy`; all three identify GitHub Actions (App ID `15368`) as their source.
+- Strict branch-up-to-date mode and required signed commits are enabled.
+- Code scanning requires CodeQL (High or higher security alerts; Errors alert threshold), and code-quality results require All severities.
+- Code-owner review and conversation resolution are required; the required human approval count is zero.
+- Force pushes and branch deletion are blocked; the bypass actors list is empty.
+
+**Outstanding check-authenticity risk:** The required contexts share the GitHub Actions source identity (App ID `15368`). That source identity does not prove which workflow produced the `Trusted AI Review Policy` result. CodeAnt identified that a same-repository PR workflow could request `checks: write` and publish a same-name check. Keep this issue open until the required check is published by a dedicated GitHub App identity, or a verified repository-wide control prevents untrusted workflows from creating matching checks. Do not treat the green status from the current shared identity as an exclusive trusted policy result.
+
+**Actions event-policy status:** The Actions Policies page reported zero Actions policies. The proposed active policy for `.github/workflows/trusted-ai-review-policy.yml` with exactly `pull_request_target`, `pull_request_review`, and `workflow_dispatch` was configured in the form but could not be saved because GitHub required an MFA confirmation. It remains NOT CREATED; an administrator must complete it with MFA and verify the saved policy and event execution before the December 2, 2026 public-repository change.
+
+This is a November 12 read-back; the November 11 snapshot that follows is historical evidence and is superseded by these current observations. No branch rules or Actions settings were changed during this read-back.
+
+
+## Historical ruleset snapshot — read-back on 2026-11-11 (superseded 2026-11-12)
 
 The active ruleset is **`GLORIFIER-NEURAL main protection`**, ID **`27011361`**, scoped to `~DEFAULT_BRANCH`.
 
