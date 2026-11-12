@@ -348,3 +348,15 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
     assert "Manual re-evaluation fallback" in guide
     assert "copy the current PR head SHA" in guide
     assert "Run workflow" in guide
+ 
+ 
+def test_evaluator_and_canonical_publisher_have_distinct_check_names():
+    """The required context must identify only the canonical publisher check."""
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    evaluator = _job_section(trusted, "ai-review-policy")
+    publisher = _job_section(trusted, "publish-dispatch-result")
+
+    evaluator_name = re.search(r"(?m)^    name:\\s*(.+?)\\s*$", evaluator)
+    assert evaluator_name is not None, "The evaluator job must have an explicit name."
+    assert evaluator_name.group(1).strip("'\\\"") != "Trusted AI Review Policy"
+    assert '"name": "Trusted AI Review Policy"' in publisher
