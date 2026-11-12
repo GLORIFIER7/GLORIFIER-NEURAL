@@ -369,4 +369,8 @@ def test_mismatched_dispatch_sha_is_rejected_without_publishing_a_pr_check():
     assert "raise SystemExit(" in mismatch_branch
     assert "check-runs" not in mismatch_branch
     assert "stale_payload" not in mismatch_branch
-    assert "urlopen(" not in mismatch_branch
+    assert "commits?per_page=100&page=" in mismatch_branch
+    assert "prior_head_found" in mismatch_branch
+    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
+    assert 'method="POST"' not in mismatch_branch
+    assert "urlopen(stale_request" not in mismatch_branch
