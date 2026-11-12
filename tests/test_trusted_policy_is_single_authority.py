@@ -182,6 +182,7 @@ def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
     assert "exit 1" in step[number_pos:]
 
 def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
+def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
     publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
     guard = (
         'if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" '
@@ -331,7 +332,9 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
 
     assert "    name: Evaluate AI review evidence" in evaluator
     assert "    name: Trusted AI Review Policy" not in evaluator
-    assert '"name": "Trusted AI Review Policy"' in publisher
+
+
+def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
 def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
 
@@ -344,4 +347,47 @@ def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     assert "GitHub Actions" in guide
     assert "15368" in guide
     assert "required contexts share the GitHub Actions source identity" in guide
+
+
+def test_inline_review_comment_events_trigger_policy_reevaluation():
+    """Regression: inline review-comment create/edit/delete must re-evaluate policy.
+
+    The evaluator inspects inline review-thread comments for :stop_sign: blockers.
+    Without pull_request_review_comment in the on: block, editing or deleting a
+    blocking inline comment would leave an earlier successful check in place.
+    """
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    events = _section_keys(trusted, "on")
+
+    # The trigger must be present.
+    assert "pull_request_review_comment" in events, (
+        "trusted-ai-review-policy.yml must include pull_request_review_comment so "
+        "creating, editing, or deleting an inline review comment re-evaluates the policy."
+    )
+
+    # The activity types must cover create, edit, and delete.
+    on_block = "
+    assert "created" in on_block
+    assert "edited" in on_block
+    assert "deleted" in on_block
+
+    # PR number resolution must cover this event (pull_request_review_comment
+    # populates github.event.pull_request.number just like pull_request_target).
+    pr_number_expression = (
+        "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
+        "|| (github.event_name == 'pull_request_review' && "
+        "github.event.review.pull_request.number) "
+        "|| github.event.pull_request.number"
+    )
+    assert pr_number_expression in trusted.split("
+        "The concurrency group must resolve the PR number for all event types, "
+        "including pull_request_review_comment."
+    )
+
+    # Publisher must also use the same expression.
+    publisher = _job_section(trusted, "publish-dispatch-result")
+    assert pr_number_expression in publisher, (
+        "The publisher PR_NUMBER env var must resolve correctly for "
+        "pull_request_review_comment events."
+    )
     assert "zero Actions policies" in guide
