@@ -555,7 +555,7 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
 
 
 
-def test_download_artifact_v8_fails_closed_on_digest_mismatch():
+def test_download_artifact_v8_is_pinned_and_fails_closed_on_digest_mismatch():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     publish_section = workflow[workflow.index("  publish:"):]
     download_start = publish_section.index("- name: Download validated patch artifact")
@@ -566,5 +566,8 @@ def test_download_artifact_v8_fails_closed_on_digest_mismatch():
         else publish_section[download_start:download_end]
     )
 
-    assert "actions/download-artifact@" in download_step
+    assert (
+        "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
+        in download_step
+    )
     assert "digest-mismatch: error" in download_step
