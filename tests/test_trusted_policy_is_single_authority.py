@@ -200,18 +200,54 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
 
 
 def test_workflow_dispatch_provides_manual_reevaluation_fallback():
-    """Regression: workflow_dispatch is the trusted manual re-evaluation path."""
+    """Regression: workflow_dispatch on trusted-ai-review-policy.yml is the
+    documented manual re-evaluation fallback when a blocking review thread is
+    resolved.
+
+    Invariants verified:
+    - The trusted workflow accepts workflow_dispatch as a trigger.
+    - Dispatch is restricted to refs/heads/main (untrusted branches cannot
+      dispatch it).
+    - Both pull_request_number and pull_request_head_sha inputs are declared.
+    - The resolver validates the dispatched SHA against the live GitHub API and
+      rejects a stale SHA before the evaluator is invoked.
+    - A mismatched manual-dispatch SHA fails before any check is written, so a typo or unrelated SHA cannot create a false PR merge blocker.
+    - ai-maintenance dispatches the trusted workflow from main with both required
+      fields, completing the generated-PR manual re-evaluation chain.
+    - Policy code is always loaded from main (never from the PR head).
+    """
     trusted = _read_workflow(TRUSTED_WORKFLOW)
     maintenance = _read_workflow("ai-maintenance.yml")
 
+    # 1. workflow_dispatch trigger must be present.
     events = _section_keys(trusted, "on")
-    assert "workflow_dispatch" in events
-    policy_job = _job_section(trusted, "ai-review-policy")
-    assert "github.ref == 'refs/heads/main'" in policy_job
-    assert "pull_request_number:" in trusted
-    assert "pull_request_head_sha:" in trusted
-    assert "expected_head_sha.casefold() != head_sha.casefold()" in policy_job
+    assert "workflow_dispatch" in events, (
+        "trusted-ai-review-policy.yml must accept workflow_dispatch so operators "
+        "can manually re-evaluate a PR after a blocking review thread is resolved."
+    )
 
+    # 2. Dispatch is restricted to refs/heads/main.
+    policy_job = _job_section(trusted, "ai-review-policy")
+    assert "github.ref == 'refs/heads/main'" in policy_job, (
+        "The ai-review-policy job must restrict workflow_dispatch runs to main "
+        "so only trusted base code is executed."
+    )
+
+    # 3. Both required inputs are declared in the workflow.
+    assert "pull_request_number:" in trusted, (
+        "pull_request_number input must be declared for manual re-evaluation dispatch."
+    )
+    assert "pull_request_head_sha:" in trusted, (
+        "pull_request_head_sha input must be declared for manual re-evaluation dispatch."
+    )
+
+    # 4. Resolver rejects a dispatched SHA that no longer matches the live PR head.
+    assert "expected_head_sha.casefold() != head_sha.casefold()" in policy_job, (
+        "The resolver must reject a stale dispatched SHA so the evaluator is never "
+        "invoked against a head that has since advanced."
+    )
+
+    # 5. A mismatched dispatch SHA must fail without creating a check on the PR.
     publisher = _job_section(trusted, "publish-dispatch-result")
     mismatch_start = publisher.index(
         "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
@@ -220,8 +256,16 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     mismatch_branch = publisher[mismatch_start:next_step]
     assert "raise SystemExit(" in mismatch_branch
     assert "check-runs" not in mismatch_branch
+    assert "stale_payload" not in mismatch_branch
+    assert "commits?per_page=100&page=" in mismatch_branch
+    assert "prior_head_found" in mismatch_branch
+    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
     assert 'method="POST"' not in mismatch_branch
+    assert "urlopen(stale_request" not in mismatch_branch
 
+
+    # 6. ai-maintenance dispatches the trusted workflow from main with both fields,
+    #    completing the generated-PR manual re-evaluation chain.
     dispatch_start = maintenance.index(
         "- name: Dispatch trusted CI and AI review for the exact PR head"
     )
@@ -231,12 +275,27 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
         if dispatch_end < 0
         else maintenance[dispatch_start:dispatch_end]
     )
-    assert "gh workflow run trusted-ai-review-policy.yml --ref main" in dispatch_step
-    assert '--field pull_request_number="$pr_number"' in dispatch_step
-    assert '--field pull_request_head_sha="$pr_head_sha"' in dispatch_step
-    assert "ref: main" in policy_job
-    assert "github.event.pull_request.head.sha" not in policy_job
-    assert "github.event.pull_request.base.sha" not in policy_job
+    assert "gh workflow run trusted-ai-review-policy.yml --ref main \\" in dispatch_step, (
+        "ai-maintenance must dispatch the trusted policy workflow from main so the "
+        "generated-PR manual re-evaluation path is complete."
+    )
+    assert '--field pull_request_number="$pr_number"' in dispatch_step, (
+        "The trusted policy dispatch must include pull_request_number."
+    )
+    assert '--field pull_request_head_sha="$pr_head_sha"' in dispatch_step, (
+        "The trusted policy dispatch must include pull_request_head_sha."
+    )
+
+    # 7. Policy code is always loaded from main, never from the PR head.
+    assert "ref: main" in policy_job, (
+        "Policy code must always be checked out from main, never from the PR head."
+    )
+    assert "github.event.pull_request.head.sha" not in policy_job, (
+        "The policy job must never check out or reference the PR head code."
+    )
+    assert "github.event.pull_request.base.sha" not in policy_job, (
+        "The policy job must not use the PR base SHA as checkout ref; use 'main'."
+    )
 
 
 def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallback():
@@ -263,9 +322,7 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
     # The manual exact-head fallback must be documented for a resolved blocker.
     assert "Manual re-evaluation fallback" in guide
     assert "copy the current PR head SHA" in guide
-
-
-
+    assert "Run workflow" in guide
 
 
 def test_evaluator_and_canonical_publisher_have_distinct_check_names():
@@ -275,8 +332,8 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     publisher = _job_section(trusted, "publish-dispatch-result")
 
     assert "    name: Evaluate AI review evidence" in evaluator
-    assert '"name": "Trusted AI Review Policy"' in publisher
     assert "    name: Trusted AI Review Policy" not in evaluator
+    assert '"name": "Trusted AI Review Policy"' in publisher
 
 
 def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
@@ -291,31 +348,29 @@ def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     assert "GitHub Actions" in guide
     assert "15368" in guide
     assert "required contexts share the GitHub Actions source identity" in guide
+    assert "zero Actions policies" in guide
 
 
 def test_inline_review_comment_events_trigger_policy_reevaluation():
-    """Inline review-comment changes must trigger a fresh trusted policy check."""
+    """Inline review-comment create, edit, and delete events must re-evaluate policy."""
     trusted = _read_workflow(TRUSTED_WORKFLOW)
-    guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
     events = _section_keys(trusted, "on")
+    on_block = "\n".join(_top_level_block(trusted, "on"))
 
     assert "pull_request_review_comment" in events
-    on_block = "\n".join(_top_level_block(trusted, "on"))
-    prc_idx = on_block.find("pull_request_review_comment")
-    assert prc_idx >= 0
-    prc_block = on_block[prc_idx:]
-    assert "created" in prc_block
-    assert "edited" in prc_block
-    assert "deleted" in prc_block
+    event_text = on_block.split("pull_request_review_comment:", 1)[1].split(
+        "workflow_dispatch:", 1
+    )[0]
+    assert "types: [created, edited, deleted]" in event_text
 
+    # The concurrency group and publisher must both resolve this event to its PR.
     pr_number_expression = (
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
-        "github.event.review.pull_request.number) "
-        "|| github.event.pull_request.number"
+        "github.event.review.pull_request.number) || github.event.pull_request.number"
     )
-    concurrency = trusted.split("\nconcurrency:", 1)[1]
+    concurrency = trusted.split("concurrency:", 1)[1].split("permissions:", 1)[0]
     assert pr_number_expression in concurrency
     publisher = _job_section(trusted, "publish-dispatch-result")
-    assert pr_number_expression in publisher
-    assert "zero Actions policies" in guide
+    expected = "PR_NUMBER: $" + "{{ " + pr_number_expression + " }}"
+    assert expected in publisher
