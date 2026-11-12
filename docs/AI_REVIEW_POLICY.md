@@ -30,7 +30,7 @@ GitHub exposes `pull_request_review_thread` as a webhook event, but it is not a 
 
 When a blocking review thread has been resolved but no new supported event has re-run the policy, use the existing exact-head manual dispatch:
 
-1. Open the pull request and copy its current 40-character head commit SHA.
+1. Open the pull request and copy the current PR head SHA (the full 40-character head commit SHA).
 2. In GitHub, open **Actions → Trusted AI Review Policy → Run workflow**.
 3. Select the `main` branch. The policy job is restricted to `refs/heads/main` and loads policy code from trusted `main`; it never checks out or executes PR-head code.
 4. Enter the open pull request number in `pull_request_number` and paste the copied exact head SHA in `pull_request_head_sha`.
