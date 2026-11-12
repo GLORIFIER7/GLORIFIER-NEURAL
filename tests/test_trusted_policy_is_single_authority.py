@@ -343,5 +343,5 @@ def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     assert "`Trusted AI Review Policy`" in guide
     assert "GitHub Actions" in guide
     assert "15368" in guide
-    assert "shared GitHub Actions source identity" in guide
+    assert "required contexts share the GitHub Actions source identity" in guide
     assert "zero Actions policies" in guide
