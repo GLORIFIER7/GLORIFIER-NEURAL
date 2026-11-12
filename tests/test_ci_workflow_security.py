@@ -313,16 +313,18 @@ def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
     )[1].split("\n      - uses: actions/checkout", 1)[0]
     assert "steps.validate-pr-identity.outcome == 'success'" in verification_step
 
-def test_ci_policy_check_is_manual_only_and_trusted_workflow_owns_pr_events():
+def test_ci_policy_check_is_owned_by_trusted_workflow_only():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
-    ci_policy_job = _job_section("ai-review-policy", ci_workflow)
-    assert (
-        "if: github.event_name == 'workflow_dispatch' "
-        "&& inputs.pull_request_number != ''"
-    ) in ci_policy_job
-    assert "github.event_name == 'pull_request'" not in ci_policy_job
-    assert "github.event_name == 'pull_request_review'" not in ci_policy_job
+    assert "ai-review-policy" not in _job_sections(ci_workflow)
+    assert "name: AI Review Policy" not in ci_workflow
 
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     assert "pull_request_target:" in trusted_workflow
     assert "pull_request_review:" in trusted_workflow
+    assert "pull_request_review_comment:" in trusted_workflow
+    assert "workflow_dispatch:" in trusted_workflow
+    assert "pull_request_head_sha:" in trusted_workflow
+    assert (
+        "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' "
+        "&& inputs.pull_request_head_sha || '' }}"
+    ) in trusted_workflow
