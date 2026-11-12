@@ -17,7 +17,7 @@ The evaluator fails closed on malformed GitHub API responses, invalid SHAs, inco
 
 - `pull_request_target` handles pull request opened, reopened, synchronized, and ready-for-review events.
 - `pull_request_review` re-evaluates submitted, edited, and dismissed reviews.
-- The workflow definition is loaded from a trusted revision: `pull_request_target` checks out `github.event.pull_request.base.sha`, `pull_request_review` checks out `github.event.review.pull_request.base.sha`, and `workflow_dispatch` checks out `main`. All checkouts disable persisted credentials.
+- Every supported event path checks out policy code from the protected default branch, `main`. No event-supplied PR base SHA or PR head is used as a checkout ref. All checkouts disable persisted credentials.
 - It does not check out, import, or execute pull-request head code.
 - It obtains the canonical current PR head SHA from the GitHub API, then evaluates formal reviews and review threads against that exact SHA.
 - The job has only `contents: read` and `pull-requests: read` permissions.
@@ -35,7 +35,7 @@ When a blocking review thread has been resolved but no new supported event has r
 3. Select the `main` branch. The policy job is restricted to `refs/heads/main` and loads policy code from trusted `main`; it never checks out or executes PR-head code.
 4. Enter the open pull request number in `pull_request_number` and paste the copied exact head SHA in `pull_request_head_sha`.
 5. Select **Run workflow**. The resolver fetches the canonical PR head from the GitHub API and rejects a mismatched or malformed SHA before evaluation. The publisher binds the outcome to the canonical current head.
-6. If the pull request advances during dispatch, the stale-dispatch path publishes a failure check on the latest head. Copy the new current PR head SHA and repeat the manual dispatch.
+6. If the pull request advances during dispatch, the publisher detects that the supplied SHA no longer matches the canonical PR head and exits before writing any check. It does not create a success or failure check for the mismatched dispatch. Copy the current PR head SHA and repeat the manual dispatch.
 
 This procedure only re-evaluates the existing policy. It does not create formal AI reviews, clear unresolved findings, grant approval, bypass branch protection, or authorize merging. The normal required reviewer evidence and signed-commit rules still apply.
 
