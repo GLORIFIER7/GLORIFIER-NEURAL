@@ -278,6 +278,8 @@ jobs:
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-maintenance-artifact
+          # Reject corrupted or substituted patch artifacts.
+          digest-mismatch: error
 
       - name: Apply validated Git patch
         id: apply_patch
