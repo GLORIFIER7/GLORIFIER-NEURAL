@@ -194,7 +194,6 @@ Conclusion: Cloudflare deployment and the configured read-only production readin
 5. Require live `/health` and `/ready` checks after a deployment. An HTTP 503 is accepted only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
 6. Do not perform a live inference request unless the owner separately authorizes prompt transmission and accepts applicable provider charges. The `GLORIFIER_PAID_INFERENCE_AUTHORIZED` setting must remain `false` under the zero-budget policy. Automated readiness and smoke checks do not submit prompts.
 7. Do not enable audit writes or task-run persistence until their schemas, least-privilege credentials, backups, and read/write verification have been separately approved and completed.
-8. Do not enable audit writes or task-run persistence until their schemas, least-privilege credentials, backups, and read/write verification have been separately approved and completed.
 
 Do not declare full AI production readiness until provider model-catalog readiness and a separately authorized inference check succeed. Successful CI, a successful deployment, or an HTTP 200 readiness response alone does not establish live inference, quality, paid-service safety, or economic outcomes.
 
