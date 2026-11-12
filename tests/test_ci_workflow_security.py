@@ -313,6 +313,8 @@ def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
     )[1].split("\n      - uses: actions/checkout", 1)[0]
     assert "steps.validate-pr-identity.outcome == 'success'" in verification_step
 
+
+
 def test_ci_policy_check_is_owned_by_trusted_workflow_only():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
     assert "ai-review-policy" not in _job_sections(ci_workflow)
