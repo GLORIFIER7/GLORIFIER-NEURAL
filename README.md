@@ -65,33 +65,35 @@ starting the Pyodide runtime.
 The account's Workers subdomain is `glorifier`. The live Worker address is
 `https://glorifier-neural.glorifier.workers.dev`. An earlier Cloudflare deployment inventory at `2026-11-05T03:58:11Z` observed
 version `733211d1-6931-4fdb-a4b9-5c7482bcf9b8`; that inventory has been
-superseded by the newer deployment recorded under **Current deployed state**
-below. Deployment success is not itself a readiness result.
+that historical inventory is documented in the dated **Historical deployed-state snapshot**
+section below. This is not a fresh deployment read-back. Deployment success is not itself
+a readiness result.
 
 The task endpoint reads `GLORIFIER_API_TOKEN` from the Cloudflare request-scoped
-`env` binding. A secret binding with this name is present on the current production
-Worker; its value is not read or stored in this repository or Wrangler configuration.
-The endpoint remains protected by Cloudflare Access and bearer-token validation.
+`env` binding. That binding name was observed in the historical 2026-11-05 inventory
+only; its current production presence is **NOT VERIFIED**. The endpoint code validates
+Cloudflare Access and bearer-token credentials, but current production enforcement is
+also **NOT VERIFIED** without a fresh authorized read-back.
 
-The current production Worker settings, read back directly from Cloudflare on
-2026-11-05 at approximately 16:28 (UTC+07:00), are
-`GLORIFIER_PROVIDER=openai`,
+**Historical Cloudflare settings read-back — 2026-11-05 at approximately 16:28
+(UTC+07:00); not a current production read-back.** The observed values at that time
+were `GLORIFIER_PROVIDER=openai`,
 `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`,
 `GLORIFIER_ENABLE_INFERENCE=true`, and
 `GLORIFIER_NEON_CONNECTIVITY_ENABLED=true`. The OpenAI secret binding
 `OPENAI_API_KEY` and task-authentication secret binding `GLORIFIER_API_TOKEN`
-are present by name; secret values are never read from the binding inventory.
-The `NVIDIA_NIM_API_KEY` binding is also present for the optional NVIDIA adapter,
-but NVIDIA is not the selected production provider. External egress is enabled
-for the read-only provider readiness request. The production inference flag is
-now `true`, but the latest successful production smoke (GitHub Actions run
+were present by name; secret values were not read. The `NVIDIA_NIM_API_KEY` binding
+was also present for the optional NVIDIA adapter. The latest successful historical
+production smoke available for this observation (GitHub Actions run
 [#41987341798](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/41987341798),
 2026-11-05T07:30Z) reported HTTP 200 from `/health` and `/ready`, with provider,
 read-only database connectivity, authentication, and rate limiting `VERIFIED`.
-Audit and task-run persistence remain `NOT CONFIGURED (OPTIONAL)`. The smoke
-response explicitly reported `inference_performed=false`; no prompt was
-submitted, no inference was run, and no optional persistence writes were tested.
-`/health` reports process liveness, not dependency readiness.
+Audit and task-run persistence remained `NOT CONFIGURED (OPTIONAL)`. The smoke
+response explicitly reported `inference_performed=false`; no prompt or inference
+was executed, and no optional persistence writes were tested. `/health` reports
+process liveness, not dependency readiness. These dated observations do not establish
+current provider selection, egress, inference configuration, bindings, traffic, or
+readiness; all remain **NOT VERIFIED** pending a fresh authorized read-back.
 
 Pull requests and ordinary pushes validate the Worker bundle without
 publishing a production version. The Cloudflare Workers Builds trigger on
