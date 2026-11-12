@@ -178,6 +178,7 @@ def test_codex_engineering_cycle_is_not_gated_by_the_publication_window():
         step = codex_section[start:] if end < 0 else codex_section[start:end]
         assert "steps.time_window.outputs.allowed" not in step
 
+
 def test_workflow_uses_shallow_checkout_and_env_safe_run_id():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
@@ -459,6 +460,7 @@ def test_scope_validator_rejects_out_of_scope_patch_in_an_alternate_index(tmp_pa
     assert "README.md" in result.stderr
     assert (publish / "README.md").read_text(encoding="utf-8") == "fixture\n"
 
+
 def test_scope_validator_rejects_nested_git_repository_gitlinks(tmp_path: Path):
     repository = _repository(tmp_path)
     nested = repository / "app" / "vendor"
@@ -530,6 +532,7 @@ def test_scope_validator_rejects_gitlinks_in_an_alternate_index(tmp_path: Path):
     assert "gitlink" in result.stderr.casefold()
     assert "app/vendor" in result.stderr
 
+
 def test_workflow_top_level_permissions_are_minimal():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     permissions_start = workflow.index("permissions:")
@@ -538,7 +541,6 @@ def test_workflow_top_level_permissions_are_minimal():
 
     assert "contents: read" in top_level_permissions
     assert "pull-requests:" not in top_level_permissions
-
 
 
 def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout():
@@ -571,9 +573,9 @@ def test_copy_back_protects_trusted_policy_authority_regression_test():
     assert protected_path in copy_back
     assert copy_back.index(protected_path) < copy_back.index("rsync -rlptD --delete")
 
-def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
 
 def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     test_start = ci_workflow.index("  test:")
     publish_start = ci_workflow.index(chr(10) + "  publish-container:", test_start)
     test_section = ci_workflow[test_start:publish_start]
