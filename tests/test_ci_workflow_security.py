@@ -215,35 +215,22 @@ def test_policy_enforcement_step_requires_resolver_success():
     assert "id: current-pr" in policy_job[resolver_start:enforce_start]
 
 
-def test_stale_head_publishes_failure_check_on_latest_head():
+def test_stale_head_rejected_without_publishing_a_pr_check():
+    """A mismatched dispatch must fail closed without creating a PR check."""
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     publish_job = _job_section("publish-dispatch-result", trusted_workflow)
-    # The stale path must publish a failure check; it must NOT silently exit
-    assert "stale_summary" in publish_job, (
-        "The stale-head path must build a stale_summary for the failure check."
+    mismatch_start = publish_job.index(
+        "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
     )
-    assert "stale_payload" in publish_job, (
-        "The stale-head path must construct a stale_payload dict."
-    )
-    assert "stale_request" in publish_job, (
-        "The stale-head path must POST a check-runs stale_request."
-    )
-    assert "latest head must be re-evaluated" in publish_job, (
-        "The stale summary must state the latest head must be re-evaluated."
-    )
-    # Failure check must be bound to current_head_sha (the latest head), not the dispatched SHA
-    stale_block_start = publish_job.index("stale_payload")
-    stale_block_end = publish_job.index("stale_request")
-    stale_block = publish_job[stale_block_start:stale_block_end]
-    assert '"head_sha": current_head_sha' in stale_block, (
-        "The stale failure check must be published on the canonical latest head SHA."
-    )
-    assert '"conclusion": "failure"' in stale_block, (
-        "The stale path must always publish conclusion=failure."
-    )
-    assert '"name": "Trusted AI Review Policy"' in stale_block, (
-        "The stale check must use the exact name 'Trusted AI Review Policy'."
-    )
+    next_step = publish_job.index("\n          policy_head_matches =", mismatch_start)
+    mismatch_branch = publish_job[mismatch_start:next_step]
+
+    assert "raise SystemExit(" in mismatch_branch
+    assert "no policy check was published" in mismatch_branch
+    assert "check-runs" not in mismatch_branch
+    assert "stale_summary" not in mismatch_branch
+    assert "stale_payload" not in mismatch_branch
+    assert "urlopen(" not in mismatch_branch
 
 
 def test_matching_head_publishes_check_with_policy_result():
