@@ -279,6 +279,8 @@ def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
     assert "needs.ai-review-policy.outputs.pr_head_sha != ''" not in publish_job
     assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publish_job
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publish_job
+    publisher_env = publish_job.split("        env:", 1)[1].split("        run: |", 1)[0]
+    assert "GITHUB_EVENT_NAME: ${{ github.event_name }}" in publisher_env
     assert 'current_head_sha = (pr.get("head") or {}).get("sha", "")' in publish_job
     assert "current_head_sha.casefold() != expected_head_sha.casefold()" in publish_job
     assert "policy_head_matches" in publish_job
