@@ -1,6 +1,8 @@
 # GLORIFIER Neural Orchestration
 
-A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The latest successful production smoke on 2026-11-05 returned HTTP 200 from `/health` and `/ready`; provider access, read-only Neon connectivity, authentication, and rate limiting were VERIFIED. A direct Cloudflare settings read-back later that day confirmed `GLORIFIER_PROVIDER=openai`, external data egress enabled, Neon connectivity enabled, and `GLORIFIER_ENABLE_INFERENCE=true`. Optional audit and task-run persistence remain unconfigured. The smoke test did not submit a prompt or perform inference, so end-to-end model execution remains NOT VERIFIED.
+> **Current evidence boundary — 2026-11-12:** NEURAL is under temporary repository template/maintenance mode; this designation does not shut down, disable, or modify any deployed Worker. The Cloudflare settings and production smoke observations dated 2026-11-05 below are historical snapshots, not a current production read-back. Current production provider selection, external-egress setting, inference flag, database connectivity, and secret-binding state are **NOT VERIFIED**. Do not infer production shutdown or disabled production inference from template mode. See [docs/TEMPLATE_MODE.md](docs/TEMPLATE_MODE.md).
+
+A governed, provider-neutral AI orchestration API built with Python and FastAPI, deployed as a Cloudflare Python Worker. The last recorded production smoke on 2026-11-05 returned HTTP 200 from `/health` and `/ready`; provider access, read-only Neon connectivity, authentication, and rate limiting were VERIFIED. A direct Cloudflare settings read-back later that day confirmed `GLORIFIER_PROVIDER=openai`, external data egress enabled, Neon connectivity enabled, and `GLORIFIER_ENABLE_INFERENCE=true`. Optional audit and task-run persistence remain unconfigured. The smoke test did not submit a prompt or perform inference, so end-to-end model execution remains NOT VERIFIED.
 
 ## License
 
@@ -121,8 +123,12 @@ Do not expose the service publicly without TLS, monitoring, secret rotation, and
 
 ## Explicit inference configuration
 
+**Historical observation only — 2026-11-05. Current production inference and egress settings are NOT VERIFIED as of 2026-11-12.**
+
 Inference is disabled by default for local development and newly provisioned deployments. The existing production Worker was directly read back from Cloudflare on 2026-11-05 at approximately 16:28 (UTC+07:00): `GLORIFIER_ENABLE_INFERENCE=true`, `GLORIFIER_PROVIDER=openai`, and `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true`. The `OPENAI_API_KEY` and `GLORIFIER_API_TOKEN` secret binding names are present; their values were not read. The readiness smoke check is read-only and did not call the Responses API completion endpoint. Live inference, output quality, latency, task execution, and usage-cost behavior therefore remain **NOT VERIFIED**. Authenticated task requests may send task content to OpenAI and incur separate API usage charges. A controlled live inference request must be treated as a separate operational test and must not be inferred from a successful `/ready` response. ChatGPT subscriptions and API billing are separate.
-## Current deployed state — observed 2026-11-05 (UTC+07:00)
+## Historical deployed-state snapshot — observed 2026-11-05 (UTC+07:00)
+
+This section is a dated historical read-back, not a statement of current production configuration. Current settings require a fresh authorized Cloudflare read-back.
 
 Direct Cloudflare configuration inventory was read at approximately 16:28 local time. The latest deployment inventory returned:
 
