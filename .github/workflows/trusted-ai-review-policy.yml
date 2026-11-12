@@ -187,6 +187,57 @@ jobs:
           if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
           if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():
+              # A stale-dispatch check is justified only when the supplied SHA is
+              # present in this exact pull request's commit history. Unrelated or
+              # mistyped SHAs fail closed without writing a status or check.
+              prior_head_found = False
+              for page_number in range(1, 11):
+                  commits_url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}/commits?per_page=100&page={page_number}"
+                  commits_request = Request(commits_url, headers=api_headers)
+                  try:
+                      with urlopen(commits_request, timeout=20) as commits_response:
+                          commits_payload = json.loads(
+                              commits_response.read().decode("utf-8")
+                          )
+                  except urllib.error.HTTPError as exc:
+                      raise SystemExit(
+                          "Could not verify dispatched PR history "
+                          f"(HTTP {exc.code}); no check was published."
+                      ) from None
+                  except (urllib.error.URLError, TimeoutError, OSError):
+                      raise SystemExit(
+                          "Could not verify dispatched PR history; no check was published."
+                      ) from None
+                  except (json.JSONDecodeError, UnicodeDecodeError):
+                      raise SystemExit(
+                          "GitHub returned invalid PR history; no check was published."
+                      ) from None
+                  if not isinstance(commits_payload, list):
+                      raise SystemExit(
+                          "GitHub returned invalid PR history; no check was published."
+                      )
+                  for commit_record in commits_payload:
+                      if not isinstance(commit_record, dict):
+                          raise SystemExit(
+                              "GitHub returned malformed PR history; no check was published."
+                          )
+                      commit_sha = commit_record.get("sha", "")
+                      if not isinstance(commit_sha, str) or not re.fullmatch(
+                          r"[0-9a-fA-F]{40}", commit_sha
+                      ):
+                          raise SystemExit(
+                              "GitHub returned PR history with an invalid commit SHA; "
+                              "no check was published."
+                          )
+                      if commit_sha.casefold() == expected_head_sha.casefold():
+                          prior_head_found = True
+                  if prior_head_found or len(commits_payload) < 100:
+                      break
+              if not prior_head_found:
+                  raise SystemExit(
+                      "The dispatched SHA is not verified as a commit in this pull request; "
+                      "no check was published."
+                  )
               stale_summary = (
                   f"The evaluation was dispatched for head {expected_head_sha} but "
                   f"the pull request has since advanced to {current_head_sha}. "
