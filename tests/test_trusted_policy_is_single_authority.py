@@ -321,3 +321,29 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     assert "github.event.pull_request.base.sha" not in policy_job, (
         "The policy job must not use the PR base SHA as checkout ref; use 'main'."
     )
+
+
+def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallback():
+    workflow = _read_workflow(TRUSTED_WORKFLOW)
+    guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
+    dispatch = _top_level_block(workflow, "workflow_dispatch")
+    policy_job = _job_section(workflow, "ai-review-policy")
+    publisher = _job_section(workflow, "publish-dispatch-result")
+
+    assert "pull_request_number:" in dispatch
+    assert "pull_request_head_sha:" in dispatch
+    assert dispatch.count("required: true") >= 2
+    assert "GITHUB_EVENT_NAME" in policy_job
+    assert "workflow_dispatch" in policy_job
+    assert "github.ref == 'refs/heads/main'" in policy_job
+    assert "EXPECTED_PR_HEAD_SHA" in policy_job
+    assert "current_head_sha" in publisher
+    assert "expected_head_sha" in publisher
+
+    # GitHub's pull_request_review_thread webhook is not an Actions workflow trigger.
+    assert "pull_request_review_thread" not in _section_keys(workflow, "on")
+
+    # The manual exact-head fallback must be documented for a resolved blocker.
+    assert "Manual re-evaluation fallback" in guide
+    assert "copy the current PR head SHA" in guide
+    assert "Run workflow" in guide
