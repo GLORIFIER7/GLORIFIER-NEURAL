@@ -40,6 +40,49 @@ Return NEURAL to active implementation only after all of the following are evide
 
 Use evidence-only status labels: **VERIFIED**, **PARTIALLY VERIFIED**, **NOT VERIFIED**, **BLOCKED — ADMIN ACTION**, and **NOT APPLICABLE**. Record the observation timestamp, repository/branch/commit, exact checks, and source links. Never report a PR as fixed or safe to merge solely because its patch was written or one workflow passed.
 
+## Reusable architecture contract
+
+NEURAL remains a reusable, provider-neutral template with explicit boundaries:
+
+- **Provider adapters:** implement the shared adapter contract in `app/providers/base.py`; provider selection is explicit, never inferred from the presence of credentials.
+- **Orchestration:** `app/orchestrator.py` coordinates the selected provider only after policy checks and authorization gates.
+- **Governance:** `app/policy.py` is deny-by-default for financial actions, wallet signing, minting, destructive operations, production writes, and unknown action classes.
+- **Evidence:** distinguish process liveness, dependency readiness, provider reachability, inference, persistence, and economic outcomes. A successful `/health` or read-only `/ready` probe does not prove inference or task execution.
+- **Human authority:** agents and providers may propose or execute only within explicitly granted scopes; repository protections and owner authorization remain authoritative.
+
+## Setup and testing boundary
+
+Use the repository's documented quick start in [README.md](../README.md#quick-start) and the safe defaults in [.env.example](../.env.example). Local and newly provisioned environments must retain:
+
+- `GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=false`
+- `GLORIFIER_ENABLE_INFERENCE=false`
+- `GLORIFIER_PAID_INFERENCE_AUTHORIZED=false`
+
+The development test baseline is Python 3.11 or 3.12, followed by:
+
+```bash
+pip install -e ".[dev]"
+ruff check .
+pytest
+```
+
+The GitHub Actions CI matrix is the authoritative repository verification. Record the exact PR head SHA and workflow run IDs; a result from an earlier commit is stale evidence.
+
+## Deployment boundary
+
+Pull-request CI, tests, local Docker builds, and Cloudflare preview/package-validation builds are not production deployments. Production promotion is governed by [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and [OCTOPUS_DEPLOY.md](OCTOPUS_DEPLOY.md), including their protected manual-dispatch and environment requirements. Template mode does not invoke those workflows, publish images, change Worker settings, or authorize production promotion.
+
+## Canonical references
+
+- [Architecture and capabilities](../README.md#architecture)
+- [Local setup and quick start](../README.md#quick-start)
+- [Provider spend and inference controls](../README.md#explicit-inference-configuration)
+- [AI review and governance controls](AI_REVIEW_POLICY.md)
+- [Production readiness and deployment controls](PRODUCTION_READINESS.md)
+- [Octopus deployment boundary](OCTOPUS_DEPLOY.md)
+- [NVIDIA Dynamo adapter and live-verification gates](NVIDIA-DYNAMO.md)
+- [Container and dependency definitions](../Dockerfile), [pyproject.toml](../pyproject.toml), and [uv.lock](../uv.lock)
+
 ## Current boundary
 
 This mode is a repository operating policy and maintenance designation. It does not alter the production Worker or repository administration settings. Keep changes on repair branches and submit them as draft pull requests for review.
