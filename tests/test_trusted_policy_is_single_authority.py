@@ -348,3 +348,14 @@ def test_manual_exact_head_dispatch_is_the_documented_review_re_evaluation_fallb
     assert "Manual re-evaluation fallback" in guide
     assert "copy the current PR head SHA" in guide
     assert "Run workflow" in guide
+
+def test_runbook_describes_trusted_main_checkout_for_every_event():
+    """Keep the runbook aligned with the trusted workflow checkout boundary."""
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    guide = (ROOT / "docs" / "AI_REVIEW_POLICY.md").read_text(encoding="utf-8")
+    policy = _job_section(trusted, "ai-review-policy")
+
+    assert "ref: main" in policy
+    assert "all supported event paths check out trusted `main`" in guide
+    assert "github.event.pull_request.base.sha" not in guide
+    assert "github.event.review.pull_request.base.sha" not in guide
