@@ -99,3 +99,5 @@ The connected GitHub write interface used for this maintenance can read rulesets
 ## Operational boundaries
 
 No policy change authorizes model inference, paid API usage, production deployment, database writes, wallet signing, minting, or other irreversible actions. The separate `GLORIFIER_PAID_INFERENCE_AUTHORIZED` guard remains default-deny. Production inference and persistence must be verified independently from repository CI and readiness checks.
+
+Current check-source caveat: The shared GitHub Actions identity (App ID 15368) is used by all three required check contexts; it cannot prove which workflow created the Trusted AI Review Policy check.
