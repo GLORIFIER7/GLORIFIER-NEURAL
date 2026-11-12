@@ -252,10 +252,10 @@ def test_matching_head_publishes_check_with_policy_result():
         "Only checks:write is permitted in the publish-dispatch-result job."
     )
 
+
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
 
-def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert "id: current-pr" in policy_job
     assert "pulls/{pull_number}" in policy_job
     assert 'head_sha = (payload.get("head") or {}).get("sha", "")' in policy_job
