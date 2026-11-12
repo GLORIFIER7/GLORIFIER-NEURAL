@@ -10,7 +10,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-TRUSTED_REVIEW_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 TRUSTED_POLICY_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
@@ -338,20 +337,22 @@ def test_workflow_publish_job_has_minimal_write_permissions():
 
 def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_driven():
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    trusted_review = TRUSTED_REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    trusted_review = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
 
     assert "pull_request_head_sha:" in workflow
     assert "inputs.pull_request_head_sha" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in workflow
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in workflow
 
     # Draft PR creation emits pull_request_target(opened); review events re-run
     # the trusted policy. No untrusted CI workflow should execute reviewer policy.
     assert "pull_request_target:" in trusted_review
     assert "pull_request_review:" in trusted_review
     assert "ai-review-policy:" in trusted_review
-    assert "github.event.pull_request.base.sha" in trusted_review
+    assert "ref: main" in trusted_review
     assert "Enforce both AI reviewer findings on the exact current PR head" in trusted_review
+
+
 def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_pr_events():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
@@ -380,9 +381,10 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
     assert '--ref "$PR_BRANCH"' not in dispatch_step
-    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 1
+    assert 'gh workflow run trusted-ai-review-policy.yml --ref main \\' in dispatch_step
+    assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 2
     assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
-    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 1
+    assert dispatch_step.count('--field pull_request_number="$pr_number"') == 2
 
 
 def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
@@ -541,14 +543,50 @@ def test_workflow_top_level_permissions_are_minimal():
 
 def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    policy_start = ci_workflow.index("  ai-review-policy:")
-    policy_section = ci_workflow[policy_start:]
-    validation = ci_workflow.index("Validate manual dispatch PR identity")
-    checkout = ci_workflow.index("uses: actions/checkout")
+    test_start = ci_workflow.index("  test:")
+    publish_start = ci_workflow.index(chr(10) + "  publish-container:", test_start)
+    test_section = ci_workflow[test_start:publish_start]
+    validation = test_section.index("Validate manual dispatch PR identity")
+    checkout = test_section.index("uses: actions/checkout")
 
     assert validation < checkout
     assert "pull_request_number:" in ci_workflow
-    assert "inputs.pull_request_number" in policy_section
-    assert "inputs.pull_request_head_sha" in policy_section
-    assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
-    assert "The current PR head SHA does not match the dispatched commit." in policy_section
+    assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
+    assert "PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
+    assert '[[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]' in test_section
+    assert '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]' in test_section
+    assert "An exact PR head SHA is required with a dispatched pull request number." in test_section
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in test_section
+    assert "persist-credentials: false" in test_section
+    assert "ai-review-policy" not in ci_workflow
+
+
+def test_copy_back_protects_trusted_policy_authority_regression_test():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    copy_back_start = workflow.index("- name: Copy validated app and tests changes back")
+    stage_start = workflow.index("\n      - name: Check changed paths and prepare review patch", copy_back_start)
+    copy_back = workflow[copy_back_start:stage_start]
+
+    protected_path = "tests/test_trusted_policy_is_single_authority.py"
+    assert protected_path in copy_back
+    assert copy_back.index(protected_path) < copy_back.index("rsync -rlptD --delete")
+
+def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    test_start = ci_workflow.index("  test:")
+    publish_start = ci_workflow.index(chr(10) + "  publish-container:", test_start)
+    test_section = ci_workflow[test_start:publish_start]
+    identity = test_section.index("Verify dispatched PR head against GitHub")
+    checkout = test_section.index("uses: actions/checkout")
+
+    assert identity < checkout
+    assert "pull-requests: read" in test_section
+    assert "id: current-pr" in test_section
+    assert "GH_TOKEN: ${{ github.token }}" in test_section
+    assert "GITHUB_REPOSITORY: ${{ github.repository }}" in test_section
+    assert "PR_NUMBER: ${{ inputs.pull_request_number }}" in test_section
+    assert "EXPECTED_PR_HEAD_SHA: ${{ inputs.pull_request_head_sha }}" in test_section
+    assert "id: validate-pr-identity" in test_section
+    assert "steps.validate-pr-identity.outcome == 'success'" in test_section
+    assert "https://api.github.com/repos/{repository}/pulls/{pull_number}" in test_section
+    assert "expected_head_sha.casefold() != current_head_sha.casefold()" in test_section
