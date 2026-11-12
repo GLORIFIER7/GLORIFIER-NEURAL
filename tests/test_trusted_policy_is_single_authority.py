@@ -189,35 +189,13 @@ def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
     )
     assert guard in publisher
 
-    expression = guard[len("if "):-1]
-    for event_name in ("pull_request_target", "pull_request_review"):
-        environment = type(
-            "Environment",
-            (),
-            {"environ": {"GITHUB_EVENT_NAME": event_name}},
-        )()
-        assert not eval(expression, {
-            "os": environment,
-            "re": re,
-            "expected_head_sha": "",
-        })
-
-    dispatch_environment = type(
-        "Environment",
-        (),
-        {"environ": {"GITHUB_EVENT_NAME": "workflow_dispatch"}},
-    )()
-    assert eval(expression, {
-        "os": dispatch_environment,
-        "re": re,
-        "expected_head_sha": "",
-    })
-    assert not eval(expression, {
-        "os": dispatch_environment,
-        "re": re,
-        "expected_head_sha": "a" * 40,
-    })
-
+    # Validate the guard inputs structurally; never execute text read from YAML.
+    publisher_env = publisher.split("        env:", 1)[1].split("        run: |", 1)[0]
+    assert "GITHUB_EVENT_NAME: ${{ github.event_name }}" in publisher_env
+    assert (
+        "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}"
+        in publisher_env
+    )
 
 def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     """Regression: workflow_dispatch on trusted-ai-review-policy.yml is the
@@ -365,5 +343,5 @@ def test_runbook_matches_live_ruleset_and_documents_check_identity_gap():
     assert "`Trusted AI Review Policy`" in guide
     assert "GitHub Actions" in guide
     assert "15368" in guide
-    assert "shared GitHub Actions identity" in guide
+    assert "shared GitHub Actions source identity" in guide
     assert "zero Actions policies" in guide
