@@ -277,7 +277,11 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     assert "raise SystemExit(" in mismatch_branch
     assert "check-runs" not in mismatch_branch
     assert "stale_payload" not in mismatch_branch
-    assert "urlopen(" not in mismatch_branch
+    assert "commits?per_page=100&page=" in mismatch_branch
+    assert "prior_head_found" in mismatch_branch
+    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
+    assert 'method="POST"' not in mismatch_branch
+    assert "urlopen(stale_request" not in mismatch_branch
 
 
     # 6. ai-maintenance dispatches the trusted workflow from main with both fields,
