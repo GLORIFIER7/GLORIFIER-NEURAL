@@ -356,7 +356,6 @@ def test_evaluator_and_canonical_publisher_have_distinct_check_names():
     evaluator = _job_section(trusted, "ai-review-policy")
     publisher = _job_section(trusted, "publish-dispatch-result")
 
-    evaluator_name = re.search(r"(?m)^    name:\\s*(.+?)\\s*$", evaluator)
-    assert evaluator_name is not None, "The evaluator job must have an explicit name."
-    assert evaluator_name.group(1).strip("'\\\"") != "Trusted AI Review Policy"
+    assert "    name: Evaluate AI review evidence" in evaluator
+    assert "    name: Trusted AI Review Policy" not in evaluator
     assert '"name": "Trusted AI Review Policy"' in publisher
