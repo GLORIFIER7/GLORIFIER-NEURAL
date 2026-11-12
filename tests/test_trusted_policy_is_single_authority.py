@@ -188,3 +188,40 @@ def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
     assert "exit 1" in step[sha_pos:number_pos]
     assert "::error::The resolved PR number" in step[number_pos:]
     assert "exit 1" in step[number_pos:]
+
+def test_publisher_requires_exact_expected_sha_only_for_manual_dispatch():
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
+    guard = (
+        'if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" '
+        'and not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha):'
+    )
+    assert guard in publisher
+
+    expression = guard[len("if "):-1]
+    for event_name in ("pull_request_target", "pull_request_review"):
+        environment = type(
+            "Environment",
+            (),
+            {"environ": {"GITHUB_EVENT_NAME": event_name}},
+        )()
+        assert not eval(expression, {
+            "os": environment,
+            "re": re,
+            "expected_head_sha": "",
+        })
+
+    dispatch_environment = type(
+        "Environment",
+        (),
+        {"environ": {"GITHUB_EVENT_NAME": "workflow_dispatch"}},
+    )()
+    assert eval(expression, {
+        "os": dispatch_environment,
+        "re": re,
+        "expected_head_sha": "",
+    })
+    assert not eval(expression, {
+        "os": dispatch_environment,
+        "re": re,
+        "expected_head_sha": "a" * 40,
+    })
