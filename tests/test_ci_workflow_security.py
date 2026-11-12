@@ -312,3 +312,17 @@ def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
         "- name: Verify dispatched PR head against GitHub", 1
     )[1].split("\n      - uses: actions/checkout", 1)[0]
     assert "steps.validate-pr-identity.outcome == 'success'" in verification_step
+
+def test_ci_policy_check_is_manual_only_and_trusted_workflow_owns_pr_events():
+    ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
+    ci_policy_job = _job_section("ai-review-policy", ci_workflow)
+    assert (
+        "if: github.event_name == 'workflow_dispatch' "
+        "&& inputs.pull_request_number != ''"
+    ) in ci_policy_job
+    assert "github.event_name == 'pull_request'" not in ci_policy_job
+    assert "github.event_name == 'pull_request_review'" not in ci_policy_job
+
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    assert "pull_request_target:" in trusted_workflow
+    assert "pull_request_review:" in trusted_workflow
