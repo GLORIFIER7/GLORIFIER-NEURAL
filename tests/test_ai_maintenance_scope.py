@@ -577,3 +577,4 @@ def test_download_artifact_v8_is_pinned_and_fails_closed_on_digest_mismatch():
     assert "\n          digest-mismatch: error\n" in f"\n{with_section}", (
         "digest-mismatch: error must be an active input under the download step's with: block."
     )
+# test marker
