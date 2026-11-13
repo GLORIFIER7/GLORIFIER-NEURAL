@@ -2,9 +2,21 @@
 
 ## Status
 
-**Adapter source: under review in GLORIFIER-NEURAL PR #67. Live Dynamo deployment: NOT VERIFIED.**
+**Adapter source: merged on main. Live GPU-backed Dynamo deployment and inference: NOT VERIFIED.**
 
 This integration makes GLORIFIER-NEURAL capable of calling an owner-operated NVIDIA Dynamo frontend. It does not install Dynamo, provision a GPU, create a Kubernetes cluster, download a model, or turn a remote endpoint into an authorized runtime.
+
+## Source implementation and CI evidence — 2026-11-11
+
+The adapter implementation is merged into the default branch:
+
+- [PR #67](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/pull/67) merged the governed OpenAI-compatible adapter.
+- [PR #71](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/pull/71) merged the HTTP/1.0 connection-close response handling needed to retain the socket while bounded response reads complete.
+- Main commit [70b6354](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/70b6354fd4bac1cb7bc825add4270b154a879998) implements wildcard-hostname rejection in either the configured API URL or the exact-origin allowlist. Regression tests for this behavior were added in [test commit 4c0f0ef](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/4c0f0ef1a895b2bee901483b6414b8db4d85f959) and expanded in [test commit 54f555d](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/54f555d78b52f746b5a5ad8ecd0b699f42210953).
+
+The current `tests/test_nvidia_dynamo_provider.py` exercises exact HTTPS-origin enforcement, wildcard rejection, redirect denial, bounded response handling, sync HTTP/1.0 connection-close behavior, and the inference/egress authorization boundary. On main commit `042c50d5d570122eeb12036c7a68865330630da7`, CI run [#42928805792](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/42928805792) passed the Python 3.11 and 3.12 test jobs, Ruff, dependency auditing, and container build. This is source and automated-test evidence only.
+
+No live NVIDIA Dynamo endpoint, GPU host, Kubernetes cluster, model catalogue, or inference request was verified by that CI run. Keep the capability **NOT VERIFIED** until the separately authorized live deployment and evidence sequence below is completed.
 
 The adapter uses the Dynamo OpenAI-compatible API:
 - `GET /v1/models` for bounded, read-only model-catalogue readiness.
