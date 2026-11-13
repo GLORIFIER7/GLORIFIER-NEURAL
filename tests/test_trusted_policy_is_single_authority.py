@@ -374,3 +374,90 @@ def test_inline_review_comment_events_trigger_policy_reevaluation():
     publisher = _job_section(trusted, "publish-dispatch-result")
     expected = "PR_NUMBER: $" + "{{ " + pr_number_expression + " }}"
     assert expected in publisher
+
+
+def test_publisher_validates_policy_head_sha_before_posting_check():
+    """Publisher must verify POLICY_HEAD_SHA equals the freshly resolved canonical
+    head before any check-runs API request (missing or mismatched => exit nonzero,
+    no check posted)."""
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
+
+    # POLICY_HEAD_SHA must be validated as a valid 40-hex string.
+    assert (
+        'bool(re.fullmatch(r"[0-9a-fA-F]{40}", policy_head_sha))'
+        in publisher
+    ), "POLICY_HEAD_SHA must be validated as a 40-hex string before use."
+    # POLICY_HEAD_SHA must equal the freshly resolved canonical head.
+    assert (
+        "policy_head_sha.casefold() == current_head_sha.casefold()"
+        in publisher
+    ), "POLICY_HEAD_SHA must equal the freshly resolved canonical head (case-insensitive)."
+    # The publisher must exit before posting a check if POLICY_HEAD_SHA is missing.
+    assert (
+        "POLICY_HEAD_SHA is missing or not a valid 40-hex SHA"
+        in publisher
+    ), "Publisher must exit nonzero if POLICY_HEAD_SHA is missing or invalid."
+    assert (
+        "does not match the current" in publisher
+    ), "Publisher must exit nonzero if POLICY_HEAD_SHA mismatches the canonical head."
+    # The check-runs POST must only be reachable after policy_head_matches is computed.
+    post_pos = publisher.index('"check-runs"')
+    head_match_pos = publisher.index("policy_head_matches")
+    assert head_match_pos < post_pos, (
+        "policy_head_matches must be computed before the check-runs POST."
+    )
+    # Success conclusion requires both policy success and matching heads.
+    assert (
+        'if policy_result == "success" and policy_head_matches'
+        in publisher
+    ), "Success conclusion requires both policy success and matching heads."
+
+
+def test_shared_head_sha_fails_closed_for_ambiguous_prs():
+    """If two open PRs share the same head SHA targeting main, the publisher must
+    fail closed without creating a check (shared-SHA scoping, per item 2 of the
+    documented fail-closed treatment)."""
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
+
+    # Must enumerate open PRs targeting main to detect shared-head ambiguity.
+    assert "pulls?state=open&base=main&per_page=100&page=" in publisher, (
+        "Publisher must enumerate open PRs targeting main to detect shared-head SHA ambiguity."
+    )
+    # Must fail closed when a sibling PR shares the head SHA.
+    assert "Shared-head ambiguity" in publisher, (
+        "Publisher must raise SystemExit for shared-head ambiguity."
+    )
+    # Must fail closed on API errors during enumeration (no check published).
+    assert "Could not enumerate open PRs for shared-head check" in publisher, (
+        "Publisher must fail closed on API errors during open-PR enumeration."
+    )
+    # The check-runs POST must not appear inside the shared-head error branch.
+    shared_head_start = publisher.index("pulls?state=open&base=main&per_page=100&page=")
+    shared_head_end = publisher.index("policy_head_matches", shared_head_start)
+    shared_head_block = publisher[shared_head_start:shared_head_end]
+    assert "check-runs" not in shared_head_block, (
+        "No check-runs POST may occur inside the shared-head ambiguity loop."
+    )
+    assert 'method="POST"' not in shared_head_block, (
+        "No POST requests may be made inside the shared-head ambiguity loop."
+    )
+
+
+def test_evaluator_and_publisher_scoped_to_main_base_for_pr_events():
+    """Both jobs must only run for PR events targeting 'main' as the base branch."""
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    policy_job = _job_section(trusted, "ai-review-policy")
+    publisher = _job_section(trusted, "publish-dispatch-result")
+
+    assert "pull_request.base.ref == 'main'" in policy_job or (
+        "github.event.pull_request.base.ref == 'main'" in trusted
+    ), "Policy evaluator job must be scoped to PRs targeting main."
+    assert "pull_request.base.ref == 'main'" in publisher or (
+        "github.event.pull_request.base.ref == 'main'" in trusted
+    ), "Publisher job must be scoped to PRs targeting main."
+    assert "github.ref == 'refs/heads/main'" in policy_job, (
+        "Policy evaluator must restrict workflow_dispatch to refs/heads/main."
+    )
+    assert "github.ref == 'refs/heads/main'" in publisher, (
+        "Publisher must restrict workflow_dispatch to refs/heads/main."
+    )

@@ -574,6 +574,8 @@ def test_copy_back_protects_trusted_policy_authority_regression_test():
     assert copy_back.index(protected_path) < copy_back.index("rsync -rlptD --delete")
 
 
+
+
 def test_manual_ci_dispatch_binds_head_sha_to_the_named_pr_before_checkout():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     test_start = ci_workflow.index("  test:")

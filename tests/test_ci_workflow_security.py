@@ -253,6 +253,8 @@ def test_matching_head_publishes_check_with_policy_result():
     )
 
 
+
+
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     policy_job = _job_section("ai-review-policy", trusted_workflow)

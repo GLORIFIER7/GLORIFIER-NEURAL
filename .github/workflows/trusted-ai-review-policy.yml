@@ -30,7 +30,11 @@ permissions:
 
 jobs:
   ai-review-policy:
-    if: ${{ github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    # Scope to main-targeting PRs for event-driven runs; restrict dispatch to main branch.
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event_name != 'workflow_dispatch' &&
+           github.event.pull_request.base.ref == 'main') }}
     name: Evaluate AI review evidence
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -122,7 +126,11 @@ jobs:
 
   publish-dispatch-result:
     name: Publish trusted policy result on PR head
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
+    # Scope to main-targeting PRs for event-driven runs; restrict dispatch to main branch.
+    if: >-
+      ${{ always() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event_name != 'workflow_dispatch' &&
+           github.event.pull_request.base.ref == 'main')) }}
     needs: [ai-review-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -250,6 +258,74 @@ jobs:
                   f"Dispatched SHA {expected_head_sha} is not in PR #{pull_number} "
                   "commit history; no policy check was published."
               )
+
+          # POLICY_HEAD_SHA validation: fail closed if the evaluator's recorded head
+          # is missing, not a valid 40-hex SHA, or does not match the freshly resolved
+          # canonical PR head. No check-runs API request is made in these cases.
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", policy_head_sha):
+              raise SystemExit(
+                  "POLICY_HEAD_SHA is missing or not a valid 40-hex SHA; "
+                  "no policy check was published to avoid attaching a result "
+                  "to a head the evaluator did not assess."
+              )
+          if policy_head_sha.casefold() != current_head_sha.casefold():
+              raise SystemExit(
+                  f"POLICY_HEAD_SHA {policy_head_sha} does not match the current "
+                  f"canonical PR head {current_head_sha}; no policy check was published."
+              )
+
+          # Shared-head ambiguity check: fail closed if any other open PR targeting
+          # main shares current_head_sha. A check run is commit-SHA scoped, so a
+          # passing result for one PR can satisfy another PR's required check.
+          for page_number in range(1, 11):
+              open_prs_url = (
+                  f"https://api.github.com/repos/{repository}/"
+                  f"pulls?state=open&base=main&per_page=100&page={page_number}"
+              )
+              open_prs_request = Request(open_prs_url, headers=api_headers)
+              try:
+                  with urlopen(open_prs_request, timeout=20) as open_prs_response:
+                      open_prs_payload = json.loads(open_prs_response.read().decode("utf-8"))
+              except urllib.error.HTTPError as exc:
+                  raise SystemExit(
+                      f"Could not enumerate open PRs for shared-head check (HTTP {exc.code}); "
+                      "no policy check was published."
+                  ) from None
+              except (urllib.error.URLError, TimeoutError, OSError):
+                  raise SystemExit(
+                      "Could not enumerate open PRs for shared-head check; "
+                      "no policy check was published."
+                  ) from None
+              except (json.JSONDecodeError, UnicodeDecodeError):
+                  raise SystemExit(
+                      "GitHub returned invalid open-PR list; no policy check was published."
+                  ) from None
+              if not isinstance(open_prs_payload, list):
+                  raise SystemExit(
+                      "GitHub returned an invalid open-PR list; no policy check was published."
+                  )
+              for sibling_pr in open_prs_payload:
+                  if not isinstance(sibling_pr, dict):
+                      raise SystemExit(
+                          "GitHub returned a malformed open-PR entry; "
+                          "no policy check was published."
+                      )
+                  sibling_number = sibling_pr.get("number")
+                  sibling_head = (sibling_pr.get("head") or {}).get("sha", "")
+                  if not isinstance(sibling_number, int) or not isinstance(sibling_head, str):
+                      raise SystemExit(
+                          "GitHub returned an open-PR entry with invalid fields; "
+                          "no policy check was published."
+                      )
+                  if str(sibling_number) != pull_number and sibling_head.casefold() == current_head_sha.casefold():
+                      raise SystemExit(
+                          f"Shared-head ambiguity: open sibling PR #{sibling_number} also "
+                          f"targets main with head {current_head_sha}. A check run is "
+                          "commit-SHA scoped and would satisfy both PRs. Resolve the "
+                          "shared-head ambiguity before publishing a policy check."
+                      )
+              if len(open_prs_payload) < 100:
+                  break
 
           policy_head_matches = (
               bool(re.fullmatch(r"[0-9a-fA-F]{40}", policy_head_sha))
