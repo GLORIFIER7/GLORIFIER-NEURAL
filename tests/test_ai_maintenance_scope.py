@@ -136,6 +136,7 @@ def test_publish_job_only_runs_when_a_validated_patch_artifact_exists():
     upload_end = codex_section.find("\n      - name:", upload_start + 1)
     upload_step = codex_section[upload_start:] if upload_end < 0 else codex_section[upload_start:upload_end]
     assert "steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success'" in upload_step
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" in upload_step
 
 
 def test_publish_job_holds_all_publication_until_after_0831_laos_time():
@@ -552,3 +553,28 @@ def test_manual_ci_dispatch_validates_pr_number_and_exact_head_before_checkout()
     assert "inputs.pull_request_head_sha" in policy_section
     assert "An exact PR head SHA is required for a dispatched policy run." in policy_section
     assert "The current PR head SHA does not match the dispatched commit." in policy_section
+
+
+
+def test_download_artifact_v8_is_pinned_and_fails_closed_on_digest_mismatch():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    publish_section = workflow[workflow.index("  publish:"):]
+    download_start = publish_section.index("- name: Download validated patch artifact")
+    download_end = publish_section.find("\n      - name:", download_start + 1)
+    download_step = (
+        publish_section[download_start:]
+        if download_end < 0
+        else publish_section[download_start:download_end]
+    )
+
+    assert (
+        "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
+        in download_step
+    )
+    with_marker = "\n        with:\n"
+    assert with_marker in download_step, "Download step is missing its explicit with: inputs."
+    with_section = download_step.split(with_marker, 1)[1]
+    assert "\n          digest-mismatch: error\n" in f"\n{with_section}", (
+        "digest-mismatch: error must be an active input under the download step's with: block."
+    )
+# test marker
