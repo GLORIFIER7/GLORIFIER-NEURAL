@@ -222,7 +222,7 @@ def test_stale_head_rejected_without_publishing_a_pr_check():
     mismatch_start = publish_job.index(
         "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
     )
-    next_step = publish_job.index("\n          policy_head_matches =", mismatch_start)
+    next_step = publish_job.index("\n          # POLICY_HEAD_SHA validation", mismatch_start)
     mismatch_branch = publish_job[mismatch_start:next_step]
 
     assert "raise SystemExit(" in mismatch_branch
@@ -250,7 +250,7 @@ def test_matching_head_publishes_check_with_policy_result():
     # Checks:write is the only write permission
     assert publish_job.count(": write") == 1, (
         "Only checks:write is permitted in the publish-dispatch-result job."
-   
+
 
 
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
