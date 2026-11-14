@@ -118,11 +118,21 @@ def test_pull_requests_read_permission_is_limited_to_trusted_policy_workflow():
 
     # Job-level permissions override workflow-level grants in GitHub Actions.
     # Job-level grants override workflow-level permissions; inspect both workflows.
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+    trusted_policy_read_only = trusted_workflow.split(
+        "\n  publish-dispatch-result:", 1
+    )[0]
     _assert_all_permission_scopes_are_read_only(ci_workflow)
-    _assert_all_permission_scopes_are_read_only(trusted_workflow)
+    _assert_all_permission_scopes_are_read_only(trusted_policy_read_only)
+    publish_writes = set(
+        re.findall(r"(?mi)^\s*([a-z0-9_-]+):\s*write\s*$", publish_job)
+    )
+    assert publish_writes == {"checks"}, (
+        "Only the isolated dispatch-result job may write the PR check status."
+    )
 
     policy_job = _job_section("ai-review-policy", trusted_workflow)
-    assert "ref: ${{ github.event.pull_request.base.sha }}" in policy_job
+    assert "ref: main" in policy_job
     assert "persist-credentials: false" in policy_job
 
 
@@ -135,8 +145,9 @@ def test_untrusted_test_job_does_not_persist_github_token():
         "actions/checkout must not persist GITHUB_TOKEN credentials"
     )
     assert "inputs.pull_request_head_sha" in test_job
-    assert "ref: ${{ github.event_name == 'workflow_dispatch'" in test_job
-    assert "pull-requests:" not in test_job
+    assert "ref: ${{ steps.current-pr.outputs.head_sha || github.sha }}" in test_job
+    assert "pull-requests: read" in test_job
+    assert "pull-requests: write" not in test_job
 
 
 def test_review_events_use_trusted_base_context_and_documented_payload():
@@ -148,9 +159,20 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
     assert {"submitted", "edited", "dismissed"} <= _event_types(
         trusted_workflow, "pull_request_review"
     )
-    assert "github.event.review.pull_request" not in policy_job
-    assert "github.event.pull_request.base.sha" in policy_job
-    assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in policy_job
+    assert "github.event.review.pull_request.number" in policy_job
+    assert "ref: main" in policy_job
+    assert "github.event.review.pull_request.base.sha" not in policy_job
+    assert "github.event.pull_request.base.sha" not in policy_job
+    pr_number_expression = (
+        "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
+        "|| (github.event_name == 'pull_request_review' && "
+        "github.event.review.pull_request.number) "
+        "|| github.event.pull_request.number"
+    )
+    assert policy_job.count(pr_number_expression) == 2
+    assert pr_number_expression in trusted_workflow.split("\nconcurrency:", 1)[1]
+    assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in policy_job
+    assert "workflow_dispatch:" in trusted_workflow
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
 
 
@@ -168,9 +190,73 @@ def test_trusted_policy_module_has_a_preflight_before_execution():
     assert policy_job.count("- name: Verify trusted policy runner") == 1
 
 
+def test_policy_enforcement_step_requires_resolver_success():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section("ai-review-policy", trusted_workflow)
+    enforce_start = policy_job.find(
+        "- name: Enforce both AI reviewer findings on the exact current PR head"
+    )
+    assert enforce_start >= 0, "Enforcement step must be present"
+    # The if: guard must appear in this step before the env: block
+    env_start = policy_job.find("env:", enforce_start)
+    guard_start = policy_job.find(
+        "if: steps.current-pr.outcome == 'success'", enforce_start
+    )
+    assert guard_start >= 0, (
+        "The enforcement step must carry 'if: steps.current-pr.outcome == \"success\"' "
+        "so a failed resolver cannot invoke the evaluator."
+    )
+    assert guard_start < env_start, (
+        "The if: guard must appear before the env: block of the enforcement step."
+    )
+    # Confirm the resolver step has the id that the guard references
+    resolver_start = policy_job.find("- name: Resolve canonical PR head SHA from GitHub")
+    assert resolver_start >= 0
+    assert "id: current-pr" in policy_job[resolver_start:enforce_start]
+
+
+def test_stale_head_rejected_without_publishing_a_pr_check():
+    """A mismatched dispatch must fail closed without creating a PR check."""
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+    mismatch_start = publish_job.index(
+        "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
+    )
+    next_step = publish_job.index("\n          # POLICY_HEAD_SHA validation", mismatch_start)
+    mismatch_branch = publish_job[mismatch_start:next_step]
+
+    assert "raise SystemExit(" in mismatch_branch
+    assert "no policy check was published" in mismatch_branch
+    assert "check-runs" not in mismatch_branch
+    assert "stale_summary" not in mismatch_branch
+    assert "stale_payload" not in mismatch_branch
+    assert "commits?per_page=100&page=" in mismatch_branch
+    assert "prior_head_found" in mismatch_branch
+    assert "urlopen(" in mismatch_branch  # Read-only PR history lookup is allowed.
+    assert 'method="POST"' not in mismatch_branch
+    assert "urlopen(stale_request" not in mismatch_branch
+
+
+def test_matching_head_publishes_check_with_policy_result():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+    assert "policy_head_matches" in publish_job
+    assert (
+        'if policy_result == "success" and policy_head_matches'
+        in publish_job
+    ), "Success can only be published when policy result is success and heads match."
+    assert '"name": "Trusted AI Review Policy"' in publish_job
+    assert "checks: write" in publish_job
+    # Checks:write is the only write permission
+    assert publish_job.count(": write") == 1, (
+        "Only checks:write is permitted in the publish-dispatch-result job."
+
+
+
 def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
     policy_job = _job_section("ai-review-policy", trusted_workflow)
+
     assert "id: current-pr" in policy_job
     assert "pulls/{pull_number}" in policy_job
     assert 'head_sha = (payload.get("head") or {}).get("sha", "")' in policy_job
@@ -178,3 +264,69 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
+
+
+def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    policy_job = _job_section("ai-review-policy", trusted_workflow)
+    publish_job = _job_section("publish-dispatch-result", trusted_workflow)
+
+    assert "outputs:" in policy_job
+    assert "pr_head_sha: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
+    assert "checks: write" in publish_job
+    assert "github.event_name == 'workflow_dispatch'" in publish_job
+    assert "needs.ai-review-policy.outputs.pr_head_sha" in publish_job
+    assert "needs.ai-review-policy.result" in publish_job
+    assert "github.ref == 'refs/heads/main'" in publish_job
+    assert "needs.ai-review-policy.outputs.pr_head_sha != ''" not in publish_job
+    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publish_job
+    assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publish_job
+    publisher_env = publish_job.split("        env:", 1)[1].split("        run: |", 1)[0]
+    assert "GITHUB_EVENT_NAME: ${{ github.event_name }}" in publisher_env
+    assert 'current_head_sha = (pr.get("head") or {}).get("sha", "")' in publish_job
+    assert "current_head_sha.casefold() != expected_head_sha.casefold()" in publish_job
+    assert "policy_head_matches" in publish_job
+    assert 'https://api.github.com/repos/{repository}/check-runs' in publish_job
+    assert '"name": "Trusted AI Review Policy"' in publish_job
+    assert '"head_sha": current_head_sha' in publish_job
+    assert '"conclusion": conclusion' in publish_job
+
+
+def test_manual_dispatch_rejects_partial_pr_identity_instead_of_skipping():
+    ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
+    test_job = _job_section("test", ci_workflow)
+    validation_step = test_job.split(
+        "- name: Validate manual dispatch PR identity", 1
+    )[1].split("\n      - name:", 1)[0]
+
+    # Either input activates validation; both are then mandatory. This keeps
+    # normal no-input dispatch available while rejecting a partial PR request.
+    assert (
+        "inputs.pull_request_number != '' || inputs.pull_request_head_sha != ''"
+        in validation_step
+    )
+    assert '[[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]' in validation_step
+    assert '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]' in validation_step
+    assert "id: validate-pr-identity" in validation_step
+    verification_step = test_job.split(
+        "- name: Verify dispatched PR head against GitHub", 1
+    )[1].split("\n      - uses: actions/checkout", 1)[0]
+    assert "steps.validate-pr-identity.outcome == 'success'" in verification_step
+
+
+
+def test_ci_policy_check_is_owned_by_trusted_workflow_only():
+    ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
+    assert "ai-review-policy" not in _job_sections(ci_workflow)
+    assert "name: AI Review Policy" not in ci_workflow
+
+    trusted_workflow = _read_workflow(TRUSTED_POLICY_WORKFLOW_PATH)
+    assert "pull_request_target:" in trusted_workflow
+    assert "pull_request_review:" in trusted_workflow
+    assert "pull_request_review_comment:" in trusted_workflow
+    assert "workflow_dispatch:" in trusted_workflow
+    assert "pull_request_head_sha:" in trusted_workflow
+    assert (
+        "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' "
+        "&& inputs.pull_request_head_sha || '' }}"
+    ) in trusted_workflow
