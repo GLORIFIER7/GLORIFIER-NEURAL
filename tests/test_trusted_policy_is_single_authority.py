@@ -162,7 +162,7 @@ def test_publisher_reports_network_errors_without_bare_exception_swallowing():
     assert "GitHub check publication failed (HTTP" in publisher
     assert "GitHub check publication is unavailable." in publisher
     assert "except Exception:" not in publisher
-    assert "pass" not in publisher
+    assert re.search(r"(?m)^[ \t]*pass(?:[ \t]*(?:#.*)?)?$", publisher) is None
 
 
 def test_generated_pr_dispatch_emits_diagnostics_for_invalid_identifiers():
@@ -401,7 +401,7 @@ def test_publisher_validates_policy_head_sha_before_posting_check():
         "does not match the current" in publisher
     ), "Publisher must exit nonzero if POLICY_HEAD_SHA mismatches the canonical head."
     # The check-runs POST must only be reachable after policy_head_matches is computed.
-    post_pos = publisher.index('"check-runs"')
+    post_pos = publisher.index('/check-runs"')
     head_match_pos = publisher.index("policy_head_matches")
     assert head_match_pos < post_pos, (
         "policy_head_matches must be computed before the check-runs POST."
@@ -442,6 +442,13 @@ def test_shared_head_sha_fails_closed_for_ambiguous_prs():
         "No POST requests may be made inside the shared-head ambiguity loop."
     )
 
+
+def test_shared_head_pagination_fails_closed_at_result_limit():
+    """A full tenth page must not publish a check with unseen sibling PRs."""
+    publisher = _job_section(_read_workflow(TRUSTED_WORKFLOW), "publish-dispatch-result")
+
+    assert "if page_number == 10 and len(open_prs_payload) == 100:" in publisher
+    assert "Open-PR pagination reached the 1,000-result safety limit" in publisher
 
 def test_evaluator_and_publisher_scoped_to_main_base_for_pr_events():
     """Both jobs must only run for PR events targeting 'main' as the base branch."""
