@@ -324,6 +324,11 @@ jobs:
                           "commit-SHA scoped and would satisfy both PRs. Resolve the "
                           "shared-head ambiguity before publishing a policy check."
                       )
+              if page_number == 10 and len(open_prs_payload) == 100:
+                  raise SystemExit(
+                      "Open-PR pagination reached the 1,000-result safety limit; "
+                      "shared-head ambiguity cannot be ruled out; no policy check was published."
+                  )
               if len(open_prs_payload) < 100:
                   break
 
