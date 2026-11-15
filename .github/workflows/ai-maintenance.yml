@@ -24,7 +24,7 @@ jobs:
       patch_ready: ${{ steps.upload_patch.outputs.artifact-id != '' && 'true' || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -58,13 +58,13 @@ jobs:
 
       - name: Set up Python
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
-        uses: actions/setup-python@v7.1.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # pinned action revision
         with:
           python-version: "3.12"
 
       - name: Set up uv
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
           version: "0.13.6"
@@ -109,7 +109,7 @@ jobs:
       - name: Run Codex maintenance agent
         id: codex
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.agent_workspace.outputs.path != '' }}
-        uses: openai/codex-action@v1.13
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           working-directory: ${{ steps.agent_workspace.outputs.path }}
@@ -205,7 +205,7 @@ jobs:
       - name: Upload validated patch for publish job
         id: upload_patch
         if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-maintenance.patch
@@ -267,14 +267,14 @@ jobs:
 
       - name: Checkout
         if: ${{ steps.time_window.outputs.allowed == 'true' }}
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Download validated patch artifact
         if: ${{ steps.time_window.outputs.allowed == 'true' }}
-        uses: actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-maintenance-artifact
