@@ -225,7 +225,7 @@ jobs:
           }
 
       - name: Authenticate to Octopus Deploy using GitHub OIDC
-        uses: OctopusDeploy/login@v2.0.3
+        uses: OctopusDeploy/login@b6156b03b4b892ffc8e9c57d098e9fe1866dcdb3 # v2
         with:
           server: ${{ env.OCTOPUS_URL }}
           service_account_id: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT_ID }}
@@ -233,7 +233,7 @@ jobs:
       - name: Create release for a database-backed Octopus project
         id: create_release_db
         if: env.OCTOPUS_CONFIG_AS_CODE != 'true'
-        uses: OctopusDeploy/create-release-action@v4.2.7
+        uses: OctopusDeploy/create-release-action@8c532ccb330c3964ea8729c35e4e232c46d1f77f # v4
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           project: ${{ env.OCTOPUS_PROJECT }}
@@ -246,7 +246,7 @@ jobs:
       - name: Create release for a Config as Code Octopus project
         id: create_release_cac
         if: env.OCTOPUS_CONFIG_AS_CODE == 'true'
-        uses: OctopusDeploy/create-release-action@v4.2.7
+        uses: OctopusDeploy/create-release-action@8c532ccb330c3964ea8729c35e4e232c46d1f77f # v4
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           project: ${{ env.OCTOPUS_PROJECT }}
@@ -260,7 +260,7 @@ jobs:
 
       - name: Deploy the created release
         id: deploy_release
-        uses: OctopusDeploy/deploy-release-action@v4.2.8
+        uses: OctopusDeploy/deploy-release-action@18537a27317fbfabc10609a34e8452184da68dd0 # v4
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           project: ${{ env.OCTOPUS_PROJECT }}
@@ -285,7 +285,7 @@ jobs:
           printf 'server_task_id=%s\n' "$task_id" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the Octopus deployment to finish
-        uses: OctopusDeploy/await-task-action@v4.0.7
+        uses: OctopusDeploy/await-task-action@2d45f7571a355fbb73e0150893d06840bbef870e # v4
         with:
           space: ${{ env.OCTOPUS_SPACE }}
           server_task_id: ${{ steps.deployment_task.outputs.server_task_id }}
