@@ -44,7 +44,7 @@ def risk_comment(head_sha=HEAD_SHA, *, risk="Low Risk", login="codeant-ai[bot]")
             "CodeAnt PR Risk\n\n"
             f"**{risk}**\n\n"
             "- The PR appears safe to merge; no actionable issues were identified in the review.\n\n"
-            f"**Assessed commit:** `{head_sha[:12]}`"
+            f"**Assessed commit:** `{head_sha}`""
         ),
         "created_at": "2026-11-15T06:03:00Z",
         "updated_at": "2026-11-15T06:03:00Z",
@@ -204,3 +204,63 @@ def test_missing_or_stale_codeant_evidence_waits_but_findings_block():
 
     assert all(_is_waiting_for_review_evidence(item) for item in waiting)
     assert not any(_is_waiting_for_review_evidence(item) for item in blockers)
+
+
+
+def test_negative_completion_label_does_not_count_as_a_review():
+    runs = [{
+        "run_id": "review-negative",
+        "label": "Not reviewed",
+        "commit": HEAD_SHA,
+        "started": "2026-11-15T06:00:00Z",
+        "finished": "2026-11-15T06:02:00Z",
+        "done": True,
+    }]
+
+    failures = evaluate_codeant_review_evidence(
+        [status_comment(runs=runs), risk_comment()],
+        HEAD_SHA,
+    )
+
+    assert any("not completed" in failure.casefold() for failure in failures)
+
+
+def test_finish_timestamp_before_start_timestamp_is_rejected():
+    runs = [{
+        "run_id": "review-time-reversed",
+        "label": "Reviewed your PR",
+        "commit": HEAD_SHA,
+        "started": "2026-11-15T06:02:00Z",
+        "finished": "2026-11-15T06:00:00Z",
+        "done": True,
+    }]
+
+    failures = evaluate_codeant_review_evidence(
+        [status_comment(runs=runs), risk_comment()],
+        HEAD_SHA,
+    )
+
+    assert failures
+
+
+def test_risk_assessment_requires_full_head_sha():
+    comments = [
+        status_comment(),
+        risk_comment(HEAD_SHA[:12]),
+    ]
+
+    failures = evaluate_codeant_review_evidence(comments, HEAD_SHA)
+
+    assert any("current head" in failure.casefold() for failure in failures)
+
+
+def test_high_risk_assessment_cannot_pass_due_to_incidental_low_risk_text():
+    risk = risk_comment(risk="High Risk")
+    risk["body"] += "\\n\\nThe previous scan was **Low Risk**."
+
+    failures = evaluate_codeant_review_evidence(
+        [status_comment(), risk],
+        HEAD_SHA,
+    )
+
+    assert any("low risk" in failure.casefold() for failure in failures)
