@@ -130,6 +130,7 @@ def test_review_event_resolves_canonical_pull_request_number():
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
         "github.event.review.pull_request.number) "
+        "|| (github.event_name == 'issue_comment' && github.event.issue.number) "
         "|| github.event.pull_request.number"
     )
     assert expression in trusted.split("\nconcurrency:", 1)[1]
@@ -151,7 +152,7 @@ def test_policy_result_is_published_on_current_pr_head_for_all_pr_event_paths():
     assert '"head_sha": current_head_sha' in publisher
     assert "policy_head_matches" in publisher
     assert 'if policy_result == "success" and policy_head_matches' in publisher
-    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publisher
+    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}" in publisher
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publisher
 
 
@@ -468,3 +469,36 @@ def test_evaluator_and_publisher_scoped_to_main_base_for_pr_events():
     assert "github.ref == 'refs/heads/main'" in publisher, (
         "Publisher must restrict workflow_dispatch to refs/heads/main."
     )
+
+
+
+def test_codeant_issue_comments_retrigger_policy_for_open_main_prs():
+    trusted = _read_workflow(TRUSTED_WORKFLOW)
+    policy = _job_section(trusted, "ai-review-policy")
+    publisher = _job_section(trusted, "publish-dispatch-result")
+
+    assert "issue_comment" in _section_keys(trusted, "on")
+    assert "types: [created, edited, deleted]" in trusted.split(
+        "  issue_comment:", 1
+    )[1].split("\\n  workflow_dispatch:", 1)[0]
+    assert "github.event.issue.pull_request != null" in policy
+    assert "github.event.comment.user.login == 'codeant-ai[bot]'" in policy
+    assert "github.event.issue.pull_request != null" in publisher
+    assert "github.event.comment.user.login == 'codeant-ai[bot]'" in publisher
+    issue_pr_number = (
+        "(github.event_name == 'issue_comment' && github.event.issue.number)"
+    )
+    assert issue_pr_number in policy
+    assert issue_pr_number in publisher
+
+    resolver = policy.split(
+        "- name: Resolve canonical PR head SHA from GitHub", 1
+    )[1].split(
+        "- name: Enforce both AI reviewer findings", 1
+    )[0]
+    assert 'base.get("ref") != "main"' in resolver
+    assert 'payload.get("state") != "open"' in resolver
+    assert "eligible=false" in resolver
+    assert "eligible=true" in resolver
+    assert "steps.current-pr.outputs.eligible == 'true'" in policy
+    assert 'pr.get("base")' in publisher
