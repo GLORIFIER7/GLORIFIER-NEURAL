@@ -26,6 +26,7 @@ concurrency:
 # Policy code is always loaded from the protected default branch (main).
 permissions:
   contents: read
+  issues: read
   pull-requests: read
 
 jobs:
