@@ -21,5 +21,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: gh extension install github/gh-actions-lock --pin 04b7a1a4d00b339dd3ff903bb4d78d4066b2bac7
-      - run: gh actions-lock --verify
+      - name: Build verifier from immutable source commit
+        run: |
+          go install github.com/github/gh-actions-lock/cmd/gh-actions-lock@04b7a1a4d00b339dd3ff903bb4d78d4066b2bac7
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: gh-actions-lock --verify
