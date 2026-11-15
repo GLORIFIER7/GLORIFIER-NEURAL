@@ -1,0 +1,242 @@
+name: Trusted AI Review Policy
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Open pull request number to evaluate."
+        required: true
+        type: string
+      pull_request_head_sha:
+        description: "Exact immutable PR head SHA to evaluate."
+        required: true
+        type: string
+
+concurrency:
+  group: trusted-ai-review-policy-${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ai-review-policy:
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
+    name: Evaluate trusted AI review evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr_head_sha: ${{ steps.current-pr.outputs.head_sha }}
+    steps:
+      - name: Check out trusted default-branch policy only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trusted-policy
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Verify trusted policy runner
+        working-directory: trusted-policy
+        env:
+          PYTHONPATH: ${{ github.workspace }}/trusted-policy
+        run: python -c "import app.ai_review_policy; print('Trusted AI review policy runner import verified')"
+      - name: Resolve canonical PR head SHA from GitHub
+        id: current-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          pull_number = os.environ["PR_NUMBER"]
+          expected_head_sha = os.environ.get("EXPECTED_PR_HEAD_SHA", "")
+          token = os.environ["GH_TOKEN"]
+
+          if not re.fullmatch(r"[1-9][0-9]*", pull_number):
+              raise SystemExit("A valid pull request number is required.")
+          if expected_head_sha and not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha):
+              raise SystemExit("An exact 40-character PR head SHA is required.")
+
+          url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}"
+          request = Request(url, headers={
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          try:
+              with urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(f"GitHub PR identity lookup failed (HTTP {exc.code}).") from None
+          except (urllib.error.URLError, TimeoutError, OSError):
+              raise SystemExit("GitHub PR identity lookup is unavailable.") from None
+          except (json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit("GitHub PR identity lookup returned invalid JSON.") from None
+
+          if not isinstance(payload, dict):
+              raise SystemExit("GitHub PR identity lookup returned an invalid response.")
+          head_sha = (payload.get("head") or {}).get("sha", "")
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
+              raise SystemExit("GitHub returned an invalid pull request head SHA.")
+          if expected_head_sha and expected_head_sha.casefold() != head_sha.casefold():
+              raise SystemExit("The dispatched PR head SHA does not match the current head.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("head_sha=" + head_sha + chr(10))
+          PY
+      - name: Enforce both AI reviewer findings on the exact current PR head
+        if: steps.current-pr.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}
+          PYTHONPATH: ${{ github.workspace }}/trusted-policy
+          AI_REVIEW_WAIT_SECONDS: "900"
+          AI_REVIEW_POLL_INTERVAL_SECONDS: "30"
+        working-directory: trusted-policy
+        run: python -m app.ai_review_policy
+
+  publish-dispatch-result:
+    name: Publish Trusted AI Review Policy check for exact PR head
+    if: always() && github.ref == 'refs/heads/main' && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
+    needs: [ai-review-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Publish policy result only to the verified current PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
+          EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
+          POLICY_HEAD_SHA: ${{ needs.ai-review-policy.outputs.pr_head_sha }}
+          POLICY_RESULT: ${{ needs.ai-review-policy.result }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          pull_number = os.environ["PR_NUMBER"]
+          token = os.environ["GH_TOKEN"]
+          expected_head_sha = os.environ.get("EXPECTED_PR_HEAD_SHA", "")
+          policy_head_sha = os.environ.get("POLICY_HEAD_SHA", "")
+          policy_result = os.environ.get("POLICY_RESULT", "failure")
+
+          if not re.fullmatch(r"[1-9][0-9]*", pull_number):
+              raise SystemExit("A valid pull request number is required; no policy check was published.")
+          if expected_head_sha and not re.fullmatch(r"[0-9a-fA-F]{40}", expected_head_sha):
+              raise SystemExit("The dispatched expected head SHA is invalid; no policy check was published.")
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          pr_url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}"
+          pr_request = Request(pr_url, headers=headers)
+          try:
+              with urlopen(pr_request, timeout=20) as response:
+                  pr = json.loads(response.read().decode("utf-8"))
+          except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit("The current PR head could not be verified; no policy check was published.") from None
+
+          current_head_sha = (pr.get("head") or {}).get("sha", "")
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
+              raise SystemExit("GitHub returned an invalid current PR head SHA; no policy check was published.")
+
+          if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():
+              prior_head_found = False
+              page = 1
+              while page <= 100:
+                  history_url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}/commits?per_page=100&page={page}"
+                  history_request = Request(history_url, headers=headers)
+                  try:
+                      with urlopen(history_request, timeout=20) as response:
+                          commits = json.loads(response.read().decode("utf-8"))
+                  except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+                      break
+                  if not isinstance(commits, list):
+                      break
+                  if any((item.get("sha") or "").casefold() == expected_head_sha.casefold() for item in commits if isinstance(item, dict)):
+                      prior_head_found = True
+                      break
+                  if len(commits) < 100:
+                      break
+                  page += 1
+              detail = "The dispatched SHA is an earlier PR commit." if prior_head_found else "The dispatched SHA is not in the current PR history."
+              raise SystemExit(f"{detail} The PR head changed during policy evaluation; no policy check was published.")
+
+          # POLICY_HEAD_SHA validation
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", policy_head_sha):
+              raise SystemExit("The trusted policy job did not provide a valid evaluated head SHA; no policy check was published.")
+          policy_head_matches = policy_head_sha.casefold() == current_head_sha.casefold()
+          if not policy_head_matches:
+              raise SystemExit("The PR head changed during policy evaluation; no policy check was published.")
+
+          if policy_result == "success" and policy_head_matches:
+              conclusion = "success"
+              summary = "The trusted AI review policy passed for the exact current pull request head."
+          else:
+              conclusion = "failure"
+              summary = f"The trusted AI review policy did not pass for the exact current pull request head (job result: {policy_result})."
+
+          check_url = f"https://api.github.com/repos/{repository}/check-runs"
+          check_payload = {
+              "name": "Trusted AI Review Policy",
+              "head_sha": current_head_sha,
+              "status": "completed",
+              "conclusion": conclusion,
+              "output": {
+                  "title": "Trusted AI review policy " + conclusion,
+                  "summary": summary,
+              },
+          }
+          check_request = Request(
+              check_url,
+              data=json.dumps(check_payload).encode("utf-8"),
+              headers={**headers, "Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              with urlopen(check_request, timeout=20) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+          except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+              raise SystemExit("GitHub rejected the exact-head policy check publication.") from None
+          if not isinstance(result, dict) or result.get("head_sha", "").casefold() != current_head_sha.casefold():
+              raise SystemExit("GitHub returned an unexpected check-run head SHA.")
+          print(f"Published {conclusion} Trusted AI Review Policy check for {current_head_sha}.")
+          PY
