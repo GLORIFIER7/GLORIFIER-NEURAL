@@ -7,6 +7,8 @@ on:
     types: [submitted, edited, dismissed]
   pull_request_review_comment:
     types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -19,7 +21,7 @@ on:
         type: string
 
 concurrency:
-  group: trusted-ai-review-policy-${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
+  group: trusted-ai-review-policy-${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
   cancel-in-progress: true
 
 # This workflow never checks out or executes pull-request head code.
@@ -31,10 +33,14 @@ permissions:
 
 jobs:
   ai-review-policy:
-    # Scope to main-targeting PRs for event-driven runs; restrict dispatch to main branch.
+    # Review events are PR-scoped; CodeAnt issue comments are resolved to the canonical open main PR below.
     if: >-
       ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'issue_comment' &&
+           github.event.issue.pull_request != null &&
+           github.event.comment.user.login == 'codeant-ai[bot]') ||
           (github.event_name != 'workflow_dispatch' &&
+           github.event_name != 'issue_comment' &&
            github.event.pull_request.base.ref == 'main') }}
     name: Evaluate AI review evidence
     runs-on: ubuntu-latest
@@ -62,7 +68,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
           EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -104,6 +110,16 @@ jobs:
               ) from None
           if not isinstance(payload, dict):
               raise SystemExit("GitHub PR identity lookup returned an invalid response.")
+          base = payload.get("base")
+          if (
+              payload.get("state") != "open"
+              or not isinstance(base, dict)
+              or base.get("ref") != "main"
+          ):
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write("eligible=false" + chr(10))
+              print("::notice::Ignoring CodeAnt comment for a closed PR or a PR not targeting main.")
+              raise SystemExit(0)
           head_sha = (payload.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
@@ -111,13 +127,14 @@ jobs:
               raise SystemExit("The current PR head SHA does not match the dispatched commit.")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("head_sha=" + head_sha + chr(10))
+              output.write("eligible=true" + chr(10))
           PY
       - name: Enforce both AI reviewer findings on the exact current PR head
-        if: steps.current-pr.outcome == 'success'
+        if: steps.current-pr.outcome == 'success' && steps.current-pr.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}
           PYTHONPATH: ${{ github.workspace }}/trusted-policy
           AI_REVIEW_WAIT_SECONDS: "900"
@@ -127,10 +144,14 @@ jobs:
 
   publish-dispatch-result:
     name: Publish trusted policy result on PR head
-    # Scope to main-targeting PRs for event-driven runs; restrict dispatch to main branch.
+    # The publisher independently confirms the live PR is open and targets main.
     if: >-
       ${{ always() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'issue_comment' &&
+           github.event.issue.pull_request != null &&
+           github.event.comment.user.login == 'codeant-ai[bot]') ||
           (github.event_name != 'workflow_dispatch' &&
+           github.event_name != 'issue_comment' &&
            github.event.pull_request.base.ref == 'main')) }}
     needs: [ai-review-policy]
     runs-on: ubuntu-latest
@@ -144,7 +165,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}
           EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}
           POLICY_HEAD_SHA: ${{ needs.ai-review-policy.outputs.pr_head_sha }}
           POLICY_RESULT: ${{ needs.ai-review-policy.result }}
@@ -195,6 +216,14 @@ jobs:
               ) from None
           if not isinstance(pr, dict):
               raise SystemExit("GitHub PR identity lookup returned an invalid response.")
+          base = pr.get("base")
+          if (
+              pr.get("state") != "open"
+              or not isinstance(base, dict)
+              or base.get("ref") != "main"
+          ):
+              print("::notice::Ignoring a closed PR or a PR not targeting main.")
+              raise SystemExit(0)
           current_head_sha = (pr.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
