@@ -250,6 +250,7 @@ def test_matching_head_publishes_check_with_policy_result():
     # Checks:write is the only write permission
     assert publish_job.count(": write") == 1, (
         "Only checks:write is permitted in the publish-dispatch-result job."
+    )
 
 
 
