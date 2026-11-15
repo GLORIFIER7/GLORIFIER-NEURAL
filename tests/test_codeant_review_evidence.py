@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 from app.ai_review_policy import (
+    _resolve_codeant_risk_sha,
     _is_waiting_for_review_evidence,
     evaluate_codeant_review_evidence,
     evaluate_reviews,
@@ -184,7 +187,11 @@ def test_actual_codeant_status_and_risk_comment_format_is_accepted():
         "updated_at": "2026-11-15T06:20:44Z",
     }
 
-    assert evaluate_codeant_review_evidence([status, risk], HEAD_SHA) == []
+    assert evaluate_codeant_review_evidence(
+        [status, risk],
+        HEAD_SHA,
+        resolved_risk_sha=HEAD_SHA,
+    ) == []
 
 
 def test_missing_or_stale_codeant_evidence_waits_but_findings_block():
@@ -243,15 +250,60 @@ def test_finish_timestamp_before_start_timestamp_is_rejected():
     assert failures
 
 
-def test_risk_assessment_requires_full_head_sha():
+def test_abbreviated_risk_assessment_requires_exact_github_resolution():
     comments = [
         status_comment(),
         risk_comment(HEAD_SHA[:12]),
     ]
 
-    failures = evaluate_codeant_review_evidence(comments, HEAD_SHA)
+    unresolved = evaluate_codeant_review_evidence(comments, HEAD_SHA)
+    resolved = evaluate_codeant_review_evidence(
+        comments,
+        HEAD_SHA,
+        resolved_risk_sha=HEAD_SHA,
+    )
+    wrong_commit = evaluate_codeant_review_evidence(
+        comments,
+        HEAD_SHA,
+        resolved_risk_sha=OTHER_SHA,
+    )
 
-    assert any("current head" in failure.casefold() for failure in failures)
+    assert any("current head" in failure.casefold() for failure in unresolved)
+    assert resolved == []
+    assert any("current head" in failure.casefold() for failure in wrong_commit)
+
+
+def test_codeant_risk_prefix_is_resolved_to_a_full_commit_sha(monkeypatch):
+    risk = risk_comment(HEAD_SHA[:12])
+    calls = []
+
+    def fake_request_json(url, token):
+        calls.append((url, token))
+        return {"sha": HEAD_SHA}
+
+    monkeypatch.setattr("app.ai_review_policy._request_json", fake_request_json)
+
+    resolved = _resolve_codeant_risk_sha(
+        "owner/repo",
+        [risk],
+        "read-only-token",
+    )
+
+    assert resolved == HEAD_SHA
+    assert calls == [
+        ("https://api.github.com/repos/owner/repo/commits/" + HEAD_SHA[:12], "read-only-token")
+    ]
+
+
+def test_codeant_risk_prefix_resolution_rejects_a_different_commit(monkeypatch):
+    risk = risk_comment(HEAD_SHA[:12])
+    monkeypatch.setattr(
+        "app.ai_review_policy._request_json",
+        lambda url, token: {"sha": OTHER_SHA},
+    )
+
+    with pytest.raises(TypeError, match="does not match the supplied prefix"):
+        _resolve_codeant_risk_sha("owner/repo", [risk], "read-only-token")
 
 
 def test_high_risk_assessment_cannot_pass_due_to_incidental_low_risk_text():
