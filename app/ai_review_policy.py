@@ -25,6 +25,19 @@ ALLOWED_REVIEW_STATES = {"APPROVED", "COMMENTED"}
 BLOCKER_PATTERN = re.compile(r"(?im)^\s*:stop_sign:\s+")
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MISSING_REVIEW_PREFIX = "Missing a formal AI review from "
+WAITING_REVIEW_PREFIXES = (
+    MISSING_REVIEW_PREFIX,
+    "Missing a completed CodeAnt review status",
+    "Missing a CodeAnt PR risk assessment",
+    "The latest CodeAnt review status does not cover the current head commit.",
+    "The latest CodeAnt review for the current head has not completed.",
+    "The CodeAnt PR risk assessment does not match the current head commit.",
+)
+
+
+def _is_waiting_for_review_evidence(failure: str) -> bool:
+    """Distinguish absent/stale reviewer evidence from an actual policy blocker."""
+    return failure.startswith(WAITING_REVIEW_PREFIXES)
 
 REVIEW_THREADS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -564,7 +577,7 @@ def main() -> int:
         blockers = [
             failure
             for failure in failures
-            if not failure.startswith(MISSING_REVIEW_PREFIX)
+            if not _is_waiting_for_review_evidence(failure)
         ]
         if blockers:
             for failure in blockers:
