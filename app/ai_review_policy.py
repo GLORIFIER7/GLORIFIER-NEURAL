@@ -510,7 +510,7 @@ def _resolve_codeant_risk_sha(
         or not resolved_sha.casefold().startswith(prefix.casefold())
     ):
         raise TypeError(
-            "GitHub commit lookup does not match the supplied CodeAnt SHA prefix."
+            "GitHub commit lookup does not match the supplied prefix."
         )
     return resolved_sha
 
