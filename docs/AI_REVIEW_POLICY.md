@@ -87,15 +87,9 @@ Verified controls:
 
 The required-status-check list currently contains only `Amazon Q Developer` (integration ID `1220912`). It does **not** contain the CI matrix checks or `Trusted AI Review Policy`. This is a live merge-protection gap: a pull request can merge without the trusted policy check being successful. PR #86 was merged even though its trusted policy check failed for missing current-head reviews.
 
-An administrator must update ruleset `27011361`, preserving its other protections and zero-bypass configuration, to require these exact check contexts from GitHub Actions (integration ID `15368`):
+At the time of this historical November 11 snapshot, the suggested administrative change was to add `test (3.11)`, `test (3.12)`, and `Trusted AI Review Policy` to ruleset `27011361`. That ruleset is no longer the active ruleset. **Do not apply or follow this historical change instruction.** Use only the November 16 current ruleset read-back above when making any settings change.
 
-1. `test (3.11)`
-2. `test (3.12)`
-3. `Trusted AI Review Policy`
-
-Retain `Amazon Q Developer` (integration ID `1220912`) only while that installed app remains an intended, active required check. Re-read the ruleset after saving and confirm the exact contexts, strict mode, and zero bypass actors. Then test a PR without either AI review and confirm the trusted check is red and merge is blocked; test a PR with both acceptable current-head reviews and no unresolved blockers and confirm the trusted check is green. Do not close the governance issue before these tests pass.
-
-The connected GitHub write interface used for this maintenance can read rulesets but does not provide a ruleset-update action. The administrator settings change therefore remains external to this PR.
+The connected GitHub write interface used for this maintenance can read rulesets but does not provide a ruleset-update action. Any current ruleset change therefore remains external to this PR.
 
 ## Diagnostic status is not a merge gate
 
