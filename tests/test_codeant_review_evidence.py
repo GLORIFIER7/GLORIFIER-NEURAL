@@ -44,7 +44,7 @@ def risk_comment(head_sha=HEAD_SHA, *, risk="Low Risk", login="codeant-ai[bot]")
             "CodeAnt PR Risk\n\n"
             f"**{risk}**\n\n"
             "- The PR appears safe to merge; no actionable issues were identified in the review.\n\n"
-            f"**Assessed commit:** `{head_sha}`""
+            f"**Assessed commit:** `{head_sha}`"
         ),
         "created_at": "2026-11-15T06:03:00Z",
         "updated_at": "2026-11-15T06:03:00Z",
@@ -178,7 +178,7 @@ def test_actual_codeant_status_and_risk_comment_format_is_accepted():
         "body": (
             "## CodeAnt PR Risk\n\n"
             "**🟢&nbsp; Low Risk**\n\n"
-            "**Assessed commit:** " + chr(96) + HEAD_SHA[:12] + chr(96)
+            "**Assessed commit:** " + chr(96) + HEAD_SHA + chr(96)
         ),
         "created_at": "2026-11-15T06:14:01Z",
         "updated_at": "2026-11-15T06:20:44Z",
@@ -246,7 +246,7 @@ def test_finish_timestamp_before_start_timestamp_is_rejected():
 def test_risk_assessment_requires_full_head_sha():
     comments = [
         status_comment(),
-        risk_comment(HEAD_SHA[:12]),
+        risk_comment(HEAD_SHA),
     ]
 
     failures = evaluate_codeant_review_evidence(comments, HEAD_SHA)
