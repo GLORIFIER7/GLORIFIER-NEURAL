@@ -99,6 +99,8 @@ jobs:
 
           if not isinstance(payload, dict):
               raise SystemExit("GitHub PR identity lookup returned an invalid response.")
+          if (payload.get("base") or {}).get("ref") != "main":
+              raise SystemExit("Trusted AI review policy only evaluates pull requests targeting main.")
           head_sha = (payload.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
               raise SystemExit("GitHub returned an invalid pull request head SHA.")
@@ -124,7 +126,7 @@ jobs:
 
   publish-dispatch-result:
     name: Publish Trusted AI Review Policy check for exact PR head
-    if: always() && github.ref == 'refs/heads/main' && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
+    if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment') && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
     needs: [ai-review-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -174,6 +176,8 @@ jobs:
           except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError):
               raise SystemExit("The current PR head could not be verified; no policy check was published.") from None
 
+          if (pr.get("base") or {}).get("ref") != "main":
+              raise SystemExit("Trusted AI review policy only publishes checks for pull requests targeting main.")
           current_head_sha = (pr.get("head") or {}).get("sha", "")
           if not re.fullmatch(r"[0-9a-fA-F]{40}", current_head_sha):
               raise SystemExit("GitHub returned an invalid current PR head SHA; no policy check was published.")
