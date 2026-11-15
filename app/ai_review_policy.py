@@ -194,6 +194,7 @@ def _parse_codeant_timestamp(value: object) -> datetime:
 def evaluate_codeant_review_evidence(
     issue_comments: list[dict],
     head_sha: str,
+    resolved_risk_sha: str | None = None,
 ) -> list[str]:
     """Require a completed CodeAnt review and Low Risk assessment on the exact PR head."""
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head_sha or ""):
@@ -302,12 +303,21 @@ def evaluate_codeant_review_evidence(
             key=lambda item: _parse_review_timestamp(item["updated_at"]),
         )
         assessed = re.search(
-            r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{40,64})[\x60]",
+            r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{12,64})[\x60]",
             latest_risk["body"],
         )
-        if assessed is None or assessed.group(1).casefold() != head_sha.casefold():
+        assessed_sha = assessed.group(1) if assessed is not None else ""
+        verified_risk_sha = (
+            assessed_sha if len(assessed_sha) >= 40 else resolved_risk_sha
+        )
+        if (
+            assessed is None
+            or not re.fullmatch(r"[0-9a-fA-F]{40,64}", verified_risk_sha or "")
+            or not verified_risk_sha.casefold().startswith(assessed_sha.casefold())
+            or verified_risk_sha.casefold() != head_sha.casefold()
+        ):
             failures.append(
-                "The CodeAnt PR risk assessment does not match the current head commit."
+                "The CodeAnt PR risk assessment does not match the exact current head commit."
             )
         else:
             risk_labels = re.findall(
@@ -328,6 +338,7 @@ def evaluate_reviews(
     threads: list[dict],
     head_sha: str,
     issue_comments: list[dict] | None = None,
+    resolved_risk_sha: str | None = None,
 ) -> list[str]:
     """Return policy failures; only current-head AI review evidence counts."""
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head_sha or ""):
@@ -392,7 +403,13 @@ def evaluate_reviews(
             )
 
     if issue_comments is not None:
-        failures.extend(evaluate_codeant_review_evidence(issue_comments, head_sha))
+        failures.extend(
+            evaluate_codeant_review_evidence(
+                issue_comments,
+                head_sha,
+                resolved_risk_sha=resolved_risk_sha,
+            )
+        )
 
     for thread in threads:
         if thread.get("isResolved") is not False:
@@ -437,6 +454,65 @@ def _request_json(url: str, token: str, payload: dict | None = None) -> object:
         code = getattr(exc, "code", None)
         detail = f"HTTP {code}" if code else type(exc).__name__
         raise RuntimeError(f"GitHub API request failed ({detail}).") from None
+
+
+def _resolve_codeant_risk_sha(
+    repo: str,
+    issue_comments: list[dict],
+    token: str,
+) -> str | None:
+    """Resolve CodeAnt's abbreviated assessed SHA through GitHub's commit API.
+
+    GitHub returns a full commit object only when the supplied abbreviation
+    resolves unambiguously. Any API error or mismatched response fails closed.
+    """
+    if not REPO_PATTERN.fullmatch(repo):
+        raise ValueError("A valid repository name is required to resolve CodeAnt evidence.")
+    if not isinstance(issue_comments, list):
+        raise TypeError("GitHub issue-comment evidence must be provided as a list.")
+
+    for item in issue_comments:
+        _validate_issue_comment(item)
+
+    risk_comments = [
+        item for item in issue_comments
+        if _normalize_login(item["user"]["login"]) == "codeant-ai[bot]"
+        and "CodeAnt PR Risk" in item["body"]
+    ]
+    if not risk_comments:
+        return None
+
+    latest_risk = max(
+        risk_comments,
+        key=lambda item: _parse_review_timestamp(item["updated_at"]),
+    )
+    assessed = re.search(
+        r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{12,64})[\x60]",
+        latest_risk["body"],
+    )
+    if assessed is None:
+        return None
+
+    prefix = assessed.group(1)
+    if len(prefix) >= 40:
+        return prefix
+
+    payload = _request_json(
+        f"{GITHUB_API_ROOT}/repos/{repo}/commits/{prefix}",
+        token,
+    )
+    if not isinstance(payload, dict):
+        raise TypeError("GitHub commit lookup returned an invalid response.")
+    resolved_sha = payload.get("sha")
+    if (
+        not isinstance(resolved_sha, str)
+        or not re.fullmatch(r"[0-9a-fA-F]{40,64}", resolved_sha)
+        or not resolved_sha.casefold().startswith(prefix.casefold())
+    ):
+        raise TypeError(
+            "GitHub commit lookup does not match the supplied CodeAnt SHA prefix."
+        )
+    return resolved_sha
 
 
 def _fetch_reviews(repo: str, pull_number: int, token: str) -> list[dict]:
@@ -573,14 +649,21 @@ def main() -> int:
             reviews = _fetch_reviews(repo, pull_number, token)
             threads = _fetch_review_threads(repo, pull_number, token)
             issue_comments = _fetch_issue_comments(repo, pull_number, token)
-        except (RuntimeError, TypeError) as exc:
+            resolved_risk_sha = _resolve_codeant_risk_sha(
+                repo, issue_comments, token
+            )
+        except (RuntimeError, TypeError, ValueError) as exc:
             message = str(exc)
             print(f"::error::{message}")
             _write_summary([message])
             return 1
 
         failures = evaluate_reviews(
-            reviews, threads, head_sha, issue_comments=issue_comments
+            reviews,
+            threads,
+            head_sha,
+            issue_comments=issue_comments,
+            resolved_risk_sha=resolved_risk_sha,
         )
         blockers = [
             failure
