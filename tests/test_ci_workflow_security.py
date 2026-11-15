@@ -167,6 +167,7 @@ def test_review_events_use_trusted_base_context_and_documented_payload():
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
         "github.event.review.pull_request.number) "
+        "|| (github.event_name == 'issue_comment' && github.event.issue.number) "
         "|| github.event.pull_request.number"
     )
     assert policy_job.count(pr_number_expression) == 2
@@ -279,7 +280,7 @@ def test_dispatched_trusted_policy_publishes_result_to_exact_pr_head():
     assert "needs.ai-review-policy.result" in publish_job
     assert "github.ref == 'refs/heads/main'" in publish_job
     assert "needs.ai-review-policy.outputs.pr_head_sha != ''" not in publish_job
-    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || github.event.pull_request.number }}" in publish_job
+    assert "PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_number || (github.event_name == 'pull_request_review' && github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number }}" in publish_job
     assert "EXPECTED_PR_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha || '' }}" in publish_job
     publisher_env = publish_job.split("        env:", 1)[1].split("        run: |", 1)[0]
     assert "GITHUB_EVENT_NAME: ${{ github.event_name }}" in publisher_env
