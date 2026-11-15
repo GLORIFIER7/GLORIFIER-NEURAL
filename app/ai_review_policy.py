@@ -146,12 +146,169 @@ def _validate_review_thread(thread: object) -> None:
             raise TypeError("GitHub GraphQL returned a review comment with an invalid commit SHA.")
 
 
+
+
+def _validate_issue_comment(item: object) -> None:
+    """Reject incomplete GitHub issue comments before trusting bot evidence."""
+    if not isinstance(item, dict):
+        raise TypeError("GitHub returned a malformed issue comment.")
+    user = item.get("user")
+    if not isinstance(user, dict) or not isinstance(user.get("login"), str) or not user["login"]:
+        raise TypeError("GitHub returned an issue comment without a valid author login.")
+    body = item.get("body")
+    if not isinstance(body, str):
+        raise TypeError("GitHub returned an issue comment without a valid body.")
+    _parse_review_timestamp(item.get("created_at"))
+    _parse_review_timestamp(item.get("updated_at"))
+
+
+def _parse_codeant_timestamp(value: object) -> datetime:
+    """Parse CodeAnt run timestamps; its machine payload labels these values UTC."""
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError("CodeAnt returned a review run without a valid timestamp.")
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise TypeError("CodeAnt returned a malformed review run timestamp.") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def evaluate_codeant_review_evidence(
+    issue_comments: list[dict],
+    head_sha: str,
+) -> list[str]:
+    """Require a completed CodeAnt review and Low Risk assessment on the exact PR head."""
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head_sha or ""):
+        return ["The pull request head SHA is missing or invalid."]
+    if not isinstance(issue_comments, list):
+        raise TypeError("GitHub issue-comment evidence must be provided as a list.")
+
+    for item in issue_comments:
+        _validate_issue_comment(item)
+
+    codeant_comments = [
+        item for item in issue_comments
+        if _normalize_login(item["user"]["login"]) == "codeant-ai[bot]"
+    ]
+    status_comments = [
+        item for item in codeant_comments
+        if "codeant-review-status:" in item["body"]
+    ]
+    risk_comments = [
+        item for item in codeant_comments
+        if "CodeAnt PR Risk" in item["body"]
+    ]
+    failures: list[str] = []
+
+    if not status_comments:
+        failures.append(
+            "Missing a completed CodeAnt review status for the current head commit."
+        )
+    else:
+        latest_status = max(
+            status_comments,
+            key=lambda item: _parse_review_timestamp(item["updated_at"]),
+        )
+        marker = re.search(
+            r"<!--\s*codeant-review-status:(.*?)\s*-->",
+            latest_status["body"],
+            flags=re.DOTALL,
+        )
+        if marker is None:
+            failures.append("CodeAnt review status has a malformed machine-readable payload.")
+        else:
+            try:
+                runs = json.loads(marker.group(1))
+                if not isinstance(runs, list) or not runs:
+                    raise TypeError("CodeAnt review status must contain a non-empty run list.")
+                normalized_runs = []
+                for run in runs:
+                    if not isinstance(run, dict):
+                        raise TypeError("CodeAnt review status contains a malformed run.")
+                    run_id = run.get("run_id")
+                    label = run.get("label")
+                    commit = run.get("commit")
+                    done = run.get("done")
+                    started = run.get("started")
+                    finished = run.get("finished")
+                    if not isinstance(run_id, str) or not run_id.strip():
+                        raise TypeError("CodeAnt review status contains a run without an ID.")
+                    if not isinstance(label, str) or not label.strip():
+                        raise TypeError("CodeAnt review status contains a run without a label.")
+                    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", commit):
+                        raise TypeError("CodeAnt review status contains an invalid commit SHA.")
+                    if not isinstance(done, bool):
+                        raise TypeError("CodeAnt review status contains an invalid completion flag.")
+                    started_at = _parse_codeant_timestamp(started)
+                    finished_at = (
+                        _parse_codeant_timestamp(finished)
+                        if finished is not None else None
+                    )
+                    normalized_runs.append(
+                        (started_at, commit, label, done, finished_at)
+                    )
+                latest_run = max(normalized_runs, key=lambda run: run[0])
+                _, reviewed_sha, label, done, finished_at = latest_run
+                if reviewed_sha.casefold() != head_sha.casefold():
+                    failures.append(
+                        "The latest CodeAnt review status does not cover the current head commit."
+                    )
+                elif (
+                    not done
+                    or finished_at is None
+                    or not (
+                        "reviewed" in label.casefold()
+                        or "review completed" in label.casefold()
+                    )
+                ):
+                    failures.append(
+                        "The latest CodeAnt review for the current head has not completed."
+                    )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                failures.append(
+                    f"CodeAnt review status is malformed and cannot be trusted: {exc}"
+                )
+
+    if not risk_comments:
+        failures.append(
+            "Missing a CodeAnt PR risk assessment for the current head commit."
+        )
+    else:
+        latest_risk = max(
+            risk_comments,
+            key=lambda item: _parse_review_timestamp(item["updated_at"]),
+        )
+        assessed = re.search(
+            r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{12,64})[\x60]",
+            latest_risk["body"],
+        )
+        if assessed is None or not head_sha.casefold().startswith(assessed.group(1).casefold()):
+            failures.append(
+                "The CodeAnt PR risk assessment does not match the current head commit."
+            )
+        elif re.search(
+            r"\*\*[^*\r\n]*\bLow\s+Risk\b[^*\r\n]*\*\*",
+            latest_risk["body"],
+            flags=re.IGNORECASE,
+        ) is None:
+            failures.append(
+                "The CodeAnt PR risk assessment is not Low Risk."
+            )
+
+    return failures
+
 def evaluate_reviews(
     reviews: list[dict],
     threads: list[dict],
     head_sha: str,
+    issue_comments: list[dict] | None = None,
 ) -> list[str]:
-    """Return policy failures; only current-head AI reviews count."""
+    """Return policy failures; only current-head AI review evidence counts."""
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head_sha or ""):
         return ["The pull request head SHA is missing or invalid."]
     if not isinstance(reviews, list) or not isinstance(threads, list):
@@ -162,7 +319,10 @@ def evaluate_reviews(
         _validate_review_thread(thread)
 
     failures: list[str] = []
-    for reviewer in AI_REVIEWERS:
+    required_formal_reviewers = (
+        AI_REVIEWERS if issue_comments is None else (AI_REVIEWERS[0],)
+    )
+    for reviewer in required_formal_reviewers:
         current_reviews = [
             item
             for item in reviews
@@ -209,6 +369,9 @@ def evaluate_reviews(
             failures.append(
                 f"{reviewer} reported an explicit blocker in its current-head review."
             )
+
+    if issue_comments is not None:
+        failures.extend(evaluate_codeant_review_evidence(issue_comments, head_sha))
 
     for thread in threads:
         if thread.get("isResolved") is not False:
@@ -272,6 +435,28 @@ def _fetch_reviews(repo: str, pull_number: int, token: str) -> list[dict]:
         if len(payload) < 100:
             return result
         page += 1
+
+
+
+def _fetch_issue_comments(repo: str, pull_number: int, token: str) -> list[dict]:
+    """Fetch all PR issue comments used for authenticated CodeAnt status evidence."""
+    result: list[dict] = []
+    page = 1
+    while True:
+        url = (
+            f"{GITHUB_API_ROOT}/repos/{repo}/issues/{pull_number}/comments"
+            f"?per_page=100&page={page}"
+        )
+        payload = _request_json(url, token)
+        if not isinstance(payload, list):
+            raise TypeError("GitHub API returned an invalid pull request issue-comments response.")
+        for item in payload:
+            _validate_issue_comment(item)
+        result.extend(payload)
+        if len(payload) < 100:
+            return result
+        page += 1
+
 
 
 def _fetch_review_threads(repo: str, pull_number: int, token: str) -> list[dict]:
@@ -366,13 +551,16 @@ def main() -> int:
         try:
             reviews = _fetch_reviews(repo, pull_number, token)
             threads = _fetch_review_threads(repo, pull_number, token)
+            issue_comments = _fetch_issue_comments(repo, pull_number, token)
         except (RuntimeError, TypeError) as exc:
             message = str(exc)
             print(f"::error::{message}")
             _write_summary([message])
             return 1
 
-        failures = evaluate_reviews(reviews, threads, head_sha)
+        failures = evaluate_reviews(
+            reviews, threads, head_sha, issue_comments=issue_comments
+        )
         blockers = [
             failure
             for failure in failures
@@ -386,8 +574,8 @@ def main() -> int:
 
         if not failures:
             message = (
-                "Policy passed: Amazon Q Developer and CodeAnt AI each submitted a formal "
-                "review for the current head commit, and no unresolved AI blocker remains."
+                "Policy passed: Amazon Q submitted a formal current-head review; CodeAnt "
+                "completed a current-head review with Low Risk; no unresolved AI blocker remains."
             )
             print(message)
             _write_summary([message])
