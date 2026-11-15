@@ -262,6 +262,10 @@ def evaluate_codeant_review_evidence(
                         _parse_codeant_timestamp(finished)
                         if finished is not None else None
                     )
+                    if finished_at is not None and finished_at < started_at:
+                        raise TypeError(
+                            "CodeAnt review status contains a finish timestamp before its start timestamp."
+                        )
                     normalized_runs.append(
                         (started_at, commit, label, done, finished_at)
                     )
@@ -274,10 +278,11 @@ def evaluate_codeant_review_evidence(
                 elif (
                     not done
                     or finished_at is None
-                    or not (
-                        "reviewed" in label.casefold()
-                        or "review completed" in label.casefold()
-                    )
+                    or label.strip().casefold() not in {
+                        "reviewed your pr",
+                        "review completed",
+                        "incremental review completed",
+                    }
                 ):
                     failures.append(
                         "The latest CodeAnt review for the current head has not completed."
@@ -297,21 +302,24 @@ def evaluate_codeant_review_evidence(
             key=lambda item: _parse_review_timestamp(item["updated_at"]),
         )
         assessed = re.search(
-            r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{12,64})[\x60]",
+            r"(?im)^\s*\*\*Assessed commit:\*\*\s*[\x60]([0-9a-fA-F]{40,64})[\x60]",
             latest_risk["body"],
         )
-        if assessed is None or not head_sha.casefold().startswith(assessed.group(1).casefold()):
+        if assessed is None or assessed.group(1).casefold() != head_sha.casefold():
             failures.append(
                 "The CodeAnt PR risk assessment does not match the current head commit."
             )
-        elif re.search(
-            r"\*\*[^*\r\n]*\bLow\s+Risk\b[^*\r\n]*\*\*",
-            latest_risk["body"],
-            flags=re.IGNORECASE,
-        ) is None:
-            failures.append(
-                "The CodeAnt PR risk assessment is not Low Risk."
+        else:
+            risk_labels = re.findall(
+                r"(?im)^\s*\*\*(?:[^*\r\n]*&nbsp;\s*)?"
+                r"(Low Risk|Moderate Risk|Medium Risk|High Risk|Critical Risk)"
+                r"\s*\*\*\s*$",
+                latest_risk["body"],
             )
+            if len(risk_labels) != 1 or risk_labels[0].casefold() != "low risk":
+                failures.append(
+                    "The CodeAnt PR risk assessment is not an unambiguous Low Risk result."
+                )
 
     return failures
 
