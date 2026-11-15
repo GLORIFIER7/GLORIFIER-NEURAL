@@ -368,7 +368,7 @@ def test_inline_review_comment_events_trigger_policy_reevaluation():
     pr_number_expression = (
         "github.event_name == 'workflow_dispatch' && inputs.pull_request_number "
         "|| (github.event_name == 'pull_request_review' && "
-        "github.event.review.pull_request.number) || github.event.pull_request.number"
+        "github.event.review.pull_request.number) || (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.pull_request.number"
     )
     concurrency = trusted.split("concurrency:", 1)[1].split("permissions:", 1)[0]
     assert pr_number_expression in concurrency
