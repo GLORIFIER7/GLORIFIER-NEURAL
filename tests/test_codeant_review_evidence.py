@@ -1,6 +1,10 @@
 import json
 
-from app.ai_review_policy import evaluate_codeant_review_evidence, evaluate_reviews
+from app.ai_review_policy import (
+    _is_waiting_for_review_evidence,
+    evaluate_codeant_review_evidence,
+    evaluate_reviews,
+)
 
 
 HEAD_SHA = "a" * 40
@@ -146,3 +150,57 @@ def test_review_policy_accepts_codeant_comment_evidence_without_formal_review_ob
         HEAD_SHA,
         issue_comments=comments,
     ) == []
+
+
+def test_actual_codeant_status_and_risk_comment_format_is_accepted():
+    run = {
+        "run_id": "e22da4662759",
+        "label": "Reviewed your PR",
+        "commit": HEAD_SHA,
+        "started": "2026-11-15T06:18:10.876763",
+        "finished": "2026-11-15T06:20:33.802414",
+        "done": True,
+    }
+    status = {
+        "user": {"login": "codeant-ai[bot]"},
+        "body": (
+            "## CodeAnt Review Status\n\n"
+            "**✅ Review completed**\n\n"
+            "<!-- codeant-review-status:"
+            + json.dumps([run], separators=(",", ":"))
+            + " -->"
+        ),
+        "created_at": "2026-11-15T06:09:05Z",
+        "updated_at": "2026-11-15T06:20:34Z",
+    }
+    risk = {
+        "user": {"login": "codeant-ai[bot]"},
+        "body": (
+            "## CodeAnt PR Risk\n\n"
+            "**🟢&nbsp; Low Risk**\n\n"
+            "**Assessed commit:** " + chr(96) + HEAD_SHA[:12] + chr(96)
+        ),
+        "created_at": "2026-11-15T06:14:01Z",
+        "updated_at": "2026-11-15T06:20:44Z",
+    }
+
+    assert evaluate_codeant_review_evidence([status, risk], HEAD_SHA) == []
+
+
+def test_missing_or_stale_codeant_evidence_waits_but_findings_block():
+    waiting = [
+        "Missing a completed CodeAnt review status for the current head commit.",
+        "Missing a CodeAnt PR risk assessment for the current head commit.",
+        "The latest CodeAnt review status does not cover the current head commit.",
+        "The latest CodeAnt review for the current head has not completed.",
+        "The CodeAnt PR risk assessment does not match the current head commit.",
+        "Missing a formal AI review from codeant-ai[bot] on the current head commit.",
+    ]
+    blockers = [
+        "CodeAnt review status is malformed and cannot be trusted.",
+        "The CodeAnt PR risk assessment is not Low Risk.",
+        "Unresolved AI blocker from codeant-ai[bot].",
+    ]
+
+    assert all(_is_waiting_for_review_evidence(item) for item in waiting)
+    assert not any(_is_waiting_for_review_evidence(item) for item in blockers)
