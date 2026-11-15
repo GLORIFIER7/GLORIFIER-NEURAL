@@ -252,7 +252,7 @@ def test_workflow_dispatch_provides_manual_reevaluation_fallback():
     mismatch_start = publisher.index(
         "if expected_head_sha and current_head_sha.casefold() != expected_head_sha.casefold():"
     )
-    next_step = publisher.index("\n          policy_head_matches =", mismatch_start)
+    next_step = publisher.index("\n\n          # POLICY_HEAD_SHA validation", mismatch_start)
     mismatch_branch = publisher[mismatch_start:next_step]
     assert "raise SystemExit(" in mismatch_branch
     assert "check-runs" not in mismatch_branch
