@@ -246,7 +246,7 @@ def test_finish_timestamp_before_start_timestamp_is_rejected():
 def test_risk_assessment_requires_full_head_sha():
     comments = [
         status_comment(),
-        risk_comment(HEAD_SHA),
+        risk_comment(HEAD_SHA[:12]),
     ]
 
     failures = evaluate_codeant_review_evidence(comments, HEAD_SHA)
