@@ -118,7 +118,7 @@ def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_read
     assert "no required status-check rule is configured" in document.casefold()
     assert "current_user_can_bypass: always" in document
     assert "27086549" in document
-    assert "no `codeowners` file" in document.casefold()
+    assert "no codeowners file" in document.casefold()
     assert "code-owner coverage is not verified" in document.casefold()
 
 
@@ -131,7 +131,7 @@ def test_lockfile_verifier_job_has_a_bounded_timeout():
 def test_production_readiness_runbook_matches_current_ruleset_and_safe_mode():
     document = _read(Path(__file__).resolve().parents[1] / "docs" / "PRODUCTION_READINESS.md")
 
-    assert "NEURAL ruleset 27086549" in document
+    assert "NEURAL main-branch ruleset 27086549" in document
     assert "test (3.11)" in document
     assert "test (3.12)" in document
     assert "signed commits" in document.casefold()
