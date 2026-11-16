@@ -178,3 +178,12 @@ def test_policy_job_uses_canonical_pull_request_head_from_github_api():
     assert 'output.write("head_sha=" + head_sha + chr(10))' in policy_job
     assert "PR_HEAD_SHA: ${{ steps.current-pr.outputs.head_sha }}" in policy_job
     assert "github.event.pull_request.head.sha" not in policy_job
+
+
+
+def test_dependency_audit_targets_the_locked_export_not_the_editable_project():
+    ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
+    test_job = _job_section("test", ci_workflow)
+    audit_step = test_job.split("- name: Audit Python dependencies", 1)[1].split("- name:", 1)[0]
+    assert "pip-audit -r /tmp/requirements.txt" in audit_step
+    assert not re.search(r"(?m)^\\s*pip-audit\\s*$", audit_step)
