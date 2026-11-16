@@ -327,7 +327,7 @@ jobs:
             --title "AI Maintenance: NEURAL reliability proposal" \
             --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. Trusted CI tests the exact PR head and runs the current-head AI review policy. This workflow never enables auto-merge."
 
-      - name: Dispatch trusted CI and AI review for the exact PR head
+      - name: Dispatch CI for the exact PR head
         if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
