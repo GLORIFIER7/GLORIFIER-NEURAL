@@ -107,7 +107,7 @@ def test_disposable_postgres_service_image_is_pinned_by_digest():
         "image: postgres:16@sha256:"
         "63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9"
     ) in workflow
-    assert "image: postgres:16\\n" not in workflow
+    assert "image: postgres:16\n" not in workflow
 
 
 def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_readback():
@@ -118,6 +118,38 @@ def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_read
     assert "no required status-check rule is configured" in document.casefold()
     assert "current_user_can_bypass: always" in document
     assert "27086549" in document
+    assert "no `codeowners` file" in document.casefold()
+    assert "code-owner coverage is not verified" in document.casefold()
+
+
+def test_lockfile_verifier_job_has_a_bounded_timeout():
+    workflow = _read(WORKFLOWS / "verify-lockfile.yml")
+
+    assert "  verify:\n    runs-on: ubuntu-latest\n    timeout-minutes: 10" in workflow
+
+
+def test_production_readiness_runbook_matches_current_ruleset_and_safe_mode():
+    document = _read(Path(__file__).resolve().parents[1] / "docs" / "PRODUCTION_READINESS.md")
+
+    assert "NEURAL ruleset 27086549" in document
+    assert "test (3.11)" in document
+    assert "test (3.12)" in document
+    assert "signed commits" in document.casefold()
+    assert "AI Review Policy" in document
+    assert "advisory only" in document.casefold()
+    assert "GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=false" in document
+    assert "GLORIFIER_ENABLE_INFERENCE=false" in document
+    assert "GLORIFIER_PAID_INFERENCE_AUTHORIZED=false" in document
+    assert "code-owner coverage is NOT VERIFIED" in document
+
+
+def test_postgres_service_digest_has_a_documented_manual_refresh_process():
+    document = _read(Path(__file__).resolve().parents[1] / "docs" / "PRODUCTION_READINESS.md")
+
+    assert "Disposable PostgreSQL image digest" in document
+    assert "database-integration.yml" in document
+    assert "test_ci_workflow_security.py" in document
+    assert "63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9" in document
 
 
 def test_codeql_actions_use_the_verified_release_pin():
