@@ -108,3 +108,13 @@ def test_disposable_postgres_service_image_is_pinned_by_digest():
         "63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9"
     ) in workflow
     assert "image: postgres:16\\n" not in workflow
+
+
+def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_readback():
+    document = _read(Path(__file__).resolve().parents[1] / "docs" / "AI_REVIEW_POLICY.md")
+
+    assert "advisory only" in document.casefold()
+    assert "former blocking" in document.casefold()
+    assert "no required status checks are configured" in document.casefold()
+    assert "current_user_can_bypass: always" in document
+    assert "27086549" in document
