@@ -54,14 +54,45 @@ def test_untrusted_ci_test_job_has_read_only_permissions_and_immutable_dispatch(
     workflow = _read(CI_WORKFLOW_PATH)
     jobs = _job_sections(workflow)
 
-    assert "test" in jobs
+    top_level_permissions = re.search(
+        r"(?ms)^permissions:\\n((?:^  [a-z-]+: (?:read|write)\\n)+)",
+        workflow,
+    )
+    assert top_level_permissions, "Workflow-level permissions must be explicit"
+    assert set(
+        re.findall(r"(?m)^  ([a-z-]+): (read|write)$", top_level_permissions.group(1))
+    ) == {("contents", "read")}
+
+    assert set(jobs) == {"test", "publish-container"}
+    job_permissions = {}
+    for job_name, job in jobs.items():
+        permissions = re.search(
+            r"(?ms)^    permissions:\\n((?:^      [a-z-]+: (?:read|write)\\n)+)",
+            job,
+        )
+        if permissions:
+            job_permissions[job_name] = set(
+                re.findall(r"(?m)^      ([a-z-]+): (read|write)$", permissions.group(1))
+            )
+
+    assert job_permissions == {
+        "test": {("contents", "read")},
+        "publish-container": {("contents", "read"), ("packages", "write")},
+    }
+    assert "write-all" not in workflow
+
     test_job = jobs["test"]
-    assert "contents: read" in test_job
-    assert "contents: write" not in test_job
-    assert "packages: write" not in test_job
     assert "persist-credentials: false" in test_job
     assert "inputs.pull_request_head_sha" in test_job
     assert "inputs.pull_request_number" in test_job
+
+
+def test_production_readiness_names_the_existing_cloudflare_deployment_workflow():
+    document = _read(Path(__file__).resolve().parents[1] / "docs" / "PRODUCTION_READINESS.md")
+
+    assert ".github/workflows/cloudflare-neural-worker.yml" in document
+    assert ".github/workflows/neural-cloudflare-worker.yml" not in document
+    assert (WORKFLOWS / "cloudflare-neural-worker.yml").is_file()
 
 
 def test_container_publisher_is_main_push_only_and_waits_for_tests():
