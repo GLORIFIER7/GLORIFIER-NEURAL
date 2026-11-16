@@ -16,9 +16,11 @@ def _read(path: Path) -> str:
 
 
 def _job_sections(workflow: str) -> dict[str, str]:
+    jobs_match = re.search(r"(?ms)^jobs:\n(.*)\Z", workflow)
+    assert jobs_match, "Workflow must define a jobs section"
     matches = re.finditer(
         r"(?ms)^  ([a-z0-9_-]+):\n(.*?)(?=^  [a-z0-9_-]+:\n|\Z)",
-        workflow,
+        jobs_match.group(1),
     )
     return {match.group(1): match.group(2) for match in matches}
 
