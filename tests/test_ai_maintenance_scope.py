@@ -134,6 +134,17 @@ def test_publish_job_only_runs_when_a_validated_patch_artifact_exists():
     upload_end = codex_section.find("\n      - name:", upload_start + 1)
     upload_step = codex_section[upload_start:] if upload_end < 0 else codex_section[upload_start:upload_end]
     assert "steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success'" in upload_step
+    assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" in upload_step
+
+    download_start = publish_section.index("- name: Download validated patch artifact")
+    download_end = publish_section.find("\\n      - name:", download_start + 1)
+    download_step = (
+        publish_section[download_start:]
+        if download_end < 0
+        else publish_section[download_start:download_end]
+    )
+    assert "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333" in download_step
+    assert "digest-mismatch: error" in download_step
 
 
 def test_publish_job_holds_all_publication_until_after_0831_laos_time():
