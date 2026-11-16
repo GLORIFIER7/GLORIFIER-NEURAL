@@ -378,7 +378,11 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_without_formal_policy():
         if dispatch_end < 0
         else maintenance_workflow[dispatch_start:dispatch_end]
     )
-    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq '.headRefOid')"' in dispatch_step
+    expected_head_lookup = (
+        'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq '
+        "'.headRefOid')\""
+    )
+    assert expected_head_lookup in dispatch_step
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert "gh workflow run ci.yml --ref main" in dispatch_step
     assert '--ref "$PR_BRANCH"' not in dispatch_step
