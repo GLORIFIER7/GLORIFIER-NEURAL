@@ -2,9 +2,20 @@
 
 ## Status
 
-**Adapter source: under review in GLORIFIER-NEURAL PR #67. Live Dynamo deployment: NOT VERIFIED.**
+**Adapter source: merged on main. Live GPU-backed Dynamo deployment and inference: NOT VERIFIED.**
 
 This integration makes GLORIFIER-NEURAL capable of calling an owner-operated NVIDIA Dynamo frontend. It does not install Dynamo, provision a GPU, create a Kubernetes cluster, download a model, or turn a remote endpoint into an authorized runtime.
+
+## Source implementation and CI evidence — 2026-11-11
+
+The adapter implementation is merged into the default branch:
+
+- [PR #67](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/pull/67) merged the governed OpenAI-compatible adapter on 2026-11-07.
+- [PR #71](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/pull/71) merged the HTTP/1.0 connection-close response handling on 2026-11-08.
+- Main commit [70b6354](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/70b6354fd4bac1cb7bc825add4270b154a879998) implements wildcard-hostname rejection in the configured API URL and exact-origin allowlist. Regression coverage appears in [test commit 4c0f0ef](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/4c0f0ef1a895b2bee901483b6414b8db4d85f959) and [test commit 54f555d](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/commit/54f555d78b52f746b5a5ad8ecd0b699f42210953).
+- CI run [#42928805792](https://github.com/GLORIFIER7/GLORIFIER-NEURAL/actions/runs/42928805792) passed Python 3.11/3.12 tests, Ruff, dependency auditing, and the container build on exact main commit `042c50d5d570122eeb12036c7a68865330630da7` (2026-11-11).
+
+This is source and automated-test evidence only. No live NVIDIA Dynamo endpoint, GPU host, Kubernetes cluster, model catalogue, or inference request was verified by that CI run. Keep the capability **NOT VERIFIED** until the separately authorized live deployment and evidence sequence below is completed.
 
 The adapter uses the Dynamo OpenAI-compatible API:
 - `GET /v1/models` for bounded, read-only model-catalogue readiness.
