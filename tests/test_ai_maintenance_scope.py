@@ -10,8 +10,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ai-maintenance.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-TRUSTED_REVIEW_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
-TRUSTED_POLICY_WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ai-review-policy.yml"
 VALIDATOR = ROOT / "scripts" / "validate_ai_maintenance_scope.py"
 
 
@@ -336,25 +334,20 @@ def test_workflow_publish_job_has_minimal_write_permissions():
     assert "actions: write" in publish_section
 
 
-def test_ci_workflow_dispatch_tests_exact_head_and_trusted_review_is_event_driven():
+def test_ci_workflow_dispatch_tests_exact_head_without_formal_review_enforcement():
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    trusted_review = TRUSTED_REVIEW_WORKFLOW.read_text(encoding="utf-8")
 
     assert "pull_request_head_sha:" in workflow
     assert "inputs.pull_request_head_sha" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
     assert "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pull_request_head_sha != '' && inputs.pull_request_head_sha || github.sha }}" in workflow
+    assert "ai-review-policy:" not in workflow
+    assert "pull_request_review:" not in workflow
+    assert not (CI_WORKFLOW.parent / "trusted-ai-review-policy.yml").exists()
 
-    # Draft PR creation emits pull_request_target(opened); review events re-run
-    # the trusted policy. No untrusted CI workflow should execute reviewer policy.
-    assert "pull_request_target:" in trusted_review
-    assert "pull_request_review:" in trusted_review
-    assert "ai-review-policy:" in trusted_review
-    assert "github.event.pull_request.base.sha" in trusted_review
-    assert "Enforce both AI reviewer findings on the exact current PR head" in trusted_review
-def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_pr_events():
+
+def test_ci_dispatch_uses_the_exact_current_pr_head_without_formal_policy():
     ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    policy_workflow = TRUSTED_POLICY_WORKFLOW.read_text(encoding="utf-8")
     maintenance_workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "pull_request_number:" in ci_workflow
@@ -362,13 +355,11 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
     assert "inputs.pull_request_head_sha" in ci_workflow
     assert "inputs.pull_request_number" in ci_workflow
     assert "workflow_dispatch" in ci_workflow
-    assert "pull_request_target:" in policy_workflow
-    assert "pull_request_review:" in policy_workflow
-    assert "github.event.pull_request.number" in policy_workflow
-    assert "steps.current-pr.outputs.head_sha" in policy_workflow
+    assert "ai-review-policy:" not in ci_workflow
+    assert "pull_request_review:" not in ci_workflow
 
     dispatch_start = maintenance_workflow.index(
-        "- name: Dispatch trusted CI and AI review for the exact PR head"
+        "- name: Dispatch CI for the exact PR head"
     )
     dispatch_end = maintenance_workflow.find("\n      - name:", dispatch_start + 1)
     dispatch_step = (
@@ -376,16 +367,15 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_and_trusted_policy_runs_on_p
         if dispatch_end < 0
         else maintenance_workflow[dispatch_start:dispatch_end]
     )
-    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq \'.headRefOid\')"' in dispatch_step
+    assert "headRefOid" in dispatch_step
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
-    assert 'gh workflow run ci.yml --ref main \\' in dispatch_step
+    assert "gh workflow run ci.yml --ref main" in dispatch_step
     assert '--ref "$PR_BRANCH"' not in dispatch_step
     assert dispatch_step.count('--field pull_request_head_sha="$pr_head_sha"') == 1
-    assert 'pr_number="$(gh pr view "$PR_BRANCH" --json number --jq \'.number\')"' in dispatch_step
     assert dispatch_step.count('--field pull_request_number="$pr_number"') == 1
 
 
-def test_publish_job_dispatches_trusted_ci_after_creating_a_draft_pr():
+def test_publish_job_dispatches_ci_after_creating_a_draft_pr():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     publish_section = workflow[workflow.index("  publish:"):]
 
