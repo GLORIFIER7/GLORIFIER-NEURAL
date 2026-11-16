@@ -115,6 +115,6 @@ def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_read
 
     assert "advisory only" in document.casefold()
     assert "former blocking" in document.casefold()
-    assert "no required status checks are configured" in document.casefold()
+    assert "no required status-check rule is configured" in document.casefold()
     assert "current_user_can_bypass: always" in document
     assert "27086549" in document
