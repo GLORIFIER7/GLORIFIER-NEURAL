@@ -118,3 +118,17 @@ def test_ai_review_document_matches_advisory_only_workflow_and_live_ruleset_read
     assert "no required status-check rule is configured" in document.casefold()
     assert "current_user_can_bypass: always" in document
     assert "27086549" in document
+
+
+def test_codeql_actions_use_the_verified_release_pin():
+    workflow = _read(WORKFLOWS / "codeql.yml")
+    lockfile = _read(WORKFLOWS / "actions.lock")
+
+    assert workflow.count(
+        "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3"
+    ) == 1
+    assert workflow.count(
+        "github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3"
+    ) == 1
+    assert "'github/codeql-action@33d7b85da1a04171e211befe2c739303b9a4c066'" in lockfile
+    assert "'github/codeql-action@v4.39.3'" in lockfile
