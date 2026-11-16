@@ -185,5 +185,9 @@ def test_dependency_audit_targets_the_locked_export_not_the_editable_project():
     ci_workflow = _read_workflow(CI_WORKFLOW_PATH)
     test_job = _job_section("test", ci_workflow)
     audit_step = test_job.split("- name: Audit Python dependencies", 1)[1].split("- name:", 1)[0]
-    assert "pip-audit -r /tmp/requirements.txt" in audit_step
-    assert not re.search(r"(?m)^\s*pip-audit\s*$", audit_step)
+    assert "uvx --from pip-audit==2.9.0 pip-audit -r /tmp/requirements.txt" in audit_step
+    editable_install = next(
+        line for line in test_job.splitlines()
+        if "pip install" in line and "-e ." in line
+    )
+    assert "--no-build-isolation" not in editable_install
