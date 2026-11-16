@@ -137,7 +137,7 @@ def test_publish_job_only_runs_when_a_validated_patch_artifact_exists():
     assert "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" in upload_step
 
     download_start = publish_section.index("- name: Download validated patch artifact")
-    download_end = publish_section.find("\\n      - name:", download_start + 1)
+    download_end = publish_section.find("\n      - name:", download_start + 1)
     download_step = (
         publish_section[download_start:]
         if download_end < 0
@@ -378,7 +378,7 @@ def test_ci_dispatch_uses_the_exact_current_pr_head_without_formal_policy():
         if dispatch_end < 0
         else maintenance_workflow[dispatch_start:dispatch_end]
     )
-    assert "headRefOid" in dispatch_step
+    assert 'pr_head_sha="$(gh pr view "$PR_BRANCH" --json headRefOid --jq '.headRefOid')"' in dispatch_step
     assert '[[ "$pr_head_sha" =~ ^[0-9a-fA-F]{40}$ ]]' in dispatch_step
     assert "gh workflow run ci.yml --ref main" in dispatch_step
     assert '--ref "$PR_BRANCH"' not in dispatch_step
