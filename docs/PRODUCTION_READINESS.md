@@ -166,13 +166,13 @@ Audit writes use the Cloudflare Fetch API and fail closed when explicitly enable
 
 Optional audit and task-run integrations report their configuration state separately. Their write paths are not tested by readiness. A post-execution persistence failure is returned as a degraded evidence marker alongside the completed task outcome, not as a retryable HTTP 503.
 
-The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The latest production smoke on 2026-11-05 followed branch (a): `/ready` returned HTTP 200 with `status: READY`. The 2026-11-04 HTTP 503 result above is historical only. A later direct Cloudflare settings read-back confirmed that the production inference flag is now `true`; the smoke still performed no inference. An HTTP 503 is a fail-closed non-ready/safe-mode result, not the expected current response while the selected provider readiness probe succeeds.
+The post-deploy smoke job requires HTTP 200 from `/health` and accepts either (a) HTTP 200 from `/ready` when the selected provider, database, authentication, and rate-limit checks pass, or (b) the strict provider-disabled safe-mode HTTP 503 response when database, authentication, and rate-limit checks pass and `inference_performed=false`. It performs no inference and does not incur a model completion request. The 2026-11-05 HTTP 200 /ready result and its configuration snapshot are historical only. They are superseded by the read-only 2026-11-16 configuration snapshot below: external egress, inference, and paid-inference authorization are all false. No prompt was submitted. Treat any subsequent readiness result as unverified until a fresh probe is recorded.
 
 ## Rate limiting
 
 The Worker uses the Cloudflare-native `GLORIFIER_RATE_LIMITER` binding with a configured limit of 60 requests per 60-second window. Its HMAC-SHA-256 key is derived from the bearer token plus the normalized client identity (`CF-Connecting-IP` on Workers, or the client host locally), so separate clients using the same token receive separate buckets. Cloudflare's native Workers rate-limit counters are approximate and per-location, not a strict global quota. Do not represent this as globally exact enforcement.
 
-## Current production observation — 2026-11-05 (UTC+07:00)
+## Historical production observation — 2026-11-05 (UTC+07:00; superseded 2026-11-16)
 
 Direct Cloudflare configuration inventory was read at approximately 16:28 local time. The latest deployment inventory returned:
 
@@ -184,13 +184,47 @@ Direct Cloudflare configuration inventory was read at approximately 16:28 local 
 - That smoke response reported `inference_performed=false`. No prompt was submitted and no model inference was executed.
 - Audit and task-run persistence remain `NOT CONFIGURED (OPTIONAL)`; no optional persistence write was tested.
 
-Conclusion: Cloudflare deployment and the configured read-only production readiness checks are **VERIFIED**. The production inference flag and external-egress consent are configured `true`, but live inference, inference quality, end-to-end task execution, optional audit/task-run writes, and externally verified economic outcomes remain **NOT VERIFIED**. Do not infer successful model execution from a successful readiness probe.
+Historical conclusion as of 2026-11-05 only: Cloudflare deployment and the configured read-only production readiness checks were reported VERIFIED at that observation time. This is not the current configuration state; see the superseding 2026-11-16 observation below.
+## Current production observation — 2026-11-16
+
+Read-only Cloudflare Worker settings were retrieved between 2026-11-16T06:26:29Z and 2026-11-16T06:27:45Z (UTC). This is configuration evidence only; it does not establish a successful provider request or task execution.
+
+### NEURAL Worker configuration
+
+The glorifier-neural Worker reported these plain-text variables:
+
+- GLORIFIER_PROVIDER=openai
+- GLORIFIER_NEON_CONNECTIVITY_ENABLED=true
+- GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=false
+- GLORIFIER_ENABLE_INFERENCE=false
+- GLORIFIER_PAID_INFERENCE_AUTHORIZED=false
+
+The secret-binding inventory included GLORIFIER_API_TOKEN, GLORIFIER_INTERNAL_SERVICE_TOKEN, NVIDIA_NIM_API_KEY, and OPENAI_API_KEY. Only binding names were inspected; secret values were not read.
+
+### Observability privacy configuration
+
+A read-only script-settings read between 2026-11-16T06:27:42Z and 2026-11-16T06:27:45Z reported observability.redact_query_string=false for both glorifier and glorifier-neural. Their persisted logs and traces therefore do not yet have query-string redaction enabled at the Worker-settings layer. Main GLORIFIER PR #894 adds redact_query_string: true to both tracked Wrangler configs and regression tests. It is a source-only proposal and has not been deployed; the live setting remains false until a reviewed deployment and fresh read-back confirm otherwise.
+
+The earlier 2026-11-05 GLORIFIER_ENABLE_INFERENCE=true and GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=true values are superseded by this 2026-11-16 observation. Keep external egress, inference, and paid-inference authorization disabled. Do not send prompts, trigger provider inference, or execute tasks merely to make /ready return HTTP 200. A same-day earlier unauthenticated probe recorded process liveness as partially verified and /ready HTTP 503; that probe is not a substitute for a new health/readiness check.
+
+### Current repository governance — 2026-11-16
+
+The live NEURAL main-branch ruleset 27086549 is active and requires strict successful checks test (3.11) and test (3.12), signed commits, and resolved review threads. It has zero required approving reviews, an empty bypass_actors list, and the connected principal reports current_user_can_bypass: never. The AI Review Policy status is advisory only and is not a required status check.
+
+The ruleset's code-owner-review setting is enabled, but no CODEOWNERS file was found at the repository root, .github/CODEOWNERS, or docs/CODEOWNERS on the current branch. Path-level code-owner coverage is NOT VERIFIED until an administrator adds and validates an ownership map. Do not treat the enabled ruleset flag as proof that a code owner is assigned.
+
 ## Release procedure
 
-1. Make code changes on a branch and open a pull request. The active repository ruleset targets `~DEFAULT_BRANCH`, requires the exact `AI Review Policy` status check with strict latest-commit enforcement, retains CodeQL/code-quality constraints, prohibits deletion and non-fast-forward updates, has zero required human approvals, and has no bypass actors. The AI policy workflow itself still has a PR-controlled workflow-definition trust limitation; see `docs/AI_REVIEW_POLICY.md`.
-2. Require the repository's CI, security checks, and Cloudflare dry-run validation to pass. Do not bypass the active ruleset or weaken quality thresholds to obtain a green result.
-3. After an approved merge to `main`, verify the Cloudflare Workers Builds validation-only package-preparation run; it must not upload or promote a Worker version. For production promotion, manually dispatch `.github/workflows/cloudflare-neural-worker.yml` from `main` with `deploy=true` through the protected `glorifier-neural-cloudflare-production` environment. Verify the protected deployment job, exact deployed Worker version, and intended traffic before announcing release. Do not wait for an automatic Workers Builds production deployment.
-4. Require live `/health` and `/ready` checks. Expect `/ready` HTTP 200 when the selected provider, database, authentication, and rate-limit checks are verified. Accept HTTP 503 only for the explicit provider-disabled safe-mode response when the other required controls are verified and `inference_performed=false`; that response is not provider-ready.
-5. The production inference flag is currently configured `true`, but do not treat that as proof of live execution. Perform a controlled authenticated inference request only after confirming the selected provider credential is valid, approving transmission of task content, and accepting any applicable API usage charges. The automated readiness/smoke steps intentionally do not submit a prompt.
+1. Open a pull request and inspect the active ruleset before release. For NEURAL, require the exact current-head CI contexts test (3.11) and test (3.12), signed commits, and resolved review threads. The AI Review Policy diagnostic is advisory only, not a required merge status. Effective path-level code-owner coverage is NOT VERIFIED because no supported CODEOWNERS file was found. Do not bypass the ruleset or weaken its checks.
+2. Require CI, dependency/security checks, and Cloudflare Worker dry-run validation to pass on the exact immutable PR head. Do not count skipped jobs, historical results, or checks from an older commit as current evidence.
+3. After an approved merge to main, use the protected .github/workflows/neural-cloudflare-worker.yml workflow with a manual workflow_dispatch and deploy=true from main through the glorifier-neural-cloudflare-production environment. The main-branch Workers Builds trigger is validation-only (--prepare-only); it is not a production release. Verify the deployment job, exact active Worker version, traffic allocation, and service bindings before announcing a release.
+4. Verify live /health and /ready endpoints after deployment. Interpret HTTP 503 as non-ready; accept the documented provider-disabled safe-mode response only as evidence that the fail-closed path works, not as provider-ready or production-ready. Record provider, database, authentication, and rate-limit signals separately.
+5. Keep GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS=false, GLORIFIER_ENABLE_INFERENCE=false, and GLORIFIER_PAID_INFERENCE_AUTHORIZED=false unless the owner separately authorizes prompt transmission and any applicable provider charges. Readiness probes are read-only and are not evidence of inference. Do not submit a prompt or perform an authenticated task without that separate authorization.
 
-Do not declare full AI production readiness until provider model-catalog readiness and a separately controlled inference check succeed. Enable audit writes or task-run persistence only after their own schema, least-privilege credentials, backup, and read/write verification steps have been approved and completed.
+## CI dependency maintenance
+
+### Disposable PostgreSQL image digest
+
+The disposable PostgreSQL service in .github/workflows/database-integration.yml is pinned to postgres:16@sha256:63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9. Treat this digest as an explicit dependency that needs a manual refresh during the monthly dependency review; do not assume the existing .github/dependabot.yml entries update service-container image digests inside workflow YAML.
+
+When refreshing it, verify the official PostgreSQL 16 image and selected immutable digest, update the service image in .github/workflows/database-integration.yml, update the exact expected digest in tests/test_ci_workflow_security.py, run the focused CI security test module, then run the disposable PostgreSQL migration workflow on the proposed branch. Keep the major version at 16 unless a separate compatibility review authorizes a major-version upgrade.
