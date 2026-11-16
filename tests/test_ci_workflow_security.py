@@ -55,7 +55,7 @@ def test_untrusted_ci_test_job_has_read_only_permissions_and_immutable_dispatch(
     jobs = _job_sections(workflow)
 
     top_level_permissions = re.search(
-        r"(?ms)^permissions:\\n((?:^  [a-z-]+: (?:read|write)\\n)+)",
+        r"(?ms)^permissions:\n((?:^  [a-z-]+: (?:read|write)\n)+)",
         workflow,
     )
     assert top_level_permissions, "Workflow-level permissions must be explicit"
@@ -67,7 +67,7 @@ def test_untrusted_ci_test_job_has_read_only_permissions_and_immutable_dispatch(
     job_permissions = {}
     for job_name, job in jobs.items():
         permissions = re.search(
-            r"(?ms)^    permissions:\\n((?:^      [a-z-]+: (?:read|write)\\n)+)",
+            r"(?ms)^    permissions:\n((?:^      [a-z-]+: (?:read|write)\n)+)",
             job,
         )
         if permissions:
