@@ -81,3 +81,30 @@ def test_container_publisher_is_main_push_only_and_waits_for_tests():
         re.findall(r"(?m)^      ([a-z-]+): (read|write)$", permissions.group(1))
     ) == {("contents", "read"), ("packages", "write")}
     assert "docker push" in publisher
+
+
+def test_dependency_audit_targets_the_locked_export_not_the_editable_project():
+    workflow = _read(CI_WORKFLOW_PATH)
+    jobs = _job_sections(workflow)
+    test_job = jobs["test"]
+    audit_step = (
+        test_job.split("- name: Audit Python dependencies", 1)[1]
+        .split("- name:", 1)[0]
+    )
+
+    assert "uvx --from pip-audit==2.9.0 pip-audit -r /tmp/requirements.txt" in audit_step
+    editable_install = next(
+        line for line in test_job.splitlines()
+        if "pip install" in line and "-e ." in line
+    )
+    assert "--no-build-isolation" not in editable_install
+
+
+def test_disposable_postgres_service_image_is_pinned_by_digest():
+    workflow = _read(WORKFLOWS / "database-integration.yml")
+
+    assert (
+        "image: postgres:16@sha256:"
+        "63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9"
+    ) in workflow
+    assert "image: postgres:16\\n" not in workflow
