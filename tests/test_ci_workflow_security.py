@@ -186,4 +186,4 @@ def test_dependency_audit_targets_the_locked_export_not_the_editable_project():
     test_job = _job_section("test", ci_workflow)
     audit_step = test_job.split("- name: Audit Python dependencies", 1)[1].split("- name:", 1)[0]
     assert "pip-audit -r /tmp/requirements.txt" in audit_step
-    assert not re.search(r"(?m)^\\s*pip-audit\\s*$", audit_step)
+    assert not re.search(r"(?m)^\s*pip-audit\s*$", audit_step)
