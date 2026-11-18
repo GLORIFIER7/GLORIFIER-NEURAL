@@ -205,7 +205,7 @@ jobs:
       - name: Upload validated patch for publish job
         id: upload_patch
         if: ${{ steps.stage.outputs.changed == 'true' && steps.validation.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-maintenance.patch
@@ -274,10 +274,12 @@ jobs:
 
       - name: Download validated patch artifact
         if: ${{ steps.time_window.outputs.allowed == 'true' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ai-maintenance-patch-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-maintenance-artifact
+          # Reject corrupted or substituted patch artifacts.
+          digest-mismatch: error
 
       - name: Apply validated Git patch
         id: apply_patch
@@ -327,7 +329,7 @@ jobs:
             --title "AI Maintenance: NEURAL reliability proposal" \
             --body "Autonomous GLORIFIER-NEURAL maintenance proposal. Locked dependency, Ruff, and pytest validation ran before publication. Trusted CI tests the exact PR head and runs the current-head AI review policy. This workflow never enables auto-merge."
 
-      - name: Dispatch trusted CI and AI review for the exact PR head
+      - name: Dispatch CI for the exact PR head
         if: ${{ steps.branch.outputs.branch != '' && steps.apply_patch.outcome == 'success' && needs.codex.outputs.patch_ready == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}

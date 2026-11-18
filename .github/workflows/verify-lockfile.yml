@@ -1,0 +1,29 @@
+# Fails when .github/workflows/actions.lock is out of sync with the
+# workflows or a locked pin no longer verifies upstream.
+
+name: verify-lockfile
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build verifier from immutable source commit
+        run: |
+          go install github.com/github/gh-actions-lock/cmd/gh-actions-lock@04b7a1a4d00b339dd3ff903bb4d78d4066b2bac7
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: gh-actions-lock --verify
