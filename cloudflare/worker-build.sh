@@ -18,7 +18,7 @@ python prepare_worker.py
 
 # Pywrangler vendors the production Pyodide packages into python_modules/.
 # Its host virtual environments are build tools, not Worker runtime modules.
-uv run --locked --no-build pywrangler sync
+uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app pywrangler sync
 
 for expected in python_modules/app/api.py python_modules/app/database/neon.py; do
   if [[ ! -f "$expected" ]]; then
@@ -41,5 +41,9 @@ if [[ "$mode" == "--prepare-only" ]]; then
   exit 0
 fi
 
-command -v wrangler >/dev/null 2>&1 || { echo "Install the pinned Wrangler CLI before building: npm install --global wrangler@4.164.0" >&2; exit 127; }
+expected_wrangler_version="4.164.0"
+if ! command -v wrangler >/dev/null 2>&1 || [[ "$(wrangler --version)" != "$expected_wrangler_version" ]]; then
+  echo "Install the pinned Wrangler CLI before building: npm install --global wrangler@$expected_wrangler_version" >&2
+  exit 127
+fi
 exec wrangler "$mode"
