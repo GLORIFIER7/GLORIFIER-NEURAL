@@ -54,10 +54,10 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         "run: uv lock",
         "Upload validated Cloudflare dependency lock",
         "cloudflare-neural-uv-lock",
-        "uv sync --locked --no-build --group dev --no-install-project",
+        "uv sync --locked --no-build --group dev --no-install-project --no-install-package glorifier-neural-app",
         "Prepare Neural application source as local Worker dependency",
         "python prepare_worker.py",
-        "uv run --locked --no-build pywrangler dev --ip 127.0.0.1 --port 8787",
+        "uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app pywrangler dev --ip 127.0.0.1 --port 8787",
         "test -f python_modules/app/api.py",
         "Verify Cloudflare Python Worker runtime startup including asyncpg",
         "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY",
@@ -85,6 +85,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
             f"Cloudflare workflow must pin actions/{artifact_action} to an immutable SHA"
         )
 
+    assert "npx wrangler" not in workflow
     assert "contents: write" not in workflow
     assert "git push origin" not in workflow
     assert "Verify committed Cloudflare dependency lock" not in workflow
@@ -99,9 +100,12 @@ def test_cloudflare_build_script_removes_host_venvs_before_wrangler_upload():
     script = script_path.read_text(encoding="utf-8")
 
     assert "python prepare_worker.py" in script
-    assert "uv run --locked --no-build pywrangler sync" in script
+    assert "uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app pywrangler sync" in script
     assert "rm -rf -- .venv .venv-workers" in script
     assert 'exec wrangler "$mode"' in script
+    assert 'expected_wrangler_version="4.164.0"' in script
+    assert '[[ "$(wrangler --version)" != "$expected_wrangler_version" ]]' in script
+    assert "npx wrangler" not in script
     assert "preview|deploy|--prepare-only" in script
     assert "--prepare-only" in script
 
