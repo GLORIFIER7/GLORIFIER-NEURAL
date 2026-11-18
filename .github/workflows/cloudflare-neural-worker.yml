@@ -67,7 +67,7 @@ jobs:
           CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_NEON_READONLY: postgresql://local:local@127.0.0.1:5432/local
         run: |
           set -euo pipefail
-          uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app python - <<'PY'
+          uv run --locked --no-build --no-sync python - <<'PY'
           import importlib.util
 
           assert importlib.util.find_spec("psycopg") is None
@@ -76,7 +76,7 @@ jobs:
           assert importlib.util.find_spec("torch") is None
           PY
 
-          uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app pywrangler dev --ip 127.0.0.1 --port 8787 > /tmp/glorifier-neural-worker.log 2>&1 &
+          uv run --locked --no-build --no-sync pywrangler dev --ip 127.0.0.1 --port 8787 > /tmp/glorifier-neural-worker.log 2>&1 &
           worker_pid=$!
           cleanup() {
             kill "$worker_pid" 2>/dev/null || true
