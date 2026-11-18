@@ -184,22 +184,20 @@ def test_smoke_main_reports_non_object_endpoint_payload_without_traceback(
     assert "Traceback" not in output
 
 
-def test_deployment_smoke_accepts_current_provider_readiness_disabled_safe_mode():
+def test_deployment_smoke_rejects_missing_provider_check_in_safe_mode():
     payload = {
         "status": "NOT READY",
         "checks": {
-            "providers": "NOT VERIFIED",
             "database": "VERIFIED",
             "authentication": "VERIFIED",
             "rate_limit": "VERIFIED",
-            "audit": "NOT CONFIGURED (OPTIONAL)",
-            "task_runs": "NOT CONFIGURED (OPTIONAL)",
         },
         "execution": {"inference_performed": False},
         "message": "Provider readiness checks are disabled by configuration.",
     }
 
-    assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_READINESS_DISABLED"
+    with pytest.raises(ValueError, match="provider-disabled safe mode"):
+        classify_readiness(503, payload)
 
 
 
@@ -215,6 +213,14 @@ def test_smoke_input_path_rejects_files_outside_system_temp():
 
     with pytest.raises(ValueError, match="temporary directory"):
         resolve_smoke_input_path(str(outside_file))
+
+
+def test_smoke_input_path_rejects_directory_inside_system_temp(tmp_path):
+    directory = tmp_path / "payload-directory"
+    directory.mkdir()
+
+    with pytest.raises(ValueError, match="regular file"):
+        resolve_smoke_input_path(str(directory))
 
 
 def test_smoke_input_path_rejects_symlink_escape_from_system_temp(tmp_path):
