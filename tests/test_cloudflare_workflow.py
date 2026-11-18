@@ -55,7 +55,6 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         "Upload validated Cloudflare dependency lock",
         "cloudflare-neural-uv-lock",
         "uv sync --locked --no-build --group dev --no-install-project --no-install-package glorifier-neural-app",
-        "uv sync --locked --no-build --group dev --no-install-project --no-install-package glorifier-neural-app",
         "Prepare Neural application source as local Worker dependency",
         "python prepare_worker.py",
         "uv run --locked --no-build --no-install-project --no-install-package glorifier-neural-app pywrangler dev --ip 127.0.0.1 --port 8787",
@@ -75,6 +74,10 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
     )
     for check in required_runtime_checks:
         assert check in workflow, f"Cloudflare validation is missing runtime check: {check}"
+
+    assert workflow.count(
+        "uv sync --locked --no-build --group dev --no-install-project --no-install-package glorifier-neural-app"
+    ) == 2, "Both validate and deploy must exclude the locally vendored application package"
 
     # Dependabot may update the immutable action commit; pinning is the invariant.
     for artifact_action in ("upload-artifact", "download-artifact"):
