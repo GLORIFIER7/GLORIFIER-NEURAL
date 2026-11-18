@@ -144,12 +144,12 @@ jobs:
         run: python prepare_worker.py
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
-        run: uv sync --locked --group dev --no-install-project
+        run: uv sync --locked --no-build --group dev --no-install-project
       - name: Prepare isolated Worker bundle and validate without deployment
         working-directory: cloudflare
         run: |
           bash ./worker-build.sh --prepare-only
-          npx wrangler deploy --dry-run
+          wrangler deploy --dry-run
       - name: Verify Neural application package was vendored by Pywrangler
         working-directory: cloudflare
         run: |
