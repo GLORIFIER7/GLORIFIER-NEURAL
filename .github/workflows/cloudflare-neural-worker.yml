@@ -144,7 +144,7 @@ jobs:
         run: python prepare_worker.py
       - name: Install locked Cloudflare Worker dependencies
         working-directory: cloudflare
-        run: uv sync --locked --no-build --group dev --no-install-project
+        run: uv sync --locked --no-build --group dev --no-install-project --no-install-package glorifier-neural-app
       - name: Prepare isolated Worker bundle and validate without deployment
         working-directory: cloudflare
         run: |
