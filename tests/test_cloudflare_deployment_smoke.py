@@ -15,6 +15,7 @@ _smoke_spec.loader.exec_module(_smoke_module)
 classify_readiness = _smoke_module.classify_readiness
 require_worker_api_token_secret = _smoke_module.require_worker_api_token_secret
 validate_health = _smoke_module.validate_health
+resolve_smoke_input_path = _smoke_module.resolve_smoke_input_path
 run_smoke = _smoke_module.main
 
 
@@ -199,3 +200,27 @@ def test_deployment_smoke_accepts_current_provider_readiness_disabled_safe_mode(
     }
 
     assert classify_readiness(503, payload) == "SAFE_MODE_PROVIDER_READINESS_DISABLED"
+
+
+
+def test_smoke_input_path_accepts_existing_regular_file_inside_system_temp(tmp_path):
+    safe_file = tmp_path / "health.json"
+    safe_file.write_text("{}", encoding="utf-8")
+
+    assert resolve_smoke_input_path(str(safe_file)) == safe_file.resolve()
+
+
+def test_smoke_input_path_rejects_files_outside_system_temp():
+    outside_file = Path(__file__).resolve()
+
+    with pytest.raises(ValueError, match="temporary directory"):
+        resolve_smoke_input_path(str(outside_file))
+
+
+def test_smoke_input_path_rejects_symlink_escape_from_system_temp(tmp_path):
+    outside_file = Path(__file__).resolve()
+    linked_file = tmp_path / "outside.json"
+    linked_file.symlink_to(outside_file)
+
+    with pytest.raises(ValueError, match="temporary directory"):
+        resolve_smoke_input_path(str(linked_file))
