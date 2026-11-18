@@ -104,7 +104,7 @@ jobs:
         working-directory: ${{ steps.agent_workspace.outputs.path }}
         env:
           UV_PROJECT_ENVIRONMENT: ${{ steps.agent_workspace.outputs.path }}/.venv
-        run: uv sync --locked --extra dev --no-install-project
+        run: uv sync --locked --no-build --extra dev --no-install-project
 
       - name: Run Codex maintenance agent
         id: codex

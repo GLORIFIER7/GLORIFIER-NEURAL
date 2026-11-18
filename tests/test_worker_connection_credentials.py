@@ -1,3 +1,5 @@
+import ssl
+
 from app.database.worker_connection import connect_worker_database
 
 
@@ -24,3 +26,5 @@ def test_worker_dsn_percent_encoded_credentials_are_decoded_before_pg8000():
     assert pg8000.kwargs["password"] == "p:ss/word%"
     assert pg8000.kwargs["database"] == "glorifier"
     assert pg8000.kwargs["host"] == "db.example.test"
+    assert pg8000.kwargs["ssl_context"].verify_mode == ssl.CERT_REQUIRED
+    assert pg8000.kwargs["ssl_context"].check_hostname is True

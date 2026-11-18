@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,24 @@ from typing import Any
 _REQUIRED_READY_CHECKS = ("providers", "database", "authentication", "rate_limit")
 _REQUIRED_SAFE_MODE_CHECKS = ("database", "authentication", "rate_limit")
 _SAFE_MODE_PROVIDER_MESSAGE = "Provider readiness checks are disabled by configuration."
+
+
+def resolve_smoke_input_path(path: str) -> Path:
+    """Resolve an existing smoke payload file, restricted to the OS temp directory.
+
+    The smoke command consumes files created by its own workflow. It must not accept
+    arbitrary repository, runner, or symlink-target paths from caller-controlled CLI
+    arguments.
+    """
+    try:
+        temporary_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        resolved_path = Path(path).resolve(strict=True)
+        resolved_path.relative_to(temporary_root)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        raise ValueError("Smoke input files must resolve inside the system temporary directory.") from None
+    if not resolved_path.is_file():
+        raise ValueError("Smoke input path must identify an existing regular file.")
+    return resolved_path
 
 
 def require_worker_api_token_secret(secret_names: list[str]) -> None:
@@ -80,8 +99,10 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        health = json.loads(Path(args.health_file).read_text(encoding="utf-8"))
-        readiness = json.loads(Path(args.readiness_file).read_text(encoding="utf-8"))
+        health_path = resolve_smoke_input_path(args.health_file)
+        readiness_path = resolve_smoke_input_path(args.readiness_file)
+        health = json.loads(health_path.read_text(encoding="utf-8"))
+        readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
         if not isinstance(health, dict) or not isinstance(readiness, dict):
             raise TypeError("Neural health and readiness responses must be JSON objects.")
         validate_health(health)

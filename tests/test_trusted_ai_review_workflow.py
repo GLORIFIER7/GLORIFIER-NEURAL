@@ -52,14 +52,10 @@ def test_trusted_policy_sweeps_do_not_overlap():
     assert "cancel-in-progress: false" in WORKFLOW
 
 
-def test_trusted_policy_rechecks_after_ci_completion():
-    assert 'workflows: ["CI"]' in WORKFLOW
-    assert "workflow_run:" in WORKFLOW
-    assert "types: [completed]" in WORKFLOW
+def test_trusted_policy_uses_scheduled_sweeps_without_workflow_run():
+    assert "schedule:" in WORKFLOW
+    assert "workflow_run:" not in WORKFLOW
 
 
-def test_trusted_policy_workflow_run_is_limited_to_default_branch_ci():
-    workflow_run = WORKFLOW.partition("  workflow_run:")[2].partition(
-        "permissions:"
-    )[0]
-    assert "branches: [main]" in workflow_run
+def test_trusted_policy_does_not_consume_untrusted_workflow_run_events():
+    assert "workflow_run:" not in WORKFLOW

@@ -123,7 +123,7 @@ def test_dependency_audit_targets_the_locked_export_not_the_editable_project():
         .split("- name:", 1)[0]
     )
 
-    assert "uvx --from pip-audit==2.9.0 pip-audit -r /tmp/requirements.txt" in audit_step
+    assert "uvx --no-build --from pip-audit==2.9.0 pip-audit -r /tmp/requirements.txt" in audit_step
     editable_install = next(
         line for line in test_job.splitlines()
         if "pip install" in line and "-e ." in line
