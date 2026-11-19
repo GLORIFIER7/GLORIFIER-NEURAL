@@ -67,7 +67,7 @@ def test_cloudflare_validation_smoke_tests_pyodide_with_asyncpg_without_ml_drive
         'importlib.util.find_spec("torch") is None',
         "http://127.0.0.1:8787/health",
         "bash ./worker-build.sh --prepare-only",
-        "npm install --global --no-audit --no-fund wrangler@4.164.0",
+        "npm install --global --ignore-scripts --no-audit --no-fund wrangler@4.164.0",
         "test \"$(wrangler --version)\" = \"4.164.0\"",
         "wrangler deploy --dry-run",
         "bash ./worker-build.sh deploy",
@@ -263,3 +263,25 @@ def test_cloudflare_worker_disables_provider_egress_and_inference_by_default():
     assert variables.get("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS") == "false"
     assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "false"
     assert variables.get("GLORIFIER_PAID_INFERENCE_AUTHORIZED", "false").casefold() == "false"
+
+
+def test_cloudflare_workflow_installs_pinned_wrangler_without_lifecycle_scripts():
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "cloudflare-neural-worker.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+    wrangler_install_lines = [
+        line
+        for line in workflow.splitlines()
+        if "npm install --global" in line and "wrangler@4.164.0" in line
+    ]
+
+    assert len(wrangler_install_lines) == 2, (
+        "Both validation and deployment must install the pinned Wrangler CLI"
+    )
+    assert all("--ignore-scripts" in line for line in wrangler_install_lines), (
+        "Wrangler installation must not execute npm package lifecycle scripts"
+    )
