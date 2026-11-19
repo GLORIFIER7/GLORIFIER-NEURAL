@@ -48,7 +48,7 @@ jobs:
           enable-cache: false
           version: "0.13.6"
       - name: Install pinned Wrangler CLI
-        run: npm install --global --no-audit --no-fund wrangler@4.164.0
+        run: npm install --global --ignore-scripts --no-audit --no-fund wrangler@4.164.0
       - name: Verify pinned Wrangler CLI
         run: test "$(wrangler --version)" = "4.164.0"
       - name: Prepare Neural application source as local Worker dependency
@@ -131,7 +131,7 @@ jobs:
           enable-cache: false
           version: "0.13.6"
       - name: Install pinned Wrangler CLI
-        run: npm install --global --no-audit --no-fund wrangler@4.164.0
+        run: npm install --global --ignore-scripts --no-audit --no-fund wrangler@4.164.0
       - name: Verify pinned Wrangler CLI
         run: test "$(wrangler --version)" = "4.164.0"
       - name: Download the exact dependency lock validated by the build job
