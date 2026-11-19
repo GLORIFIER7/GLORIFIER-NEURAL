@@ -263,3 +263,25 @@ def test_cloudflare_worker_disables_provider_egress_and_inference_by_default():
     assert variables.get("GLORIFIER_ALLOW_EXTERNAL_DATA_EGRESS") == "false"
     assert variables.get("GLORIFIER_ENABLE_INFERENCE", "false").casefold() == "false"
     assert variables.get("GLORIFIER_PAID_INFERENCE_AUTHORIZED", "false").casefold() == "false"
+
+
+def test_cloudflare_workflow_installs_pinned_wrangler_without_lifecycle_scripts():
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "cloudflare-neural-worker.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+    wrangler_install_lines = [
+        line
+        for line in workflow.splitlines()
+        if "npm install --global" in line and "wrangler@4.164.0" in line
+    ]
+
+    assert len(wrangler_install_lines) == 2, (
+        "Both validation and deployment must install the pinned Wrangler CLI"
+    )
+    assert all("--ignore-scripts" in line for line in wrangler_install_lines), (
+        "Wrangler installation must not execute npm package lifecycle scripts"
+    )
