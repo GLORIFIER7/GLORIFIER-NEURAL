@@ -25,6 +25,24 @@ const BLOCKED_COMMANDS = [
   { matches: /\b(?:railway\s+up|fly\s+deploy|docker\s+push)\b/i, reason: 'Infrastructure deployment and image publication require a separate release approval.' },
 ];
 
+// Reject all shell commands except individually vetted read-only inspections and
+// local tests. A deny list alone is bypassed by shell quoting/substitution.
+const SAFE_BASH_COMMANDS = [
+  /^pwd$/,
+  /^git status(?: --short)?$/,
+  /^git diff(?: --check| --stat| --name-only)?$/,
+  /^git log(?: --oneline(?: -[1-9][0-9]*)?)?$/,
+  /^git show(?: --stat)?(?: (?:HEAD|[a-fA-F0-9]{7,40}))?$/,
+  /^git branch --show-current$/,
+  /^npm run (?:lint|build|typecheck|test(?::[A-Za-z0-9_-]+)?|check(?::[A-Za-z0-9_-]+)?)$/,
+  /^node --test(?: [A-Za-z0-9_./@-]+)+$/,
+  /^node --check [A-Za-z0-9_./@-]+$/,
+  /^uv run --locked pytest(?: [A-Za-z0-9_./@-]+)*$/,
+  /^pytest(?: [A-Za-z0-9_./@-]+)*$/,
+  /^go test(?: [A-Za-z0-9_./@-]+)*$/,
+  /^cargo test(?: [A-Za-z0-9_./@-]+)*$/,
+];
+
 function isForceFlagPresent(command) {
   return /--force(?:-with-lease|-if-includes)?(?:=|\b)/i.test(command)
     || /(?:^|\s)-[a-z]*f[a-z]*(?:\s|$)/i.test(command);
@@ -80,7 +98,11 @@ export function decidePreToolUse(event) {
     const blocked = BLOCKED_COMMANDS.find((entry) =>
       entry.matches.test(command) && (!entry.requiresForceFlag || isForceFlagPresent(command)),
     );
-    return blocked ? deny(blocked.reason) : null;
+    if (blocked) return deny(blocked.reason);
+    if (!SAFE_BASH_COMMANDS.some((pattern) => pattern.test(command.trim()))) {
+      return deny('This shell command is not an approved read-only inspection or local validation command.');
+    }
+    return null;
   }
 
   return null;
