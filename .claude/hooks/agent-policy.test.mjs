@@ -22,6 +22,8 @@ test('denies edits to protected paths for every supported file-edit tool name', 
     '.github/workflows/ci.yml', '.env.production', '.dev.vars',
     'wrangler.jsonc', 'database/migrations/001.sql', 'package-lock.json',
     'uv.lock', 'keys/deploy.pem',
+    '.claude/settings.json', '.claude/hooks/agent-policy.mjs',
+    '.claude/skills/issue-repair/SKILL.md', '.opencode/config.json', 'AGENTS.md',
   ]) {
     for (const tool_name of ['Edit', 'MultilineEdit', 'MultiEdit', 'NotebookEdit']) {
       const decision = decidePreToolUse({
