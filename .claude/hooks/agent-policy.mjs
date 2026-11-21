@@ -2,6 +2,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const PROTECTED_PATHS = [
+  /(^|\/)\.claude(?:\/|$)/i,
+  /(^|\/)\.opencode(?:\/|$)/i,
+  /(^|\/)(?:AGENTS\.md|CLAUDE\.md|GEMINI\.md|AGENT_RUNTIME\.md|opencode\.json)$/i,
   /(^|\/)\.github\/workflows(?:\/|$)/i,
   /(^|\/)\.env(?:\.[^/]*)?$/i,
   /(^|\/)\.dev\.vars$/i,
