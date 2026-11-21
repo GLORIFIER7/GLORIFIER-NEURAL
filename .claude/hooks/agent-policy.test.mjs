@@ -80,3 +80,16 @@ test('fails closed when a write tool has no target path', () => {
   const decision = decidePreToolUse({ tool_name: 'Write', tool_input: {}, cwd });
   assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny');
 });
+
+
+test('unknown, obfuscated, or compound Bash commands fail closed', () => {
+  for (const command of [
+    'git cl""ean -fd', 'git checkout -- README.md', 'rm -rf /tmp/repo',
+    'gh secret set API_KEY', 'npx wrangler secret put API_KEY',
+    'git status; git reset --hard HEAD', 'git status $(git clean -fd)',
+    'node -e "process.exit(0)"', 'npm run deploy',
+  ]) {
+    const decision = decidePreToolUse({ tool_name: 'Bash', tool_input: { command }, cwd });
+    assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny', command);
+  }
+});
