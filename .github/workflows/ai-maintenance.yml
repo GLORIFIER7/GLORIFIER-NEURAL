@@ -64,7 +64,7 @@ jobs:
 
       - name: Set up uv
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' }}
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
           version: "0.13.6"
@@ -109,7 +109,7 @@ jobs:
       - name: Run Codex maintenance agent
         id: codex
         if: ${{ steps.authorization.outputs.enabled == 'true' && steps.provider.outputs.configured == 'true' && steps.agent_workspace.outputs.path != '' }}
-        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # pinned action revision
+        uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # pinned action revision
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           working-directory: ${{ steps.agent_workspace.outputs.path }}
